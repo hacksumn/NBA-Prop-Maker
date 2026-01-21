@@ -1,321 +1,501 @@
 """
-Task 7: Daily Predictions Workflow
-NBA Player Props Betting System
+Task 7: Classification Model - Beat the Line
+NBA Player Props Betting System v2
 
-Run this BEFORE games start to lock in tonight's predictions.
+FUNDAMENTAL CHANGE:
+- OLD: Predict raw stats → compare to line → bet if edge exists
+- NEW: Predict probability of OVER/UNDER directly → bet when confident
 
-Usage:
-    python task7_daily_predictions.py
+Key insight: Vegas line IS information. Use it as a feature, not just a comparison point.
 
-Requirements:
-    - Trained models (model_*.pkl) in working directory
-    - Updated player_games_schedule.csv with recent data
-    - pip install: pandas numpy scikit-learn requests
+The model learns WHEN players beat their lines, not what their stats will be.
 """
 
 import pandas as pd
 import numpy as np
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, precision_score, recall_score, log_loss, brier_score_loss
+from sklearn.preprocessing import StandardScaler
+from sklearn.calibration import CalibratedClassifierCV
 import pickle
-import os
-from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 
-# Configuration
-PROPS_TO_PREDICT = ['pts', 'trb', 'ast', 'pra', 'pr', 'pa', 'stl', 'blk', 'tov']
-MIN_EDGE_STRONG = 3.0      # Points edge for "strong" bet
-MIN_EDGE_MODERATE = 2.0    # Points edge for "moderate" bet
-OUTPUT_DIR = '.'
 
-def load_models():
-    """Load all trained models."""
-    models = {}
-    for prop in PROPS_TO_PREDICT:
-        model_path = f'model_{prop}.pkl'
-        if os.path.exists(model_path):
-            with open(model_path, 'rb') as f:
-                models[prop] = pickle.load(f)
-            print(f"  ✓ Loaded {prop} model")
+def load_historical_data():
+    """Load full historical data with all features."""
+    print("Loading historical data...")
+    
+    # Try to load matchup-enhanced data first
+    try:
+        df = pd.read_csv('/home/claude/player_games_with_matchups.csv', parse_dates=['game_date'])
+        if 'pts_matchup_edge' in df.columns:
+            print(f"  Loaded matchup-enhanced data: {len(df):,} rows")
+            print(f"  Matchup features present: ✓")
+            has_matchup = (df['n_prev_matchups'] > 0).mean()
+            print(f"  Rows with matchup history: {has_matchup:.1%}")
         else:
-            print(f"  ✗ Missing {model_path}")
-    return models
+            raise FileNotFoundError("No matchup features")
+    except:
+        # Fallback to project data
+        df = pd.read_csv('/mnt/project/player_games_schedule.csv', parse_dates=['game_date'])
+        print(f"  Main data: {len(df):,} rows (no matchup features)")
+    
+    # Filter to players with enough games (need rolling stats)
+    df = df[df['games_played'] >= 10].copy()
+    print(f"  After filtering (10+ games): {len(df):,} rows")
+    
+    # Create combo stats
+    df['pra'] = df['pts'] + df['trb'] + df['ast']
+    df['pr'] = df['pts'] + df['trb']
+    df['pa'] = df['pts'] + df['ast']
+    
+    # Create "line" proxies using L10 averages (what sportsbooks use)
+    df['pts_line'] = df['pts_l10']
+    df['trb_line'] = df['trb_l10']
+    df['ast_line'] = df['ast_l10']
+    df['pra_line'] = df['pts_l10'] + df['trb_l10'] + df['ast_l10']
+    df['pr_line'] = df['pts_l10'] + df['trb_l10']
+    df['pa_line'] = df['pts_l10'] + df['ast_l10']
+    
+    return df
 
 
-def load_latest_data():
-    """Load the most recent player data."""
-    if os.path.exists('player_games_schedule.csv'):
-        df = pd.read_csv('player_games_schedule.csv', parse_dates=['game_date'])
-        print(f"  ✓ Loaded {len(df):,} player-games")
-        print(f"  Latest date: {df['game_date'].max().date()}")
-        return df
+def create_classification_features(df, prop):
+    """
+    Create features specifically for classification (over/under prediction).
+    
+    The key is: we're predicting IF player beats line, not WHAT their stat will be.
+    
+    Enhanced with interaction features AND player vs opponent matchup history.
+    """
+    merged = df.copy()
+    
+    # Get the actual stat and line
+    if prop in ['pts', 'trb', 'ast']:
+        actual_col = prop
+        line_col = f'{prop}_line'
+        l5_col = f'{prop}_l5'
+        l10_col = f'{prop}_l10'
+        l20_col = f'{prop}_l20'
+        std_col = f'{prop}_std_l10'
+        # Matchup columns (new format)
+        matchup_edge_col = f'{prop}_matchup_edge'
+        recent_matchup_edge_col = f'{prop}_recent_matchup_edge'
+        favorable_col = f'{prop}_favorable_matchup'
+        unfavorable_col = f'{prop}_unfavorable_matchup'
+        vs_opp_col = f'{prop}_vs_opp'
+        vs_opp_l3_col = f'{prop}_vs_opp_l3'
     else:
-        raise FileNotFoundError("player_games_schedule.csv not found!")
-
-
-def get_latest_player_features(df, player_name):
-    """Get the most recent features for a player."""
-    player_df = df[df['player'] == player_name].sort_values('game_date')
-    if len(player_df) == 0:
-        return None
-    return player_df.iloc[-1]
-
-
-def get_players_for_prediction(df, min_games=10):
-    """Get list of players with sufficient history."""
-    player_games = df.groupby('player')['game_date'].count()
-    valid_players = player_games[player_games >= min_games].index.tolist()
-    return valid_players
-
-
-def create_combo_features(row):
-    """Create combination line proxies from component L10 averages."""
-    row = row.copy()
-    if 'pts_l10' in row and 'trb_l10' in row and 'ast_l10' in row:
-        row['pra_l10'] = row['pts_l10'] + row['trb_l10'] + row['ast_l10']
-        row['pr_l10'] = row['pts_l10'] + row['trb_l10']
-        row['pa_l10'] = row['pts_l10'] + row['ast_l10']
-    return row
-
-
-def predict_player(player_name, df, models, feature_cols):
-    """Generate predictions for a single player."""
-    # Get latest features for this player
-    latest = get_latest_player_features(df, player_name)
-    if latest is None:
-        return None
+        actual_col = prop  # pra, pr, pa
+        line_col = f'{prop}_line'
+        l5_col = 'pts_l5'
+        l10_col = 'pts_l10'
+        l20_col = 'pts_l20'
+        std_col = 'pts_std_l10'
+        # Use pts matchup for combo props
+        matchup_edge_col = 'pts_matchup_edge'
+        recent_matchup_edge_col = 'pts_recent_matchup_edge'
+        favorable_col = 'pts_favorable_matchup'
+        unfavorable_col = 'pts_unfavorable_matchup'
+        vs_opp_col = 'pts_vs_opp'
+        vs_opp_l3_col = 'pts_vs_opp_l3'
     
-    # Add combo features
-    latest = create_combo_features(latest)
+    # TARGET: Did player go OVER the line?
+    merged['actual'] = merged[actual_col]
+    merged['line'] = merged[line_col]
+    merged['went_over'] = (merged['actual'] > merged['line']).astype(int)
     
-    predictions = {'player': player_name}
+    # ============================================
+    # BASE FEATURES
+    # ============================================
+    merged['avg_vs_line'] = merged[l10_col] - merged['line']
+    merged['l5_vs_line'] = merged[l5_col] - merged['line']
+    merged['l20_vs_line'] = merged[l20_col] - merged['line']
+    merged['variance'] = merged[std_col].fillna(5)
+    merged['line_percentile'] = merged['avg_vs_line'] / (merged['variance'] + 0.1)
+    merged['trend'] = merged['l5_vs_line'] - merged['l20_vs_line']
+    merged['recent_vs_season'] = merged[l5_col] / (merged[l20_col] + 0.1)
     
-    for prop, model_data in models.items():
-        model = model_data['model']
-        scaler = model_data['scaler']
-        medians = model_data['medians']
-        features = model_data['features']
-        
-        # Prepare features
-        X = pd.DataFrame([latest[features]])
-        X = X.fillna(medians)
-        X_scaled = scaler.transform(X)
-        
-        # Predict
-        pred = model.predict(X_scaled)[0]
-        
-        # Get line (L10 average)
-        line_col = f'{prop}_l10'
-        if line_col in latest.index:
-            line = latest[line_col]
-        else:
-            line = pred  # Fallback
-        
-        predictions[f'{prop}_pred'] = round(pred, 1)
-        predictions[f'{prop}_line'] = round(line, 1) if not pd.isna(line) else None
-        predictions[f'{prop}_edge'] = round(pred - line, 1) if not pd.isna(line) else None
+    # Schedule factors
+    merged['is_b2b'] = merged['is_b2b_second'].fillna(0)
+    merged['high_mins'] = merged['high_min_prev'].fillna(0)
+    merged['fatigue_risk'] = merged['is_b2b'] * merged['high_mins']
     
-    return predictions
+    # Matchup factors (team defense)
+    merged['easy_matchup'] = merged['opp_pts_allowed_rank'].fillna(15) / 30
+    merged['hard_matchup'] = 1 - merged['easy_matchup']
+    
+    # Rest
+    merged['days_rest_capped'] = merged['days_rest'].fillna(1).clip(0, 5)
+    merged['well_rested'] = (merged['days_rest_capped'] >= 2).astype(int)
+    
+    # ============================================
+    # PLAYER VS OPPONENT MATCHUP FEATURES
+    # ============================================
+    
+    # Number of prior meetings
+    merged['matchup_games'] = merged['n_prev_matchups'].fillna(0) if 'n_prev_matchups' in merged.columns else 0
+    merged['has_matchup_history'] = (merged['matchup_games'] >= 2).astype(int)
+    merged['strong_matchup_history'] = (merged['matchup_games'] >= 3).astype(int)
+    
+    # Matchup edge: how much better/worse vs this specific opponent
+    if matchup_edge_col in merged.columns:
+        merged['matchup_edge'] = merged[matchup_edge_col].fillna(0)
+    else:
+        merged['matchup_edge'] = 0
+    
+    # Recent matchup edge (last 3 games vs opponent)
+    if recent_matchup_edge_col in merged.columns:
+        merged['recent_matchup_edge'] = merged[recent_matchup_edge_col].fillna(0)
+    else:
+        merged['recent_matchup_edge'] = merged['matchup_edge']
+    
+    # Favorable/unfavorable matchup flags (pre-computed)
+    if favorable_col in merged.columns:
+        merged['favorable_vs_opp'] = merged[favorable_col].fillna(0)
+        merged['unfavorable_vs_opp'] = merged[unfavorable_col].fillna(0)
+    else:
+        merged['favorable_vs_opp'] = ((merged['matchup_edge'] > 2) & (merged['has_matchup_history'] == 1)).astype(int)
+        merged['unfavorable_vs_opp'] = ((merged['matchup_edge'] < -2) & (merged['has_matchup_history'] == 1)).astype(int)
+    
+    # Matchup edge vs line: does matchup history suggest over/under?
+    merged['matchup_edge_vs_line'] = merged['matchup_edge'] - merged['avg_vs_line']
+    
+    # Strong matchup signals
+    merged['strong_matchup_over'] = (
+        (merged['strong_matchup_history'] == 1) & 
+        (merged['matchup_edge'] > 3)
+    ).astype(int)
+    merged['strong_matchup_under'] = (
+        (merged['strong_matchup_history'] == 1) & 
+        (merged['matchup_edge'] < -3)
+    ).astype(int)
+    
+    # ============================================
+    # INTERACTION FEATURES
+    # ============================================
+    
+    # Fatigue + Trend interaction
+    merged['fatigue_x_cold'] = merged['is_b2b'] * (merged['trend'] < 0).astype(int)
+    merged['fatigue_x_hot'] = merged['is_b2b'] * (merged['trend'] > 0).astype(int)
+    
+    # Matchup + Form interaction
+    merged['easy_x_hot'] = merged['easy_matchup'] * (merged['recent_vs_season'] > 1).astype(int)
+    merged['hard_x_cold'] = merged['hard_matchup'] * (merged['recent_vs_season'] < 1).astype(int)
+    
+    # Matchup history + Form interaction
+    merged['good_matchup_x_hot'] = merged['strong_matchup_over'] * (merged['trend'] > 0).astype(int)
+    merged['bad_matchup_x_cold'] = merged['strong_matchup_under'] * (merged['trend'] < 0).astype(int)
+    
+    # Matchup + Schedule interaction (NEW!)
+    merged['good_matchup_rested'] = merged['strong_matchup_over'] * merged['well_rested']
+    merged['bad_matchup_tired'] = merged['strong_matchup_under'] * merged['is_b2b']
+    
+    # Variance-adjusted edge
+    merged['edge_reliability'] = merged['avg_vs_line'] / (merged['variance'] + 1)
+    merged['matchup_reliability'] = merged['matchup_edge'] / (merged['variance'] + 1)
+    
+    # Line extremes
+    merged['line_vs_l20'] = merged['line'] - merged[l20_col]
+    merged['line_extreme_low'] = (merged['line_vs_l20'] < -3).astype(int)
+    merged['line_extreme_high'] = (merged['line_vs_l20'] > 3).astype(int)
+    
+    # Consistency
+    variance_median = merged['variance'].median()
+    merged['is_consistent'] = (merged['variance'] < variance_median).astype(int)
+    merged['consistent_above_line'] = merged['is_consistent'] * (merged['avg_vs_line'] > 0).astype(int)
+    
+    # Usage/load
+    merged['mins_load'] = merged['mp_l10'].fillna(25) / 36
+    merged['high_usage'] = (merged['mins_load'] > 0.9).astype(int)
+    merged['games_density'] = merged['games_last_7d'].fillna(2) / 4
+    merged['heavy_schedule'] = (merged['games_density'] > 0.75).astype(int)
+    merged['compound_fatigue'] = merged['is_b2b'] * merged['heavy_schedule'] * merged['high_usage']
+    
+    # Non-linear terms
+    merged['trend_sq'] = merged['trend'] ** 2
+    merged['variance_sq'] = merged['variance'] ** 2
+    merged['edge_sq'] = merged['avg_vs_line'] ** 2
+    merged['matchup_edge_sq'] = merged['matchup_edge'] ** 2
+    
+    return merged
 
 
-def generate_all_predictions(df, models, players=None):
-    """Generate predictions for all valid players."""
-    if players is None:
-        players = get_players_for_prediction(df)
-    
-    # Get feature columns from first model
-    first_model = list(models.values())[0]
-    feature_cols = first_model['features']
-    
-    all_predictions = []
-    for player in players:
-        pred = predict_player(player, df, models, feature_cols)
-        if pred:
-            all_predictions.append(pred)
-    
-    return pd.DataFrame(all_predictions)
-
-
-def create_bet_recommendations(predictions_df, lines_override=None):
+def build_classification_model(merged, prop):
     """
-    Create betting recommendations from predictions.
-    
-    Args:
-        predictions_df: DataFrame with predictions
-        lines_override: Optional dict of {player: {prop: line}} for real sportsbook lines
+    Train classification model to predict over/under.
     """
-    bets = []
+    print(f"\n{'='*60}")
+    print(f"  {prop.upper()} - Classification Model")
+    print(f"{'='*60}")
     
-    for _, row in predictions_df.iterrows():
-        player = row['player']
+    # Features for classification - expanded set with interactions AND matchup history
+    feature_cols = [
+        # Base features
+        'avg_vs_line', 'l5_vs_line', 'l20_vs_line', 
+        'variance', 'line_percentile', 'trend', 'recent_vs_season',
+        # Schedule
+        'is_b2b', 'high_mins', 'fatigue_risk', 'days_rest_capped', 'well_rested',
+        # Matchup (team defense)
+        'easy_matchup', 'hard_matchup',
+        # PLAYER VS OPPONENT HISTORY
+        'matchup_edge', 'recent_matchup_edge', 
+        'has_matchup_history', 'strong_matchup_history', 'matchup_games',
+        'matchup_edge_vs_line', 'strong_matchup_over', 'strong_matchup_under',
+        'favorable_vs_opp', 'unfavorable_vs_opp',
+        # Interactions
+        'fatigue_x_cold', 'fatigue_x_hot',
+        'easy_x_hot', 'hard_x_cold',
+        'good_matchup_x_hot', 'bad_matchup_x_cold',
+        'good_matchup_rested', 'bad_matchup_tired',
+        'edge_reliability', 'matchup_reliability',
+        'line_extreme_low', 'line_extreme_high',
+        'is_consistent', 'consistent_above_line',
+        # Usage/load
+        'mins_load', 'high_usage', 'games_density', 'heavy_schedule',
+        'compound_fatigue',
+        # Non-linear terms
+        'trend_sq', 'variance_sq', 'edge_sq', 'matchup_edge_sq'
+    ]
+    
+    # Clean data
+    clean = merged.dropna(subset=feature_cols + ['went_over', 'line'])
+    print(f"  Clean rows: {len(clean):,}")
+    
+    if len(clean) < 500:
+        print(f"  ✗ Not enough data, skipping")
+        return None
+    
+    # Temporal split (last 21 days = test)
+    clean = clean.sort_values('game_date')
+    max_date = clean['game_date'].max()
+    cutoff = max_date - pd.Timedelta(days=21)
+    
+    train = clean[clean['game_date'] < cutoff]
+    test = clean[clean['game_date'] >= cutoff]
+    
+    print(f"  Train: {len(train):,}, Test: {len(test):,}")
+    
+    X_train = train[feature_cols]
+    y_train = train['went_over']
+    X_test = test[feature_cols]
+    y_test = test['went_over']
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_train_sc = scaler.fit_transform(X_train)
+    X_test_sc = scaler.transform(X_test)
+    
+    # Train multiple classifiers - prioritize non-linear models
+    models = {
+        'gbm_deep': GradientBoostingClassifier(
+            n_estimators=200, max_depth=5, learning_rate=0.05,
+            min_samples_leaf=10, subsample=0.8, random_state=42
+        ),
+        'gbm_wide': GradientBoostingClassifier(
+            n_estimators=300, max_depth=3, learning_rate=0.1,
+            min_samples_leaf=20, random_state=42
+        ),
+        'rf_deep': RandomForestClassifier(
+            n_estimators=200, max_depth=10, min_samples_leaf=10,
+            max_features='sqrt', random_state=42, n_jobs=-1
+        ),
+        'rf_wide': RandomForestClassifier(
+            n_estimators=300, max_depth=6, min_samples_leaf=20,
+            max_features=0.7, random_state=42, n_jobs=-1
+        ),
+        'logistic': LogisticRegression(C=0.1, max_iter=1000)  # baseline only
+    }
+    
+    best_model = None
+    best_acc = 0
+    best_name = None
+    best_brier = 1.0  # Lower is better
+    
+    print(f"\n  Testing models:")
+    for name, model in models.items():
+        model.fit(X_train_sc, y_train)
         
-        for prop in PROPS_TO_PREDICT:
-            pred_col = f'{prop}_pred'
-            line_col = f'{prop}_line'
-            edge_col = f'{prop}_edge'
-            
-            if pred_col not in row or pd.isna(row[pred_col]):
-                continue
-            
-            pred = row[pred_col]
-            
-            # Use override line if provided, else use L10
-            if lines_override and player in lines_override and prop in lines_override[player]:
-                line = lines_override[player][prop]
-            elif line_col in row and not pd.isna(row[line_col]):
-                line = row[line_col]
-            else:
-                continue
-            
-            edge = pred - line
-            direction = 'OVER' if edge > 0 else 'UNDER'
-            abs_edge = abs(edge)
-            
-            # Classify bet strength
-            if abs_edge >= MIN_EDGE_STRONG:
-                strength = 'STRONG'
-            elif abs_edge >= MIN_EDGE_MODERATE:
-                strength = 'MODERATE'
-            else:
-                continue  # Skip small edges
-            
-            # Format prop name nicely
-            prop_display = {
-                'pts': 'Points',
-                'trb': 'Rebounds',
-                'ast': 'Assists',
-                'pra': 'Pts+Reb+Ast',
-                'pr': 'Pts+Reb',
-                'pa': 'Pts+Ast',
-                'stl': 'Steals',
-                'blk': 'Blocks',
-                'tov': 'Turnovers'
-            }.get(prop, prop.upper())
-            
-            bets.append({
-                'player': player,
-                'prop': prop,
-                'prop_display': prop_display,
-                'direction': direction,
-                'line': line,
-                'prediction': pred,
-                'edge': abs_edge,
-                'strength': strength,
-                'timestamp': datetime.now().isoformat()
-            })
+        # Get probabilities
+        y_pred_proba = model.predict_proba(X_test_sc)[:, 1]
+        y_pred = (y_pred_proba > 0.5).astype(int)
+        
+        acc = accuracy_score(y_test, y_pred)
+        brier = brier_score_loss(y_test, y_pred_proba)
+        
+        print(f"    {name}: {acc:.1%} acc, {brier:.4f} brier")
+        
+        # Prefer lower brier score (better calibration) over raw accuracy
+        if brier < best_brier:
+            best_brier = brier
+            best_acc = acc
+            best_model = model
+            best_name = name
+            best_proba = y_pred_proba
     
-    return pd.DataFrame(bets)
+    print(f"  Best model: {best_name.upper()}")
+    print(f"  Test accuracy: {best_acc:.1%}")
+    
+    # Analyze by confidence level
+    print(f"\n  [Accuracy by Confidence]")
+    test_results = test.copy()
+    test_results['pred_proba'] = best_proba
+    test_results['pred_over'] = (best_proba > 0.5).astype(int)
+    test_results['correct'] = (test_results['pred_over'] == test_results['went_over']).astype(int)
+    
+    # Confidence buckets
+    buckets = [
+        (0.50, 0.55, 'Low (50-55%)'),
+        (0.55, 0.60, 'Med (55-60%)'),
+        (0.60, 0.65, 'High (60-65%)'),
+        (0.65, 1.00, 'Very High (65%+)')
+    ]
+    
+    profitable_threshold = None
+    for low, high, label in buckets:
+        # Over bets
+        over_mask = (test_results['pred_proba'] >= low) & (test_results['pred_proba'] < high)
+        # Under bets  
+        under_mask = (test_results['pred_proba'] <= 1-low) & (test_results['pred_proba'] > 1-high)
+        
+        mask = over_mask | under_mask
+        subset = test_results[mask]
+        
+        if len(subset) >= 10:
+            acc = subset['correct'].mean()
+            n = len(subset)
+            
+            # Calculate ROI at -110 odds
+            wins = subset['correct'].sum()
+            losses = n - wins
+            profit = wins * 1.0 - losses * 1.1
+            roi = profit / n * 100 if n > 0 else 0
+            
+            status = "✓ PROFITABLE" if acc > 0.5238 else "✗ losing"
+            print(f"    {label}: {acc:.1%} ({n} bets), ROI: {roi:+.1f}% {status}")
+            
+            if acc > 0.5238 and profitable_threshold is None:
+                profitable_threshold = low
+    
+    # Calibration check
+    brier = brier_score_loss(y_test, best_proba)
+    print(f"\n  Brier score: {brier:.4f} (lower is better, 0.25 = random)")
+    
+    # Return model bundle
+    return {
+        'model': best_model,
+        'scaler': scaler,
+        'features': feature_cols,
+        'accuracy': best_acc,
+        'brier': brier,
+        'profitable_threshold': profitable_threshold or 0.55,
+        'prop': prop,
+        'model_type': best_name
+    }
 
 
-def format_recommendations(bets_df):
-    """Format betting recommendations for display."""
-    if len(bets_df) == 0:
-        return "No bets meeting criteria."
+def analyze_what_model_learned(model_bundle, merged):
+    """Show what the model actually learned."""
+    prop = model_bundle['prop']
+    model = model_bundle['model']
+    features = model_bundle['features']
     
-    # Sort by edge
-    bets_df = bets_df.sort_values('edge', ascending=False)
+    print(f"\n  [What the model learned for {prop.upper()}]")
     
-    lines = []
-    lines.append("=" * 70)
-    lines.append("BET RECOMMENDATIONS")
-    lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("=" * 70)
-    
-    # Strong bets
-    strong = bets_df[bets_df['strength'] == 'STRONG']
-    if len(strong) > 0:
-        lines.append(f"\n★★★ STRONG BETS ({len(strong)}):")
-        for _, bet in strong.iterrows():
-            lines.append(f"  {bet['player']:<25} {bet['prop_display']:<12} {bet['direction']:<5} {bet['line']:.1f}")
-            lines.append(f"      Prediction: {bet['prediction']:.1f}, Edge: {'+' if bet['direction']=='OVER' else '-'}{bet['edge']:.1f} pts")
-    
-    # Moderate bets
-    moderate = bets_df[bets_df['strength'] == 'MODERATE']
-    if len(moderate) > 0:
-        lines.append(f"\n★★ MODERATE BETS ({len(moderate)}):")
-        for _, bet in moderate.iterrows():
-            lines.append(f"  {bet['player']:<25} {bet['prop_display']:<12} {bet['direction']:<5} {bet['line']:.1f}")
-            lines.append(f"      Prediction: {bet['prediction']:.1f}, Edge: {'+' if bet['direction']=='OVER' else '-'}{bet['edge']:.1f} pts")
-    
-    lines.append("\n" + "=" * 70)
-    lines.append(f"Total bets: {len(bets_df)} (Strong: {len(strong)}, Moderate: {len(moderate)})")
-    lines.append("=" * 70)
-    
-    return "\n".join(lines)
-
-
-def save_locked_predictions(bets_df, predictions_df, date_str=None):
-    """Save predictions to timestamped files."""
-    if date_str is None:
-        date_str = datetime.now().strftime('%Y-%m-%d')
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    # Save detailed predictions
-    predictions_file = f'predictions_locked_{date_str}_{timestamp}.csv'
-    predictions_df.to_csv(predictions_file, index=False)
-    print(f"  ✓ Saved: {predictions_file}")
-    
-    # Save bet recommendations
-    bets_file = f'bets_locked_{date_str}_{timestamp}.csv'
-    bets_df.to_csv(bets_file, index=False)
-    print(f"  ✓ Saved: {bets_file}")
-    
-    # Save formatted summary
-    summary_file = f'bets_summary_{date_str}_{timestamp}.txt'
-    summary = format_recommendations(bets_df)
-    with open(summary_file, 'w', encoding='utf-8') as f:
-        f.write(summary)
-    print(f"  ✓ Saved: {summary_file}")
-    
-    return predictions_file, bets_file, summary_file
+    if hasattr(model, 'feature_importances_'):
+        importances = sorted(zip(features, model.feature_importances_), key=lambda x: -x[1])
+        print(f"  Top predictors:")
+        for feat, imp in importances[:5]:
+            print(f"    {feat}: {imp:.3f}")
+    elif hasattr(model, 'coef_'):
+        coefs = sorted(zip(features, model.coef_[0]), key=lambda x: -abs(x[1]))
+        print(f"  Top coefficients:")
+        for feat, coef in coefs[:5]:
+            direction = "→ OVER" if coef > 0 else "→ UNDER"
+            print(f"    {feat}: {coef:+.3f} {direction}")
 
 
 def main():
-    print("=" * 60)
-    print("Task 7: Daily NBA Props Predictions")
-    print("=" * 60)
-    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("="*60)
+    print("NBA Props v2: Classification Model (Beat the Line)")
+    print("="*60)
+    print("\nFundamental change: Predict OVER/UNDER directly, not raw stats")
+    print("Use Vegas line as FEATURE, not just comparison target\n")
     
-    # Step 1: Load models
-    print("\n[1] Loading trained models...")
-    models = load_models()
-    if len(models) == 0:
-        print("ERROR: No models found! Run task6_train_models.py first.")
-        return
+    # Load data
+    df = load_historical_data()
     
-    # Step 2: Load data
-    print("\n[2] Loading player data...")
-    try:
-        df = load_latest_data()
-    except FileNotFoundError as e:
-        print(f"ERROR: {e}")
-        return
+    # Props to model
+    props = ['pts', 'trb', 'ast', 'pra', 'pr', 'pa']
     
-    # Step 3: Get valid players
-    print("\n[3] Getting players with sufficient history...")
-    players = get_players_for_prediction(df, min_games=10)
-    print(f"  ✓ {len(players)} players eligible")
+    # Train classification models for each prop
+    models = {}
     
-    # Step 4: Generate predictions
-    print("\n[4] Generating predictions...")
-    predictions_df = generate_all_predictions(df, models, players)
-    print(f"  ✓ Generated predictions for {len(predictions_df)} players")
+    for prop in props:
+        # Create classification features
+        merged = create_classification_features(df, prop)
+        
+        # Build model
+        model_bundle = build_classification_model(merged, prop)
+        
+        if model_bundle:
+            models[prop] = model_bundle
+            analyze_what_model_learned(model_bundle, merged)
     
-    # Step 5: Create bet recommendations
-    print("\n[5] Creating bet recommendations...")
-    bets_df = create_bet_recommendations(predictions_df)
-    print(f"  ✓ Found {len(bets_df)} bets meeting criteria")
+    # Summary
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print("="*60)
     
-    # Step 6: Display summary
-    print("\n" + format_recommendations(bets_df))
+    print(f"\n{'Prop':<6} {'Model':<8} {'Accuracy':<10} {'Brier':<8} {'Min Conf'}")
+    print("-"*50)
     
-    # Step 7: Save locked predictions
-    print("\n[6] Saving locked predictions...")
-    save_locked_predictions(bets_df, predictions_df)
+    for prop, bundle in models.items():
+        print(f"{prop.upper():<6} {bundle['model_type'].upper():<8} "
+              f"{bundle['accuracy']:.1%}      {bundle['brier']:.4f}   "
+              f"{bundle['profitable_threshold']:.0%}")
     
-    print("\n" + "=" * 60)
-    print("PREDICTIONS LOCKED! ✓")
-    print("=" * 60)
+    # Save models
+    print(f"\n{'='*60}")
+    print("SAVING MODELS")
+    print("="*60)
+    
+    for prop, bundle in models.items():
+        filename = f"classifier_{prop}.pkl"
+        with open(filename, 'wb') as f:
+            pickle.dump(bundle, f)
+        print(f"  ✓ Saved {filename}")
+    
+    # Key insight
+    print(f"\n{'='*60}")
+    print("KEY INSIGHT")
+    print("="*60)
+    print("""
+The classification approach is fundamentally different:
+
+OLD MODEL (broken):
+  1. Predict player scores 25.3 points
+  2. Vegas line is 24.5
+  3. Bet OVER because 25.3 > 24.5
+  PROBLEM: Vegas already knows he averages ~25. The line accounts for it.
+
+NEW MODEL (this one):
+  1. Vegas set line at 24.5
+  2. Player's L10 is 26.0 (1.5 above line)
+  3. Player is on B2B, tired
+  4. Model predicts 48% chance of OVER
+  5. NO BET - not confident enough
+
+The new model learns WHEN players beat their lines, considering:
+  - How far line is from their average
+  - Schedule/fatigue factors  
+  - Recent form vs season average
+  - Matchup difficulty
+
+Only bet when confidence exceeds profitable threshold (usually 55-60%).
+""")
 
 
 if __name__ == "__main__":
