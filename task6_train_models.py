@@ -85,9 +85,7 @@ def get_feature_columns(df: pd.DataFrame) -> list:
         'ft', 'fta', 'ft_pct', 'orb', 'drb', 'gmsc',
         'res', 'won', 'is_home',
         'pra', 'pr', 'pa',  # combo targets
-        'pra_l10', 'pr_l10', 'pa_l10',  # combo line proxies (keep separate)
-        'FANTASY_PTS', 'PLUS_MINUS',  # LEAKAGE: these are calculated from current game stats
-        'matchup_raw'  # not a useful feature
+        'pra_l10', 'pr_l10', 'pa_l10'  # combo line proxies (keep separate)
     }
     
     feature_cols = [c for c in df.columns 

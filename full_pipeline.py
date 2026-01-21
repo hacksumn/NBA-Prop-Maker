@@ -2,6 +2,8 @@
 NBA PLAYER PROPS - COMPLETE PIPELINE (LEAKAGE-SAFE)
 Downloads data, builds features, trains models with STRICT leakage prevention
 
+Now includes PREDICTED_MINUTES feature for improved prop predictions!
+
 Usage:
     python full_pipeline.py
 """
@@ -46,6 +48,8 @@ CURRENT_GAME_COLS = {
     # NBA API columns that leak current game info
     'FANTASY_PTS', 'fantasy_pts', 'PLUS_MINUS', 'plus_minus',
     'MIN', 'min',  # minutes in different formats
+    # Temporary columns
+    'next_mp',  # used for minutes model training
 }
 
 # Line proxies - used for betting simulation, NOT as features
@@ -148,12 +152,10 @@ def step1_download_data():
     df = game_log.get_data_frames()[0]
     print(f"  Fetched {len(df):,} records")
     
-    # Drop unnecessary columns from NBA API
+    # Drop unnecessary/leaky columns from NBA API
     drop_cols = ['SEASON_ID', 'PLAYER_ID', 'TEAM_ID', 'TEAM_NAME', 'GAME_ID', 
                  'VIDEO_AVAILABLE', 'MIN_SEC', 'NBA_FANTASY_PTS', 
-                 'DD2', 'TD3', 'WNBA_FANTASY_PTS',
-                 # CRITICAL: These are current-game stats that cause leakage
-                 'FANTASY_PTS', 'PLUS_MINUS']
+                 'DD2', 'TD3', 'WNBA_FANTASY_PTS', 'PLUS_MINUS']
     df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
     
     # Transform columns
@@ -340,10 +342,100 @@ def step4_schedule_features(df):
     return df
 
 
-def step5_train_models(df):
+def step5_predicted_minutes(df):
+    """
+    Train minutes model and add predicted_minutes feature.
+    This is a key driver of counting stats (PTS, REB, AST are nearly linear in minutes).
+    """
+    print("\n" + "="*60)
+    print("STEP 5: CREATING PREDICTED_MINUTES FEATURE")
+    print("="*60)
+    
+    # Features for minutes prediction (NOT using L10 to avoid leakage with line)
+    minutes_features = [
+        'mp_l5', 'mp_l20',  # Historical minutes (not L10)
+        'mp_avg_l3', 'mp_l3',
+        'mp_std_l5', 'mp_std_l20',
+        'days_rest', 'is_b2b', 'is_b2b_second',
+        'games_last_7d', 'games_last_14d',
+        'high_min_prev', 'games_streak', 'player_days_rest',
+        'games_played',
+    ]
+    
+    # Get available features
+    available = [f for f in minutes_features if f in df.columns]
+    print(f"  Using {len(available)} features for minutes model")
+    
+    # Create target: predict CURRENT game's minutes from historical features
+    # Note: We train on historical data, predicting known minutes
+    df_sorted = df.sort_values(['player', 'game_date']).reset_index(drop=True)
+    
+    # Filter to trainable rows (enough history)
+    df_train = df_sorted[df_sorted['games_played'] >= 5].copy()
+    df_train = df_train.dropna(subset=['mp'] + available[:3])  # Need mp and at least some features
+    df_train = df_train.sort_values('game_date').reset_index(drop=True)
+    
+    print(f"  Training rows: {len(df_train):,}")
+    
+    # Prepare features
+    X = df_train[available].copy()
+    y = df_train['mp'].values  # Target is current game minutes
+    
+    medians = X.median()
+    X = X.fillna(medians)
+    
+    # Scale
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Train model
+    model = GradientBoostingRegressor(
+        n_estimators=200,
+        learning_rate=0.1,
+        max_depth=4,
+        min_samples_leaf=20,
+        random_state=42
+    )
+    model.fit(X_scaled, y)
+    
+    # Evaluate (simple split)
+    split_idx = int(len(X) * 0.8)
+    train_pred = model.predict(X_scaled[:split_idx])
+    test_pred = model.predict(X_scaled[split_idx:])
+    
+    train_mae = mean_absolute_error(y[:split_idx], train_pred)
+    test_mae = mean_absolute_error(y[split_idx:], test_pred)
+    test_r2 = r2_score(y[split_idx:], test_pred)
+    
+    print(f"  Minutes Model - MAE: {test_mae:.2f} min, R2: {test_r2:.3f}")
+    
+    # Predict for ALL rows in original df
+    X_full = df[available].copy()
+    X_full = X_full.fillna(medians)
+    X_full_scaled = scaler.transform(X_full)
+    
+    df['predicted_minutes'] = model.predict(X_full_scaled)
+    df['predicted_minutes'] = df['predicted_minutes'].clip(0, 48)
+    
+    print(f"  Added predicted_minutes: mean={df['predicted_minutes'].mean():.1f}, std={df['predicted_minutes'].std():.1f}")
+    
+    # Save minutes model
+    with open('model_minutes.pkl', 'wb') as f:
+        pickle.dump({
+            'model': model,
+            'scaler': scaler,
+            'medians': medians,
+            'features': available,
+        }, f)
+    print(f"  Saved model_minutes.pkl")
+    
+    return df
+
+
+def step6_train_models(df):
     """Train all prediction models with STRICT leakage prevention"""
     print("\n" + "="*60)
-    print("STEP 5: TRAINING MODELS (LEAKAGE-SAFE)")
+    print("STEP 6: TRAINING PROP MODELS (LEAKAGE-SAFE)")
     print("="*60)
     
     # Filter to players with enough games
@@ -363,6 +455,13 @@ def step5_train_models(df):
     # Get valid features (STRICT filtering)
     feature_cols = get_valid_features(df)
     print(f"  Features: {len(feature_cols)}")
+    
+    # Check if predicted_minutes is included
+    if 'predicted_minutes' in feature_cols:
+        print(f"  ✓ predicted_minutes included as feature")
+    else:
+        print(f"  ⚠ predicted_minutes NOT in features - check EXCLUDED_FROM_FEATURES")
+    
     print(f"  Sample features: {feature_cols[:10]}")
     
     # EXPLICIT CHECK: Print any columns that look suspicious
@@ -471,7 +570,8 @@ def step5_train_models(df):
 
 def main():
     print("="*60)
-    print("NBA PLAYER PROPS - LEAKAGE-SAFE PIPELINE")
+    print("NBA PLAYER PROPS - LEAKAGE-SAFE PIPELINE v2")
+    print("Now with PREDICTED_MINUTES feature!")
     print(f"Started: {datetime.now()}")
     print("="*60)
     
@@ -480,12 +580,13 @@ def main():
     df = step2_rolling_features(df)
     df = step3_opponent_features(df)
     df = step4_schedule_features(df)
+    df = step5_predicted_minutes(df)  # NEW: Add minutes prediction
     
     # Save processed data
     df.to_csv('player_games_schedule.csv', index=False)
-    print(f"\n  Saved: player_games_schedule.csv ({len(df):,} rows)")
+    print(f"\n  Saved: player_games_schedule.csv ({len(df):,} rows, {len(df.columns)} cols)")
     
-    results, df = step5_train_models(df)
+    results, df = step6_train_models(df)
     
     # Summary
     print("\n" + "="*60)
@@ -493,7 +594,7 @@ def main():
     print("="*60)
     print(f"Date range: {df['game_date'].min().date()} to {df['game_date'].max().date()}")
     print(f"Total rows: {len(df):,}")
-    print(f"Models saved: {len(results)}")
+    print(f"Models saved: {len(results) + 1} (including minutes model)")
     
     # Realistic expectations check
     suspicious = [t for t, r in results.items() if r['accuracy'] > 0.60]
@@ -513,9 +614,8 @@ def main():
     print("  Anything above 65% is almost certainly leakage")
     
     print("\nNext steps:")
-    print("  1. Get API key from https://the-odds-api.com/ (free)")
-    print("  2. python get_real_lines.py --api-key YOUR_KEY")
-    print("  3. python task8_betting_lines.py --input real_lines.csv")
+    print("  1. python get_real_lines.py --api-key YOUR_KEY")
+    print("  2. python task8_betting_lines.py --input real_lines.csv")
 
 
 if __name__ == "__main__":

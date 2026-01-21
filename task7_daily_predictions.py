@@ -1,424 +1,93 @@
 """
-Task 7: Daily Prediction Script
+Task 7: Daily Predictions Workflow
 NBA Player Props Betting System
 
-This script generates predictions for today's games using trained models.
+Run this BEFORE games start to lock in tonight's predictions.
 
 Usage:
-1. Ensure models are trained (run task6_train_models.py first)
-2. Provide today's matchups via:
-   - Interactive input
-   - CSV file (--input matchups.csv)
-   - Command line (--players "LeBron James,LAL,GSW")
+    python task7_daily_predictions.py
 
-Output:
-- Console predictions
-- Optional CSV export (--output predictions_today.csv)
+Requirements:
+    - Trained models (model_*.pkl) in working directory
+    - Updated player_games_schedule.csv with recent data
+    - pip install: pandas numpy scikit-learn requests
 """
 
 import pandas as pd
 import numpy as np
 import pickle
-import argparse
+import os
 from datetime import datetime, timedelta
-from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
+# Configuration
+PROPS_TO_PREDICT = ['pts', 'trb', 'ast', 'pra', 'pr', 'pa', 'stl', 'blk', 'tov']
+MIN_EDGE_STRONG = 3.0      # Points edge for "strong" bet
+MIN_EDGE_MODERATE = 2.0    # Points edge for "moderate" bet
+OUTPUT_DIR = '.'
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-PROPS = ['pts', 'trb', 'ast', 'stl', 'blk', 'tov', 'pra', 'pr', 'pa']
-
-PROP_DISPLAY_NAMES = {
-    'pts': 'Points',
-    'trb': 'Rebounds', 
-    'ast': 'Assists',
-    'stl': 'Steals',
-    'blk': 'Blocks',
-    'tov': 'Turnovers',
-    'pra': 'Pts+Reb+Ast',
-    'pr': 'Pts+Reb',
-    'pa': 'Pts+Ast'
-}
-
-# Feature configuration for computing new predictions
-ROLLING_STATS = ['pts', 'trb', 'ast', 'mp', 'fga', 'fg_pct', '3pa', '3p_pct', 
-                 'fta', 'ft_pct', 'tov', 'stl', 'blk']
-VOLATILITY_STATS = ['pts', 'trb', 'ast', 'mp']
-TREND_STATS = ['pts', 'trb', 'ast']
-
-
-# =============================================================================
-# MODEL LOADING
-# =============================================================================
-
-def load_models(model_dir: Path = Path('.')) -> dict:
-    """
-    Load all trained models from pickle files.
-    
-    Returns:
-        Dictionary of {prop_name: model_data}
-    """
+def load_models():
+    """Load all trained models."""
     models = {}
-    missing = []
-    
-    for prop in PROPS:
-        model_path = model_dir / f'model_{prop}.pkl'
-        if model_path.exists():
+    for prop in PROPS_TO_PREDICT:
+        model_path = f'model_{prop}.pkl'
+        if os.path.exists(model_path):
             with open(model_path, 'rb') as f:
                 models[prop] = pickle.load(f)
+            print(f"  ✓ Loaded {prop} model")
         else:
-            missing.append(prop)
-    
-    if missing:
-        print(f"⚠  Missing models: {missing}")
-        print("   Run task6_train_models.py first to train models.")
-    
-    if models:
-        print(f"✓ Loaded {len(models)} models: {list(models.keys())}")
-    
+            print(f"  ✗ Missing {model_path}")
     return models
 
 
-# =============================================================================
-# HISTORICAL DATA LOADING
-# =============================================================================
-
-def load_historical_data(data_path: str = 'player_games_schedule.csv') -> pd.DataFrame:
-    """Load historical player-game data with all features."""
-    print(f"Loading historical data from {data_path}...")
-    df = pd.read_csv(data_path, parse_dates=['game_date'])
-    print(f"  Loaded {len(df):,} rows, {len(df.columns)} columns")
-    print(f"  Date range: {df['game_date'].min().date()} to {df['game_date'].max().date()}")
-    return df
-
-
-def get_team_abbreviations(df: pd.DataFrame) -> dict:
-    """Get mapping of team names to abbreviations."""
-    teams = df['tm'].unique().tolist()
-    return {t: t for t in teams}  # Identity mapping for now
-
-
-def search_players(df: pd.DataFrame, query: str, limit: int = 10) -> list:
-    """
-    Search for players by partial name match.
-    
-    Args:
-        df: Historical data
-        query: Search string (case-insensitive)
-        limit: Maximum results to return
-        
-    Returns:
-        List of matching player names
-    """
-    import unicodedata
-    
-    def normalize(s):
-        """Remove accents and lowercase."""
-        return ''.join(
-            c for c in unicodedata.normalize('NFD', s.lower())
-            if unicodedata.category(c) != 'Mn'
-        )
-    
-    players = df['player'].unique()
-    query_norm = normalize(query)
-    
-    # Exact matches first (normalized)
-    exact = [p for p in players if query_norm == normalize(p)]
-    if exact:
-        return exact[:limit]
-    
-    # Partial matches (normalized)
-    partial = [p for p in players if query_norm in normalize(p)]
-    
-    return partial[:limit]
-
-
-def get_player_with_fuzzy_match(df: pd.DataFrame, player_name: str) -> str:
-    """
-    Get exact player name, using fuzzy matching if needed.
-    
-    Returns:
-        Exact player name from database, or None if not found
-    """
-    import unicodedata
-    
-    def normalize(s):
-        """Remove accents and lowercase."""
-        return ''.join(
-            c for c in unicodedata.normalize('NFD', s.lower())
-            if unicodedata.category(c) != 'Mn'
-        )
-    
-    # Check exact match first
-    if player_name in df['player'].unique():
-        return player_name
-    
-    # Try normalized exact match
-    query_norm = normalize(player_name)
-    for p in df['player'].unique():
-        if normalize(p) == query_norm:
-            return p
-    
-    # Try partial match
-    matches = search_players(df, player_name, limit=5)
-    
-    if len(matches) == 1:
-        return matches[0]
-    elif len(matches) > 1:
-        # Check if first part of name matches exactly
-        first_name = player_name.split()[0].lower()
-        for m in matches:
-            if m.lower().startswith(first_name):
-                return m
-        return None  # Multiple ambiguous matches
+def load_latest_data():
+    """Load the most recent player data."""
+    if os.path.exists('player_games_schedule.csv'):
+        df = pd.read_csv('player_games_schedule.csv', parse_dates=['game_date'])
+        print(f"  ✓ Loaded {len(df):,} player-games")
+        print(f"  Latest date: {df['game_date'].max().date()}")
+        return df
     else:
-        return None
+        raise FileNotFoundError("player_games_schedule.csv not found!")
 
 
-# =============================================================================
-# FEATURE COMPUTATION FOR NEW GAMES
-# =============================================================================
-
-def get_player_latest_features(df: pd.DataFrame, player_name: str) -> pd.Series:
-    """
-    Get the most recent features for a player.
-    
-    These represent the player's rolling averages ENTERING their next game.
-    """
+def get_latest_player_features(df, player_name):
+    """Get the most recent features for a player."""
     player_df = df[df['player'] == player_name].sort_values('game_date')
-    
     if len(player_df) == 0:
         return None
-    
-    # Get the most recent row - its features are what we'd use for the NEXT game
-    latest = player_df.iloc[-1].copy()
-    
-    # The rolling features in this row already exclude the current game
-    # (they were calculated with shift(1)), so they're ready to use
-    return latest
+    return player_df.iloc[-1]
 
 
-def get_opponent_features(df: pd.DataFrame, opponent: str) -> dict:
-    """
-    Get opponent's defensive features (what they typically allow).
-    
-    Returns the most recent defensive stats for the opponent team.
-    """
-    # Get all games where this team played (they are 'tm')
-    opp_games = df[df['tm'] == opponent].sort_values('game_date')
-    
-    if len(opp_games) == 0:
-        return {}
-    
-    # Get the most recent game for opponent-level features
-    latest_game = opp_games.iloc[-1]
-    
-    # Extract opponent features (these are stored from opponent's perspective)
-    opp_features = {
-        'opp_pts_allowed_l10': latest_game.get('opp_pts_allowed_l10', np.nan),
-        'opp_trb_allowed_l10': latest_game.get('opp_trb_allowed_l10', np.nan),
-        'opp_ast_allowed_l10': latest_game.get('opp_ast_allowed_l10', np.nan),
-        'opp_fga_allowed_l10': latest_game.get('opp_fga_allowed_l10', np.nan),
-        'opp_pts_allowed_rank': latest_game.get('opp_pts_allowed_rank', np.nan),
-        'opp_trb_allowed_rank': latest_game.get('opp_trb_allowed_rank', np.nan),
-        'opp_ast_allowed_rank': latest_game.get('opp_ast_allowed_rank', np.nan),
-        'opp_tm_pts_l10': latest_game.get('opp_tm_pts_l10', np.nan),
-        'opp_tm_fga_l10': latest_game.get('opp_tm_fga_l10', np.nan),
-    }
-    
-    return opp_features
+def get_players_for_prediction(df, min_games=10):
+    """Get list of players with sufficient history."""
+    player_games = df.groupby('player')['game_date'].count()
+    valid_players = player_games[player_games >= min_games].index.tolist()
+    return valid_players
 
 
-def compute_schedule_features(df: pd.DataFrame, player_name: str, 
-                              game_date: datetime, 
-                              use_latest_features: bool = True) -> dict:
-    """
-    Compute schedule features for a player's upcoming game.
-    
-    Args:
-        df: Historical data
-        player_name: Player name
-        game_date: Date of upcoming game
-        use_latest_features: If True, use player's most recent schedule features
-                            (recommended for predictions since they represent current state)
-        
-    Returns:
-        Dictionary of schedule features
-    """
-    # Get player's recent games
-    player_df = df[df['player'] == player_name].sort_values('game_date')
-    
-    if len(player_df) == 0:
-        return {}
-    
-    latest = player_df.iloc[-1]
-    latest_date = latest['game_date']
-    
-    # For predictions, use the player's most recent schedule features
-    # This represents their current state and avoids issues with future dates
-    if use_latest_features:
-        # Use the schedule features from the player's last game
-        # These represent realistic values
-        return {
-            'days_rest': latest.get('days_rest', 2.0),
-            'player_days_rest': latest.get('player_days_rest', 2.0),
-            'is_b2b': latest.get('is_b2b', 0),
-            'is_b2b_second': latest.get('is_b2b_second', 0),
-            'games_last_7d': latest.get('games_last_7d', 3.0),
-            'games_last_14d': latest.get('games_last_14d', 6.0),
-            'mp_l3': latest.get('mp_l3', np.nan),
-            'mp_avg_l3': latest.get('mp_avg_l3', np.nan),
-            'high_min_prev': latest.get('high_min_prev', 0.0),
-            'games_streak': latest.get('games_streak', len(player_df)),
-        }
-    
-    # Calculate fresh schedule features (for backtesting on historical dates)
-    days_rest = (game_date - latest_date).days
-    
-    # Cap days rest to realistic range (0-10 days)
-    days_rest = min(max(days_rest, 0), 10)
-    
-    # Back-to-back indicator
-    is_b2b = 1 if days_rest <= 1 else 0
-    is_b2b_second = 1 if days_rest == 1 else 0
-    
-    # Games in last 7/14 days (relative to game_date)
-    cutoff_7d = game_date - timedelta(days=7)
-    cutoff_14d = game_date - timedelta(days=14)
-    games_last_7d = len(player_df[(player_df['game_date'] > cutoff_7d) & 
-                                   (player_df['game_date'] < game_date)])
-    games_last_14d = len(player_df[(player_df['game_date'] > cutoff_14d) & 
-                                    (player_df['game_date'] < game_date)])
-    
-    # Minutes load (from most recent games before prediction date)
-    recent_games = player_df[player_df['game_date'] < game_date].tail(3)
-    mp_l3 = recent_games['mp'].sum() if len(recent_games) > 0 else np.nan
-    mp_avg_l3 = recent_games['mp'].mean() if len(recent_games) > 0 else np.nan
-    
-    # High minutes previous game
-    high_min_prev = 1.0 if latest['mp'] >= 36 else 0.0
-    
-    # Games streak
-    games_streak = len(player_df)
-    
-    return {
-        'days_rest': days_rest,
-        'player_days_rest': days_rest,
-        'is_b2b': is_b2b,
-        'is_b2b_second': is_b2b_second,
-        'games_last_7d': games_last_7d,
-        'games_last_14d': games_last_14d,
-        'mp_l3': mp_l3,
-        'mp_avg_l3': mp_avg_l3,
-        'high_min_prev': high_min_prev,
-        'games_streak': games_streak,
-    }
+def create_combo_features(row):
+    """Create combination line proxies from component L10 averages."""
+    row = row.copy()
+    if 'pts_l10' in row and 'trb_l10' in row and 'ast_l10' in row:
+        row['pra_l10'] = row['pts_l10'] + row['trb_l10'] + row['ast_l10']
+        row['pr_l10'] = row['pts_l10'] + row['trb_l10']
+        row['pa_l10'] = row['pts_l10'] + row['ast_l10']
+    return row
 
 
-def prepare_features_for_prediction(df: pd.DataFrame, player_name: str, 
-                                     team: str, opponent: str,
-                                     game_date: datetime,
-                                     model_features: list) -> pd.DataFrame:
-    """
-    Prepare a complete feature vector for prediction.
-    
-    Args:
-        df: Historical data
-        player_name: Player name
-        team: Player's team abbreviation
-        opponent: Opponent team abbreviation
-        game_date: Date of the game
-        model_features: List of features required by the model
-        
-    Returns:
-        DataFrame with one row containing all features
-    """
-    # Try to find player with fuzzy matching
-    exact_name = get_player_with_fuzzy_match(df, player_name)
-    
-    if exact_name is None:
-        print(f"  ⚠ Player '{player_name}' not found in historical data")
-        # Suggest similar names
-        similar = search_players(df, player_name.split()[0], limit=3)
-        if similar:
-            print(f"    Did you mean: {similar}?")
+def predict_player(player_name, df, models, feature_cols):
+    """Generate predictions for a single player."""
+    # Get latest features for this player
+    latest = get_latest_player_features(df, player_name)
+    if latest is None:
         return None
     
-    if exact_name != player_name:
-        print(f"  → Matched '{player_name}' to '{exact_name}'")
+    # Add combo features
+    latest = create_combo_features(latest)
     
-    # Get player's latest rolling features
-    player_latest = get_player_latest_features(df, exact_name)
-    
-    if player_latest is None:
-        print(f"  ⚠ No historical data found for '{exact_name}'")
-        return None
-    
-    # Start with player's rolling features
-    features = player_latest.to_dict()
-    
-    # Update opponent features (the player's row has old opponent data)
-    opp_features = get_opponent_features(df, opponent)
-    features.update(opp_features)
-    
-    # Update schedule features for THIS game
-    schedule_features = compute_schedule_features(df, exact_name, game_date)
-    features.update(schedule_features)
-    
-    # Create DataFrame with just the model features
-    feature_vector = {}
-    for feat in model_features:
-        if feat in features:
-            feature_vector[feat] = features[feat]
-        else:
-            # Use NaN for missing features (model will use median)
-            feature_vector[feat] = np.nan
-    
-    return pd.DataFrame([feature_vector])
-
-
-# =============================================================================
-# PREDICTION ENGINE
-# =============================================================================
-
-def predict_player_props(df: pd.DataFrame, models: dict, 
-                         player_name: str, team: str, opponent: str,
-                         game_date: datetime) -> dict:
-    """
-    Generate predictions for all props for a single player.
-    
-    Returns:
-        Dictionary with predictions for each prop
-    """
-    # Resolve player name first (with fuzzy matching)
-    exact_name = get_player_with_fuzzy_match(df, player_name)
-    
-    if exact_name is None:
-        # Suggest similar names
-        similar = search_players(df, player_name.split()[0] if ' ' in player_name else player_name, limit=3)
-        if similar:
-            print(f"  ⚠ Player '{player_name}' not found. Did you mean: {similar}?")
-        else:
-            print(f"  ⚠ Player '{player_name}' not found in historical data")
-        return {'player': player_name, 'team': team, 'opponent': opponent, 
-                'game_date': game_date.strftime('%Y-%m-%d')}
-    
-    if exact_name != player_name:
-        print(f"  → Using '{exact_name}' for '{player_name}'")
-    
-    predictions = {
-        'player': player_name,  # Keep original name for display
-        'team': team,
-        'opponent': opponent,
-        'game_date': game_date.strftime('%Y-%m-%d')
-    }
-    
-    # Get player's latest data once for line calculations
-    player_latest = get_player_latest_features(df, exact_name)
+    predictions = {'player': player_name}
     
     for prop, model_data in models.items():
         model = model_data['model']
@@ -426,429 +95,227 @@ def predict_player_props(df: pd.DataFrame, models: dict,
         medians = model_data['medians']
         features = model_data['features']
         
-        # Prepare features (pass exact_name directly since we already resolved it)
-        X = prepare_features_for_prediction(
-            df, exact_name, team, opponent, game_date, features
-        )
-        
-        if X is None:
-            predictions[prop] = None
-            predictions[f'{prop}_line'] = None
-            continue
-        
-        # Fill missing values with medians
+        # Prepare features
+        X = pd.DataFrame([latest[features]])
         X = X.fillna(medians)
-        
-        # Scale
         X_scaled = scaler.transform(X)
         
         # Predict
         pred = model.predict(X_scaled)[0]
         
-        # Floor predictions at 0 (counting stats can't be negative)
-        pred = max(0, pred)
-        
-        predictions[prop] = round(pred, 1)
-        
-        # Get player's L10 as line proxy (using exact_name, already fetched)
-        if player_latest is not None:
-            if prop == 'pra':
-                line = player_latest.get('pts_l10', 0) + player_latest.get('trb_l10', 0) + player_latest.get('ast_l10', 0)
-            elif prop == 'pr':
-                line = player_latest.get('pts_l10', 0) + player_latest.get('trb_l10', 0)
-            elif prop == 'pa':
-                line = player_latest.get('pts_l10', 0) + player_latest.get('ast_l10', 0)
-            else:
-                line = player_latest.get(f'{prop}_l10', np.nan)
-            predictions[f'{prop}_line'] = round(line, 1) if pd.notna(line) else None
+        # Get line (L10 average)
+        line_col = f'{prop}_l10'
+        if line_col in latest.index:
+            line = latest[line_col]
         else:
-            predictions[f'{prop}_line'] = None
+            line = pred  # Fallback
+        
+        predictions[f'{prop}_pred'] = round(pred, 1)
+        predictions[f'{prop}_line'] = round(line, 1) if not pd.isna(line) else None
+        predictions[f'{prop}_edge'] = round(pred - line, 1) if not pd.isna(line) else None
     
     return predictions
 
 
-def find_edges(predictions: dict, min_edge: float = 1.0) -> list:
-    """
-    Identify predictions with significant edge over the line.
+def generate_all_predictions(df, models, players=None):
+    """Generate predictions for all valid players."""
+    if players is None:
+        players = get_players_for_prediction(df)
     
-    Args:
-        predictions: Dictionary of predictions
-        min_edge: Minimum edge (prediction - line) to flag
-        
-    Returns:
-        List of (prop, prediction, line, edge, direction) tuples
-    """
-    edges = []
-    
-    for prop in PROPS:
-        pred = predictions.get(prop)
-        line = predictions.get(f'{prop}_line')
-        
-        if pred is None or line is None:
-            continue
-        
-        edge = pred - line
-        direction = 'OVER' if edge > 0 else 'UNDER'
-        
-        if abs(edge) >= min_edge:
-            edges.append({
-                'prop': PROP_DISPLAY_NAMES.get(prop, prop),
-                'prediction': pred,
-                'line': line,
-                'edge': abs(edge),
-                'direction': direction
-            })
-    
-    return sorted(edges, key=lambda x: -x['edge'])
-
-
-# =============================================================================
-# INPUT HANDLING
-# =============================================================================
-
-def parse_matchups_from_csv(filepath: str) -> list:
-    """
-    Parse matchups from a CSV file.
-    
-    Expected columns: player, team, opponent, game_date (optional)
-    """
-    df = pd.read_csv(filepath)
-    
-    required_cols = ['player', 'team', 'opponent']
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        raise ValueError(f"CSV missing required columns: {missing}")
-    
-    matchups = []
-    for _, row in df.iterrows():
-        game_date = pd.to_datetime(row.get('game_date', datetime.now().date()))
-        matchups.append({
-            'player': row['player'],
-            'team': row['team'],
-            'opponent': row['opponent'],
-            'game_date': game_date
-        })
-    
-    return matchups
-
-
-def parse_matchups_from_string(matchup_str: str, game_date: datetime = None) -> list:
-    """
-    Parse matchups from command line string.
-    
-    Format: "Player Name,TEAM,OPP;Player2,TEAM2,OPP2"
-    """
-    if game_date is None:
-        game_date = datetime.now()
-    
-    matchups = []
-    for entry in matchup_str.split(';'):
-        parts = entry.strip().split(',')
-        if len(parts) >= 3:
-            matchups.append({
-                'player': parts[0].strip(),
-                'team': parts[1].strip().upper(),
-                'opponent': parts[2].strip().upper(),
-                'game_date': game_date
-            })
-    
-    return matchups
-
-
-def interactive_input(df: pd.DataFrame) -> list:
-    """Gather matchups interactively from user."""
-    print("\n" + "="*60)
-    print("INTERACTIVE INPUT MODE")
-    print("="*60)
-    
-    # Show available teams
-    teams = sorted(df['tm'].unique())
-    print(f"\nAvailable teams: {', '.join(teams)}")
-    
-    # Get game date
-    date_str = input("\nGame date (YYYY-MM-DD) or press Enter for today: ").strip()
-    if date_str:
-        game_date = pd.to_datetime(date_str)
-    else:
-        game_date = datetime.now()
-    
-    matchups = []
-    print("\nEnter matchups (leave player blank to finish):")
-    
-    while True:
-        print(f"\n--- Matchup {len(matchups) + 1} ---")
-        player = input("Player name: ").strip()
-        if not player:
-            break
-        
-        team = input("Team (e.g., LAL): ").strip().upper()
-        opponent = input("Opponent (e.g., GSW): ").strip().upper()
-        
-        if team and opponent:
-            matchups.append({
-                'player': player,
-                'team': team,
-                'opponent': opponent,
-                'game_date': game_date
-            })
-            print(f"  ✓ Added: {player} ({team}) vs {opponent}")
-    
-    return matchups
-
-
-def get_todays_players_from_data(df: pd.DataFrame, date: datetime = None,
-                                  min_minutes: float = 0) -> list:
-    """
-    Get all players who played on a specific date.
-    Useful for backtesting on historical dates.
-    
-    Args:
-        df: Historical data
-        date: Date to get players for
-        min_minutes: Minimum average minutes (mp_l10) to include player
-    """
-    if date is None:
-        date = df['game_date'].max()
-    
-    # Get games on that date
-    date_games = df[df['game_date'].dt.date == date.date()].copy()
-    
-    if len(date_games) == 0:
-        print(f"No games found for {date.date()}")
-        return []
-    
-    # Filter by minutes if specified
-    if min_minutes > 0:
-        date_games = date_games[date_games['mp_l10'] >= min_minutes]
-        if len(date_games) == 0:
-            print(f"No players with {min_minutes}+ avg minutes found for {date.date()}")
-            return []
-    
-    matchups = []
-    for _, row in date_games.iterrows():
-        matchups.append({
-            'player': row['player'],
-            'team': row['tm'],
-            'opponent': row['opp'],
-            'game_date': pd.to_datetime(date),
-            'mp_l10': row.get('mp_l10', 0)  # Include for display
-        })
-    
-    return matchups
-
-
-# =============================================================================
-# OUTPUT FORMATTING
-# =============================================================================
-
-def print_predictions(predictions: dict, show_edges: bool = True):
-    """Print formatted predictions for a player."""
-    print(f"\n{'─'*60}")
-    print(f"  {predictions['player']} ({predictions['team']} vs {predictions['opponent']})")
-    print(f"  {predictions['game_date']}")
-    print(f"{'─'*60}")
-    
-    # Main props table
-    print(f"\n  {'Prop':<12} {'Pred':>8} {'Line':>8} {'Edge':>8}")
-    print(f"  {'─'*40}")
-    
-    for prop in PROPS:
-        pred = predictions.get(prop)
-        line = predictions.get(f'{prop}_line')
-        
-        if pred is None:
-            continue
-        
-        edge = pred - line if line else 0
-        edge_str = f"{edge:+.1f}" if line else "N/A"
-        line_str = f"{line:.1f}" if line else "N/A"
-        
-        # Highlight significant edges
-        marker = ""
-        if line and abs(edge) >= 2:
-            marker = " **" if edge > 0 else " *"
-        
-        print(f"  {PROP_DISPLAY_NAMES.get(prop, prop):<12} {pred:>8.1f} {line_str:>8} {edge_str:>8}{marker}")
-    
-    # Show top edges
-    if show_edges:
-        edges = find_edges(predictions, min_edge=1.5)
-        if edges:
-            print(f"\n  [TOP EDGES]")
-            for e in edges[:3]:
-                print(f"  → {e['prop']}: {e['direction']} {e['line']:.1f} "
-                      f"(pred: {e['prediction']:.1f}, edge: {e['edge']:.1f})")
-
-
-def save_predictions_csv(all_predictions: list, output_path: str):
-    """Save all predictions to CSV."""
-    rows = []
-    for pred in all_predictions:
-        row = {
-            'player': pred['player'],
-            'team': pred['team'],
-            'opponent': pred['opponent'],
-            'game_date': pred['game_date']
-        }
-        for prop in PROPS:
-            row[f'{prop}_pred'] = pred.get(prop)
-            row[f'{prop}_line'] = pred.get(f'{prop}_line')
-            if pred.get(prop) and pred.get(f'{prop}_line'):
-                row[f'{prop}_edge'] = pred[prop] - pred[f'{prop}_line']
-        rows.append(row)
-    
-    df = pd.DataFrame(rows)
-    df.to_csv(output_path, index=False)
-    print(f"\n✓ Predictions saved to: {output_path}")
-
-
-# =============================================================================
-# MAIN
-# =============================================================================
-
-def main():
-    parser = argparse.ArgumentParser(
-        description='Generate NBA player prop predictions',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python task7_daily_predictions.py --interactive
-  python task7_daily_predictions.py --input matchups.csv
-  python task7_daily_predictions.py --players "LeBron James,LAL,GSW;Stephen Curry,GSW,LAL"
-  python task7_daily_predictions.py --date 2025-02-07  # All players from that date
-  python task7_daily_predictions.py --date 2025-02-07 --min-minutes 20  # Only rotation players
-  python task7_daily_predictions.py --date 2025-02-07 --min-edge 2.0  # Only show big edges
-        """
-    )
-    
-    parser.add_argument('--input', '-i', help='CSV file with matchups')
-    parser.add_argument('--players', '-p', help='Matchups string: "Player,TEAM,OPP;..."')
-    parser.add_argument('--date', '-d', help='Get all players from this date (YYYY-MM-DD)')
-    parser.add_argument('--output', '-o', help='Output CSV path')
-    parser.add_argument('--interactive', action='store_true', help='Interactive input mode')
-    parser.add_argument('--data', default='player_games_schedule.csv', help='Historical data file')
-    parser.add_argument('--model-dir', default='.', help='Directory with model .pkl files')
-    parser.add_argument('--min-minutes', type=float, default=0, 
-                        help='Minimum average minutes (L10) to include player (default: 0)')
-    parser.add_argument('--min-edge', type=float, default=0,
-                        help='Only show players with at least this edge on any prop (default: 0)')
-    parser.add_argument('--top', type=int, default=None,
-                        help='Only show top N players by max edge')
-    
-    args = parser.parse_args()
-    
-    print("="*60)
-    print("Task 7: Daily Predictions")
-    print("="*60)
-    
-    # Load models
-    models = load_models(Path(args.model_dir))
-    
-    if not models:
-        print("\n✗ No models loaded. Run task6_train_models.py first.")
-        return
-    
-    # Load historical data
-    df = load_historical_data(args.data)
-    
-    # Get matchups
-    matchups = []
-    
-    if args.input:
-        matchups = parse_matchups_from_csv(args.input)
-        print(f"\nLoaded {len(matchups)} matchups from {args.input}")
-    
-    elif args.players:
-        matchups = parse_matchups_from_string(args.players)
-        print(f"\nParsed {len(matchups)} matchups from command line")
-    
-    elif args.date:
-        game_date = pd.to_datetime(args.date)
-        matchups = get_todays_players_from_data(df, game_date, min_minutes=args.min_minutes)
-        print(f"\nFound {len(matchups)} players from {args.date}")
-        if args.min_minutes > 0:
-            print(f"  (filtered to {args.min_minutes}+ avg minutes)")
-    
-    elif args.interactive:
-        matchups = interactive_input(df)
-    
-    else:
-        # Default: show last date in data
-        last_date = df['game_date'].max()
-        print(f"\nNo input specified. Showing predictions for {last_date.date()}")
-        print("Use --help for options.")
-        matchups = get_todays_players_from_data(df, last_date, min_minutes=args.min_minutes)[:10]  # Limit to 10
-    
-    if not matchups:
-        print("\nNo matchups to predict.")
-        return
-    
-    # Generate predictions
-    print(f"\n{'='*60}")
-    print("GENERATING PREDICTIONS")
-    print("="*60)
+    # Get feature columns from first model
+    first_model = list(models.values())[0]
+    feature_cols = first_model['features']
     
     all_predictions = []
+    for player in players:
+        pred = predict_player(player, df, models, feature_cols)
+        if pred:
+            all_predictions.append(pred)
     
-    for matchup in matchups:
-        predictions = predict_player_props(
-            df, models,
-            matchup['player'],
-            matchup['team'],
-            matchup['opponent'],
-            matchup['game_date']
-        )
+    return pd.DataFrame(all_predictions)
+
+
+def create_bet_recommendations(predictions_df, lines_override=None):
+    """
+    Create betting recommendations from predictions.
+    
+    Args:
+        predictions_df: DataFrame with predictions
+        lines_override: Optional dict of {player: {prop: line}} for real sportsbook lines
+    """
+    bets = []
+    
+    for _, row in predictions_df.iterrows():
+        player = row['player']
         
-        if predictions.get('pts') is not None:
-            # Calculate max edge for this player
-            edges = find_edges(predictions, min_edge=0)
-            max_edge = max([e['edge'] for e in edges]) if edges else 0
-            predictions['_max_edge'] = max_edge
+        for prop in PROPS_TO_PREDICT:
+            pred_col = f'{prop}_pred'
+            line_col = f'{prop}_line'
+            edge_col = f'{prop}_edge'
             
-            all_predictions.append(predictions)
+            if pred_col not in row or pd.isna(row[pred_col]):
+                continue
+            
+            pred = row[pred_col]
+            
+            # Use override line if provided, else use L10
+            if lines_override and player in lines_override and prop in lines_override[player]:
+                line = lines_override[player][prop]
+            elif line_col in row and not pd.isna(row[line_col]):
+                line = row[line_col]
+            else:
+                continue
+            
+            edge = pred - line
+            direction = 'OVER' if edge > 0 else 'UNDER'
+            abs_edge = abs(edge)
+            
+            # Classify bet strength
+            if abs_edge >= MIN_EDGE_STRONG:
+                strength = 'STRONG'
+            elif abs_edge >= MIN_EDGE_MODERATE:
+                strength = 'MODERATE'
+            else:
+                continue  # Skip small edges
+            
+            # Format prop name nicely
+            prop_display = {
+                'pts': 'Points',
+                'trb': 'Rebounds',
+                'ast': 'Assists',
+                'pra': 'Pts+Reb+Ast',
+                'pr': 'Pts+Reb',
+                'pa': 'Pts+Ast',
+                'stl': 'Steals',
+                'blk': 'Blocks',
+                'tov': 'Turnovers'
+            }.get(prop, prop.upper())
+            
+            bets.append({
+                'player': player,
+                'prop': prop,
+                'prop_display': prop_display,
+                'direction': direction,
+                'line': line,
+                'prediction': pred,
+                'edge': abs_edge,
+                'strength': strength,
+                'timestamp': datetime.now().isoformat()
+            })
     
-    # Apply edge filter if specified
-    if args.min_edge > 0:
-        all_predictions = [p for p in all_predictions if p.get('_max_edge', 0) >= args.min_edge]
-        print(f"\nFiltered to {len(all_predictions)} players with edge >= {args.min_edge}")
+    return pd.DataFrame(bets)
+
+
+def format_recommendations(bets_df):
+    """Format betting recommendations for display."""
+    if len(bets_df) == 0:
+        return "No bets meeting criteria."
     
-    # Apply top N filter if specified
-    if args.top:
-        all_predictions = sorted(all_predictions, key=lambda x: -x.get('_max_edge', 0))[:args.top]
-        print(f"\nShowing top {len(all_predictions)} players by max edge")
+    # Sort by edge
+    bets_df = bets_df.sort_values('edge', ascending=False)
     
-    # Print predictions
-    for predictions in all_predictions:
-        print_predictions(predictions)
+    lines = []
+    lines.append("=" * 70)
+    lines.append("BET RECOMMENDATIONS")
+    lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("=" * 70)
     
-    # Summary
-    print(f"\n{'='*60}")
-    print("SUMMARY")
-    print("="*60)
-    print(f"Players predicted: {len(all_predictions)}/{len(matchups)}")
+    # Strong bets
+    strong = bets_df[bets_df['strength'] == 'STRONG']
+    if len(strong) > 0:
+        lines.append(f"\n★★★ STRONG BETS ({len(strong)}):")
+        for _, bet in strong.iterrows():
+            lines.append(f"  {bet['player']:<25} {bet['prop_display']:<12} {bet['direction']:<5} {bet['line']:.1f}")
+            lines.append(f"      Prediction: {bet['prediction']:.1f}, Edge: {'+' if bet['direction']=='OVER' else '-'}{bet['edge']:.1f} pts")
     
-    # Find best edges across all players
-    all_edges = []
-    for pred in all_predictions:
-        edges = find_edges(pred, min_edge=2.0)
-        for e in edges:
-            e['player'] = pred['player']
-            all_edges.append(e)
+    # Moderate bets
+    moderate = bets_df[bets_df['strength'] == 'MODERATE']
+    if len(moderate) > 0:
+        lines.append(f"\n★★ MODERATE BETS ({len(moderate)}):")
+        for _, bet in moderate.iterrows():
+            lines.append(f"  {bet['player']:<25} {bet['prop_display']:<12} {bet['direction']:<5} {bet['line']:.1f}")
+            lines.append(f"      Prediction: {bet['prediction']:.1f}, Edge: {'+' if bet['direction']=='OVER' else '-'}{bet['edge']:.1f} pts")
     
-    all_edges = sorted(all_edges, key=lambda x: -x['edge'])
+    lines.append("\n" + "=" * 70)
+    lines.append(f"Total bets: {len(bets_df)} (Strong: {len(strong)}, Moderate: {len(moderate)})")
+    lines.append("=" * 70)
     
-    if all_edges:
-        print(f"\n[TOP EDGES ACROSS ALL PLAYERS (≥2.0)]")
-        for e in all_edges[:10]:
-            print(f"  {e['player']:<20} {e['prop']:<12} {e['direction']:<5} "
-                  f"Line: {e['line']:.1f} → Pred: {e['prediction']:.1f} "
-                  f"(+{e['edge']:.1f})")
+    return "\n".join(lines)
+
+
+def save_locked_predictions(bets_df, predictions_df, date_str=None):
+    """Save predictions to timestamped files."""
+    if date_str is None:
+        date_str = datetime.now().strftime('%Y-%m-%d')
     
-    # Save if output specified
-    if args.output:
-        save_predictions_csv(all_predictions, args.output)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    print("\n" + "="*60)
+    # Save detailed predictions
+    predictions_file = f'predictions_locked_{date_str}_{timestamp}.csv'
+    predictions_df.to_csv(predictions_file, index=False)
+    print(f"  ✓ Saved: {predictions_file}")
+    
+    # Save bet recommendations
+    bets_file = f'bets_locked_{date_str}_{timestamp}.csv'
+    bets_df.to_csv(bets_file, index=False)
+    print(f"  ✓ Saved: {bets_file}")
+    
+    # Save formatted summary
+    summary_file = f'bets_summary_{date_str}_{timestamp}.txt'
+    summary = format_recommendations(bets_df)
+    with open(summary_file, 'w', encoding='utf-8') as f:
+        f.write(summary)
+    print(f"  ✓ Saved: {summary_file}")
+    
+    return predictions_file, bets_file, summary_file
+
+
+def main():
+    print("=" * 60)
+    print("Task 7: Daily NBA Props Predictions")
+    print("=" * 60)
+    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Step 1: Load models
+    print("\n[1] Loading trained models...")
+    models = load_models()
+    if len(models) == 0:
+        print("ERROR: No models found! Run task6_train_models.py first.")
+        return
+    
+    # Step 2: Load data
+    print("\n[2] Loading player data...")
+    try:
+        df = load_latest_data()
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
+        return
+    
+    # Step 3: Get valid players
+    print("\n[3] Getting players with sufficient history...")
+    players = get_players_for_prediction(df, min_games=10)
+    print(f"  ✓ {len(players)} players eligible")
+    
+    # Step 4: Generate predictions
+    print("\n[4] Generating predictions...")
+    predictions_df = generate_all_predictions(df, models, players)
+    print(f"  ✓ Generated predictions for {len(predictions_df)} players")
+    
+    # Step 5: Create bet recommendations
+    print("\n[5] Creating bet recommendations...")
+    bets_df = create_bet_recommendations(predictions_df)
+    print(f"  ✓ Found {len(bets_df)} bets meeting criteria")
+    
+    # Step 6: Display summary
+    print("\n" + format_recommendations(bets_df))
+    
+    # Step 7: Save locked predictions
+    print("\n[6] Saving locked predictions...")
+    save_locked_predictions(bets_df, predictions_df)
+    
+    print("\n" + "=" * 60)
+    print("PREDICTIONS LOCKED! ✓")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
