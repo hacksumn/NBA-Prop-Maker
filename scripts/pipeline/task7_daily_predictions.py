@@ -29,7 +29,7 @@ def load_historical_data():
     
     # Try to load matchup-enhanced data first
     try:
-        df = pd.read_csv('/home/claude/player_games_with_matchups.csv', parse_dates=['game_date'])
+        df = pd.read_csv('data/player_games_with_matchups.csv', parse_dates=['game_date'])
         if 'pts_matchup_edge' in df.columns:
             print(f"  Loaded matchup-enhanced data: {len(df):,} rows")
             print(f"  Matchup features present: ✓")
@@ -39,7 +39,7 @@ def load_historical_data():
             raise FileNotFoundError("No matchup features")
     except:
         # Fallback to project data
-        df = pd.read_csv('/mnt/project/player_games_schedule.csv', parse_dates=['game_date'])
+        df = pd.read_csv('data/player_games_schedule.csv', parse_dates=['game_date'])
         print(f"  Main data: {len(df):,} rows (no matchup features)")
     
     # Filter to players with enough games (need rolling stats)
@@ -463,7 +463,7 @@ def main():
     print("="*60)
     
     for prop, bundle in models.items():
-        filename = f"classifier_{prop}.pkl"
+        filename = f"models/classifiers/classifier_{prop}.pkl"
         with open(filename, 'wb') as f:
             pickle.dump(bundle, f)
         print(f"  ✓ Saved {filename}")

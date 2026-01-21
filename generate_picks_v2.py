@@ -32,11 +32,11 @@ def load_player_features():
     
     # Try matchup-enhanced data first
     try:
-        df = pd.read_csv('player_games_with_matchups.csv', parse_dates=['game_date'])
+        df = pd.read_csv('data/player_games_with_matchups.csv', parse_dates=['game_date'])
         has_matchups = 'pts_matchup_edge' in df.columns
         print(f"  Loaded with matchup features: {'✓' if has_matchups else '✗'}")
     except:
-        df = pd.read_csv('player_games_schedule.csv', parse_dates=['game_date'])
+        df = pd.read_csv('data/player_games_schedule.csv', parse_dates=['game_date'])
         print(f"  Loaded base features (no matchup history)")
     
     # Get most recent features for each player
@@ -54,7 +54,7 @@ def load_classifiers():
     props = ['pts', 'trb', 'ast', 'pra', 'pr', 'pa']
     for prop in props:
         try:
-            with open(f'classifier_{prop}.pkl', 'rb') as f:
+            with open(f'models/classifiers/classifier_{prop}.pkl', 'rb') as f:
                 models[prop] = pickle.load(f)
             print(f"  ✓ {prop.upper()}")
         except FileNotFoundError:
