@@ -48,6 +48,21 @@ This project uses **gradient boosting models** to predict NBA player performance
 
 ## 📁 Project Structure
 
+**Note**: The repository has been reorganized for better clarity. See [STRUCTURE.md](STRUCTURE.md) for detailed documentation.
+
+**Quick Overview**:
+- `data/` - All data files
+- `models/` - Trained models (regression & classifiers)
+- `results/` - Predictions and betting results
+- `scripts/` - All Python scripts organized by purpose
+- `images/` - Visualizations
+
+**Main Scripts**:
+- `generate_picks_v2.py` - 🆕 Production picks generator (use this daily)
+- `full_pipeline.py` - Complete pipeline from data to models
+
+## 📁 Old Project Structure (Deprecated)
+
 ```
 nba-prop-maker/
 ├── README.md                       # This file
