@@ -26,7 +26,7 @@ from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR   = Path(__file__).parent.resolve()
-DATA_DIR     = SCRIPT_DIR / "files" / "data"   # model reads from files/data/
+DATA_DIR     = SCRIPT_DIR / "data"
 LOG_DIR      = SCRIPT_DIR / "logs"
 GAME_LOG_CSV = DATA_DIR / "nba_data.csv"
 LINES_CSV    = DATA_DIR / "historical_lines.csv"
