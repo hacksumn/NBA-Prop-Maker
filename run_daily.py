@@ -35,15 +35,20 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Force UTF-8 output on Windows so Unicode chars in log messages don't crash
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR    = Path(__file__).parent.resolve()
 DATA_DIR      = SCRIPT_DIR / "data"
 FILES_DIR     = SCRIPT_DIR / "files"
-FILES_DATA    = FILES_DIR / "data"
 LOG_DIR       = SCRIPT_DIR / "logs"
 
-GAME_LOG_CSV  = FILES_DATA / "nba_data.csv"
-LINES_CSV     = FILES_DATA / "historical_lines.csv"
+GAME_LOG_CSV  = DATA_DIR / "nba_data.csv"
+LINES_CSV     = DATA_DIR / "historical_lines.csv"
 LOG_FILE      = LOG_DIR / f"run_{datetime.now().strftime('%Y%m%d')}.log"
 
 # Layer output files (all written to data/)
@@ -61,7 +66,6 @@ PROJECTIONS_TODAY = DATA_DIR / "player_projections_today.csv"
 # ── Logging setup ──────────────────────────────────────────────────────────────
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-FILES_DATA.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,10 +84,11 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 def _banner():
     print("""
-╔══════════════════════════════════════════════════════════════╗
-║          NBA PROP MODEL — 5-LAYER DAILY PIPELINE            ║
-║  L1:PBP  L2:PPP  L3:Usage  L4:Luck  L5:Blowout  → Picks    ║
-╚══════════════════════════════════════════════════════════════╝""")
+==============================================================
+     NBA PROP MODEL -- 5-LAYER DAILY PIPELINE
+     L1:PBP  L2:PPP  L3:Usage  L4:Luck  L5:Blowout -> Picks
+==============================================================""")
+
 
 
 def _section(title: str):
@@ -115,7 +120,7 @@ def _step_header(n: int, title: str):
 
 
 def _ok(msg: str):
-    logger.info(f"  ✓ {msg}")
+    logger.info(f"  [OK] {msg}")
 
 
 def _warn(msg: str):
@@ -123,7 +128,7 @@ def _warn(msg: str):
 
 
 def _fail(msg: str):
-    logger.error(f"  ✗ {msg}")
+    logger.error(f"  [FAIL] {msg}")
 
 
 # ── Step 1: NBA Game Logs ──────────────────────────────────────────────────────
@@ -424,16 +429,17 @@ def step4_pbp_fetch(args, errors):
             logger.info("  Full refresh: fetching entire 2024-25 PBP season (slow)...")
             fetch_season("2024-25")
         else:
-            logger.info(f"  Incremental: fetching PBP for {start_date} → {end_date}")
+            logger.info(f"  Incremental: fetching PBP for {start_date} -> {end_date}")
             fetch_season("2024-25", start_date=start_date, end_date=end_date)
 
-        # Check if master CSV exists
-        if PBP_MASTER.exists():
-            import pandas as pd
-            master = pd.read_csv(PBP_MASTER)
-            _ok(f"PBP master: {len(master):,} player-game rows → {PBP_MASTER.name}")
+        # Always rebuild master from all available per-game files
+        from pbp_fetcher import merge_possession_summaries
+        import pandas as pd
+        master = merge_possession_summaries(output_path=str(PBP_MASTER))
+        if not master.empty:
+            _ok(f"PBP master: {len(master):,} player-game rows -> {PBP_MASTER.name}")
         else:
-            _warn("PBP master CSV not yet built — run --full-refresh to build from scratch")
+            _warn("No PBP possession files found yet — run with --full-refresh to backfill")
 
     except Exception as exc:
         _fail(f"Layer 1 (PBP Fetch) failed: {exc}")
@@ -626,11 +632,15 @@ def step8_merge_projections(errors):
         if PLAYER_PROFILES.exists():
             logger.info("  Merging Layer 3 (usage profiles)...")
             prof = pd.read_csv(PLAYER_PROFILES)
-            prof["player"] = prof["PLAYER_NAME"] if "PLAYER_NAME" in prof.columns else prof.get("player", "")
-            usage_cols = [c for c in ["player", "USG_PCT", "TS_PCT", "role_tier",
+            # profiles uses player_name (lowercase); rename to player for merge
+            if "player_name" in prof.columns:
+                prof = prof.rename(columns={"player_name": "player"})
+            elif "PLAYER_NAME" in prof.columns:
+                prof = prof.rename(columns={"PLAYER_NAME": "player"})
+            usage_cols = [c for c in ["player", "usg_pct", "ts_pct", "role_tier",
                                        "pts_per_poss", "ast_per_poss"] if c in prof.columns]
             proj = proj.merge(prof[usage_cols], on="player", how="left")
-            merged_count = proj["USG_PCT"].notna().sum() if "USG_PCT" in proj.columns else 0
+            merged_count = proj["usg_pct"].notna().sum() if "usg_pct" in proj.columns else 0
             _ok(f"Layer 3 merged: {merged_count} players have usage profiles")
         else:
             _warn("player_profiles.csv not found — Layer 3 not merged")
@@ -777,10 +787,10 @@ def main():
     if errors:
         logger.warning(f"\n  {len(errors)} non-fatal error(s):")
         for e in errors:
-            logger.warning(f"    ✗ {e}")
+            logger.warning(f"    [FAIL] {e}")
         logger.info("  (Non-fatal errors do not stop the pipeline)")
     else:
-        logger.info("  All steps completed successfully ✓")
+        logger.info("  All steps completed successfully")
 
     logger.info("=" * 65)
 
