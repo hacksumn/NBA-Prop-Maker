@@ -1,0 +1,3993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Props &mdash; March 21, 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+@font-face {
+  font-family: 'Street Bit';
+  src: url('StreetBit.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #09090f;
+  --bg2:       #0f0f1a;
+  --bg3:       #14142a;
+  --bg4:       #1a1a35;
+  --border:    #252545;
+  --accent:    #7c3aed;
+  --accent2:   #a855f7;
+  --cyan:      #06b6d4;
+  --green:     #22c55e;
+  --red:       #ef4444;
+  --gold:      #f59e0b;
+  --text:      #e2e8f0;
+  --muted:     #64748b;
+  --pixel:     'Street Bit', 'Press Start 2P', monospace;
+  --mono:      'Share Tech Mono', monospace;
+  --sans:      'Inter', sans-serif;
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Scanline overlay ─────────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.08) 2px,
+    rgba(0,0,0,0.08) 4px
+  );
+}
+
+.wrapper { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 28px 24px; }
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.header {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  flex-wrap: wrap; gap: 16px;
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 20px; margin-bottom: 28px;
+}
+.header-left { display: flex; flex-direction: column; gap: 6px; }
+.logo {
+  font-family: var(--pixel);
+  font-size: clamp(14px, 2.2vw, 22px);
+  color: var(--accent2);
+  letter-spacing: 2px;
+  text-shadow: 0 0 20px rgba(168,85,247,0.6), 0 0 40px rgba(168,85,247,0.3);
+  line-height: 1.4;
+}
+.logo span { color: var(--cyan); }
+.dateline {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.header-right {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  line-height: 1.8;
+}
+
+/* ── Stat cards ──────────────────────────────────────────────────────────── */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color .2s, transform .15s;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.card::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--accent-line, var(--accent));
+}
+.card-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 10px;
+}
+.card-value {
+  font-family: var(--pixel);
+  font-size: clamp(16px, 2.5vw, 24px);
+  line-height: 1;
+  color: var(--card-color, var(--text));
+}
+.card-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+  font-family: var(--mono);
+}
+
+/* ── Filter bar ──────────────────────────────────────────────────────────── */
+.filter-bar {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.filter-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.filter-bar select,
+.filter-bar input {
+  background: var(--bg3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+  transition: border-color .2s;
+  min-width: 120px;
+}
+.filter-bar select:focus,
+.filter-bar input:focus { border-color: var(--accent); }
+.filter-bar input { width: 200px; }
+.result-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.result-count span { color: var(--cyan); font-weight: bold; }
+
+/* ── Tab pills ───────────────────────────────────────────────────────────── */
+.tab-pills {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.tab-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all .2s;
+  user-select: none;
+}
+.tab-pill:hover, .tab-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+.table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+thead tr {
+  background: var(--bg3);
+  border-bottom: 1px solid var(--accent);
+}
+th {
+  padding: 13px 14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color .15s;
+}
+th:hover { color: var(--cyan); }
+th.sort-asc::after  { content: ' ↑'; color: var(--cyan); }
+th.sort-desc::after { content: ' ↓'; color: var(--cyan); }
+
+.row-even { background: var(--bg); }
+.row-odd  { background: var(--bg2); }
+td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--bg4) !important; }
+
+.td-player {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.td-team {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.td-num {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: right;
+}
+.td-muted { color: var(--muted); }
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+.prop-badge {
+  display: inline-block;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+.dir-badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: bold;
+  padding: 4px 10px;
+  border-radius: 4px;
+  letter-spacing: 1px;
+}
+.dir-over  { background: rgba(34,197,94,0.15);  color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+.dir-under { background: rgba(239,68,68,0.15);  color: var(--red);   border: 1px solid rgba(239,68,68,0.3); }
+
+.grade-badge {
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  font-family: var(--pixel);
+  font-size: 9px;
+  width: 32px; height: 22px;
+  border-radius: 4px;
+}
+.grade-A    { background: rgba(34,197,94,0.2);  color: var(--green); border: 1px solid rgba(34,197,94,0.4); }
+.grade-Bplus{ background: rgba(6,182,212,0.15); color: var(--cyan);  border: 1px solid rgba(6,182,212,0.3); }
+.grade-B    { background: rgba(245,158,11,0.15);color: var(--gold);  border: 1px solid rgba(245,158,11,0.3); }
+.grade-C    { background: rgba(100,116,139,0.15);color: var(--muted);border: 1px solid rgba(100,116,139,0.3); }
+
+.edge-pos { color: var(--green) !important; }
+.edge-neg { color: var(--red)   !important; }
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.footer-text {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+.footer-text strong { color: var(--accent2); }
+
+/* ── Glow pulse on logo ──────────────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { text-shadow: 0 0 20px rgba(168,85,247,0.6), 0 0 40px rgba(168,85,247,0.3); }
+  50%       { text-shadow: 0 0 30px rgba(168,85,247,0.9), 0 0 60px rgba(168,85,247,0.5); }
+}
+.logo { animation: pulse 3s ease-in-out infinite; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">NBA<span>&nbsp;PROP</span>&nbsp;MODEL</div>
+      <div class="dateline">March 21, 2026 &nbsp;&#9670;&nbsp; Generated 11:32 AM</div>
+    </div>
+    <div class="header-right">
+      PICKS: 250 &nbsp;|&nbsp; AVG CONF: 69%<br>
+      AVG EDGE: 3.53 &nbsp;|&nbsp; OVER / UNDER: 119 / 131
+    </div>
+  </header>
+
+  <!-- Stat cards -->
+  <div class="cards">
+    <div class="card" style="--accent-line:var(--accent2); --card-color:var(--accent2);">
+      <div class="card-label">Total Picks</div>
+      <div class="card-value">250</div>
+      <div class="card-sub">Today&rsquo;s slate</div>
+    </div>
+    <div class="card" style="--accent-line:var(--cyan); --card-color:var(--cyan);">
+      <div class="card-label">Avg Confidence</div>
+      <div class="card-value">69%</div>
+      <div class="card-sub">Model conviction</div>
+    </div>
+    <div class="card" style="--accent-line:var(--green); --card-color:var(--green);">
+      <div class="card-label">OVERs</div>
+      <div class="card-value">119</div>
+      <div class="card-sub">48% of picks</div>
+    </div>
+    <div class="card" style="--accent-line:var(--red); --card-color:var(--red);">
+      <div class="card-label">UNDERs</div>
+      <div class="card-value">131</div>
+      <div class="card-sub">52% of picks</div>
+    </div>
+    <div class="card" style="--accent-line:var(--gold); --card-color:var(--gold);">
+      <div class="card-label">Avg Edge</div>
+      <div class="card-value">3.5</div>
+      <div class="card-sub">Points vs line</div>
+    </div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="filter-bar">
+    <div class="filter-group">
+      <span class="filter-label">Direction</span>
+      <select id="dirFilter" onchange="applyFilters()">
+        <option value="">All</option>
+        <option value="OVER">OVER</option>
+        <option value="UNDER">UNDER</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Prop</span>
+      <select id="propFilter" onchange="applyFilters()">
+        <option value="">All props</option>
+        <option value="PTS">PTS</option>
+        <option value="TRB">TRB</option>
+        <option value="AST">AST</option>
+        <option value="PRA">PRA</option>
+        <option value="PR">PR</option>
+        <option value="PA">PA</option>
+        <option value="STL">STL</option>
+        <option value="BLK">BLK</option>
+        <option value="TOV">TOV</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Search</span>
+      <input id="searchBox" type="text" placeholder="Player name..." oninput="applyFilters()">
+    </div>
+    <div class="result-count">Showing <span id="visCount">250</span> of 250 picks</div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <table id="picksTable">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0,this)">Player</th>
+          <th onclick="sortTable(1,this)">Team</th>
+          <th onclick="sortTable(2,this)">Prop</th>
+          <th onclick="sortTable(3,this)">Dir</th>
+          <th onclick="sortTable(4,this)">Line</th>
+          <th onclick="sortTable(5,this)">Pred</th>
+          <th onclick="sortTable(6,this)">Edge</th>
+          <th onclick="sortTable(7,this)">L10</th>
+          <th onclick="sortTable(8,this)">Conf%</th>
+          <th onclick="sortTable(9,this)">OU%</th>
+          <th onclick="sortTable(10,this)">Line Mv</th>
+          <th onclick="sortTable(11,this)">Tot</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ace Bailey</td>
+  <td class="td-team">UTA</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">26.5</td>
+  <td class="td-num">15.5</td>
+  <td class="td-num edge-neg">-11.0</td>
+  <td class="td-num td-muted">18.4</td>
+  <td class="td-num">90%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Oso Ighodaro</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">12.7</td>
+  <td class="td-num edge-neg">-9.8</td>
+  <td class="td-num td-muted">16.1</td>
+  <td class="td-num">88%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ace Bailey</td>
+  <td class="td-team">UTA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">28.0</td>
+  <td class="td-num">18.3</td>
+  <td class="td-num edge-neg">-9.7</td>
+  <td class="td-num td-muted">21.9</td>
+  <td class="td-num">88%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Justin Edwards</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">10.0</td>
+  <td class="td-num edge-neg">-9.5</td>
+  <td class="td-num td-muted">9.3</td>
+  <td class="td-num">87%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">VJ Edgecombe</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">28.5</td>
+  <td class="td-num">19.1</td>
+  <td class="td-num edge-neg">-9.4</td>
+  <td class="td-num td-muted">20.4</td>
+  <td class="td-num">87%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Pascal Siakam</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">27.7</td>
+  <td class="td-num edge-pos">+9.2</td>
+  <td class="td-num td-muted">25.0</td>
+  <td class="td-num">87%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">VJ Edgecombe</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">34.0</td>
+  <td class="td-num">24.9</td>
+  <td class="td-num edge-neg">-9.1</td>
+  <td class="td-num td-muted">26.3</td>
+  <td class="td-num">86%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Pascal Siakam</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">29.0</td>
+  <td class="td-num">37.9</td>
+  <td class="td-num edge-pos">+8.9</td>
+  <td class="td-num td-muted">33.8</td>
+  <td class="td-num">86%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ace Bailey</td>
+  <td class="td-team">UTA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">29.0</td>
+  <td class="td-num">20.2</td>
+  <td class="td-num edge-neg">-8.8</td>
+  <td class="td-num td-muted">23.6</td>
+  <td class="td-num">86%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Justin Edwards</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.0</td>
+  <td class="td-num">9.4</td>
+  <td class="td-num edge-neg">-8.6</td>
+  <td class="td-num td-muted">9.2</td>
+  <td class="td-num">86%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Pascal Siakam</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">23.0</td>
+  <td class="td-num">31.5</td>
+  <td class="td-num edge-pos">+8.5</td>
+  <td class="td-num td-muted">28.2</td>
+  <td class="td-num">85%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Luka Dončić</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">52.5</td>
+  <td class="td-num">44.5</td>
+  <td class="td-num edge-neg">-8.0</td>
+  <td class="td-num td-muted">51.0</td>
+  <td class="td-num">84%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ace Bailey</td>
+  <td class="td-team">UTA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">13.6</td>
+  <td class="td-num edge-neg">-7.9</td>
+  <td class="td-num td-muted">16.7</td>
+  <td class="td-num">84%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">VJ Edgecombe</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">29.5</td>
+  <td class="td-num">21.7</td>
+  <td class="td-num edge-neg">-7.8</td>
+  <td class="td-num td-muted">23.5</td>
+  <td class="td-num">84%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Justin Edwards</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">19.75</td>
+  <td class="td-num">12.0</td>
+  <td class="td-num edge-neg">-7.8</td>
+  <td class="td-num td-muted">11.3</td>
+  <td class="td-num">84%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jared McCain</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">8.9</td>
+  <td class="td-num edge-neg">-7.6</td>
+  <td class="td-num td-muted">14.0</td>
+  <td class="td-num">83%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Tyler Herro</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">32.5</td>
+  <td class="td-num">24.9</td>
+  <td class="td-num edge-neg">-7.6</td>
+  <td class="td-num td-muted">31.0</td>
+  <td class="td-num">83%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Nickeil Alexander-Walker</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">24.8</td>
+  <td class="td-num edge-pos">+7.3</td>
+  <td class="td-num td-muted">19.6</td>
+  <td class="td-num">83%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Pascal Siakam</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">27.0</td>
+  <td class="td-num">34.1</td>
+  <td class="td-num edge-pos">+7.1</td>
+  <td class="td-num td-muted">30.6</td>
+  <td class="td-num">82%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jordan Goodwin</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.0</td>
+  <td class="td-num">11.3</td>
+  <td class="td-num edge-neg">-6.7</td>
+  <td class="td-num td-muted">13.7</td>
+  <td class="td-num">81%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Bilal Coulibaly</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">25.2</td>
+  <td class="td-num edge-pos">+6.7</td>
+  <td class="td-num td-muted">20.7</td>
+  <td class="td-num">81%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Kyle Filipowski</td>
+  <td class="td-team">UTA</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">14.9</td>
+  <td class="td-num edge-neg">-6.6</td>
+  <td class="td-num td-muted">19.0</td>
+  <td class="td-num">81%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Tyler Herro</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">27.5</td>
+  <td class="td-num">20.9</td>
+  <td class="td-num edge-neg">-6.6</td>
+  <td class="td-num td-muted">26.9</td>
+  <td class="td-num">81%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">VJ Edgecombe</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">15.9</td>
+  <td class="td-num edge-neg">-6.6</td>
+  <td class="td-num td-muted">17.6</td>
+  <td class="td-num">81%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Nickeil Alexander-Walker</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">29.0</td>
+  <td class="td-num edge-pos">+6.5</td>
+  <td class="td-num td-muted">23.2</td>
+  <td class="td-num">80%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Jaylen Wells</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">20.9</td>
+  <td class="td-num edge-pos">+6.4</td>
+  <td class="td-num td-muted">17.9</td>
+  <td class="td-num">80%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Chet Holmgren</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">30.8</td>
+  <td class="td-num edge-pos">+6.3</td>
+  <td class="td-num td-muted">28.6</td>
+  <td class="td-num">80%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Bam Adebayo</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">20.5</td>
+  <td class="td-num">26.8</td>
+  <td class="td-num edge-pos">+6.3</td>
+  <td class="td-num td-muted">28.0</td>
+  <td class="td-num">80%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Oso Ighodaro</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">10.3</td>
+  <td class="td-num edge-neg">-6.2</td>
+  <td class="td-num td-muted">13.1</td>
+  <td class="td-num">80%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Jaylen Wells</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">19.6</td>
+  <td class="td-num edge-pos">+6.1</td>
+  <td class="td-num td-muted">16.8</td>
+  <td class="td-num">79%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Daniel Gafford</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">22.5</td>
+  <td class="td-num edge-pos">+6.0</td>
+  <td class="td-num td-muted">17.9</td>
+  <td class="td-num">79%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Luka Dončić</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">43.0</td>
+  <td class="td-num">37.0</td>
+  <td class="td-num edge-neg">-6.0</td>
+  <td class="td-num td-muted">42.9</td>
+  <td class="td-num">79%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Jaylen Wells</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.0</td>
+  <td class="td-num">23.0</td>
+  <td class="td-num edge-pos">+6.0</td>
+  <td class="td-num td-muted">19.5</td>
+  <td class="td-num">79%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Collin Gillespie</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">23.5</td>
+  <td class="td-num">17.6</td>
+  <td class="td-num edge-neg">-5.9</td>
+  <td class="td-num td-muted">22.3</td>
+  <td class="td-num">79%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Alex Caruso</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">9.0</td>
+  <td class="td-num">14.9</td>
+  <td class="td-num edge-pos">+5.9</td>
+  <td class="td-num td-muted">11.8</td>
+  <td class="td-num">79%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Tyler Herro</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">26.5</td>
+  <td class="td-num">20.7</td>
+  <td class="td-num edge-neg">-5.8</td>
+  <td class="td-num td-muted">26.3</td>
+  <td class="td-num">78%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Bilal Coulibaly</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">20.2</td>
+  <td class="td-num edge-pos">+5.7</td>
+  <td class="td-num td-muted">16.2</td>
+  <td class="td-num">78%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jevon Carter</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">12.5</td>
+  <td class="td-num">6.8</td>
+  <td class="td-num edge-neg">-5.7</td>
+  <td class="td-num td-muted">9.6</td>
+  <td class="td-num">78%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Daniel Gafford</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">24.2</td>
+  <td class="td-num edge-pos">+5.7</td>
+  <td class="td-num td-muted">19.3</td>
+  <td class="td-num">78%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Oso Ighodaro</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">7.9</td>
+  <td class="td-num edge-neg">-5.6</td>
+  <td class="td-num td-muted">10.4</td>
+  <td class="td-num">78%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jordan Goodwin</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">12.9</td>
+  <td class="td-num edge-neg">-5.6</td>
+  <td class="td-num td-muted">15.4</td>
+  <td class="td-num">78%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jevon Carter</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">12.0</td>
+  <td class="td-num">6.6</td>
+  <td class="td-num edge-neg">-5.4</td>
+  <td class="td-num td-muted">8.9</td>
+  <td class="td-num">77%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Coby White</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">19.1</td>
+  <td class="td-num edge-neg">-5.4</td>
+  <td class="td-num td-muted">20.7</td>
+  <td class="td-num">77%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Stephon Castle</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">28.5</td>
+  <td class="td-num">33.7</td>
+  <td class="td-num edge-pos">+5.2</td>
+  <td class="td-num td-muted">28.9</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Jaylen Wells</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">12.5</td>
+  <td class="td-num">17.5</td>
+  <td class="td-num edge-pos">+5.0</td>
+  <td class="td-num td-muted">15.2</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jalen Green</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">32.5</td>
+  <td class="td-num">27.5</td>
+  <td class="td-num edge-neg">-5.0</td>
+  <td class="td-num td-muted">27.4</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jevon Carter</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">8.5</td>
+  <td class="td-num edge-neg">-5.0</td>
+  <td class="td-num td-muted">11.8</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Pelle Larsson</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">15.5</td>
+  <td class="td-num edge-pos">+5.0</td>
+  <td class="td-num td-muted">12.7</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Pelle Larsson</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">23.5</td>
+  <td class="td-num edge-pos">+5.0</td>
+  <td class="td-num td-muted">20.3</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Chet Holmgren</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">23.5</td>
+  <td class="td-num">28.4</td>
+  <td class="td-num edge-pos">+4.9</td>
+  <td class="td-num td-muted">26.2</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Grayson Allen</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.0</td>
+  <td class="td-num">21.9</td>
+  <td class="td-num edge-pos">+4.9</td>
+  <td class="td-num td-muted">24.0</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Paolo Banchero</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">26.4</td>
+  <td class="td-num edge-pos">+4.9</td>
+  <td class="td-num td-muted">26.0</td>
+  <td class="td-num">76%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Luka Dončić</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">34.0</td>
+  <td class="td-num">29.2</td>
+  <td class="td-num edge-neg">-4.8</td>
+  <td class="td-num td-muted">34.0</td>
+  <td class="td-num">75%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Bilal Coulibaly</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.0</td>
+  <td class="td-num">21.8</td>
+  <td class="td-num edge-pos">+4.8</td>
+  <td class="td-num td-muted">17.9</td>
+  <td class="td-num">75%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Kon Knueppel</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">23.3</td>
+  <td class="td-num edge-pos">+4.8</td>
+  <td class="td-num td-muted">20.1</td>
+  <td class="td-num">75%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">GG Jackson</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">24.1</td>
+  <td class="td-num edge-pos">+4.6</td>
+  <td class="td-num td-muted">23.4</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Collin Gillespie</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.0</td>
+  <td class="td-num">13.5</td>
+  <td class="td-num edge-neg">-4.5</td>
+  <td class="td-num td-muted">17.4</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Alperen Sengun</td>
+  <td class="td-team">HOU</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">27.0</td>
+  <td class="td-num">22.5</td>
+  <td class="td-num edge-neg">-4.5</td>
+  <td class="td-num td-muted">24.6</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Klay Thompson</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">12.0</td>
+  <td class="td-num">16.5</td>
+  <td class="td-num edge-pos">+4.5</td>
+  <td class="td-num td-muted">15.8</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Alex Caruso</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">5.5</td>
+  <td class="td-num">9.9</td>
+  <td class="td-num edge-pos">+4.4</td>
+  <td class="td-num td-muted">7.6</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Ajay Mitchell</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">20.9</td>
+  <td class="td-num edge-pos">+4.4</td>
+  <td class="td-num td-muted">20.1</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jared McCain</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">11.0</td>
+  <td class="td-num">6.6</td>
+  <td class="td-num edge-neg">-4.4</td>
+  <td class="td-num td-muted">11.0</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Alex Caruso</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">8.5</td>
+  <td class="td-num">12.9</td>
+  <td class="td-num edge-pos">+4.4</td>
+  <td class="td-num td-muted">10.2</td>
+  <td class="td-num">74%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Brandin Podziemski</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">18.8</td>
+  <td class="td-num edge-pos">+4.3</td>
+  <td class="td-num td-muted">18.2</td>
+  <td class="td-num">73%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Deandre Ayton</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">21.8</td>
+  <td class="td-num edge-pos">+4.3</td>
+  <td class="td-num td-muted">18.4</td>
+  <td class="td-num">73%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jalen Johnson</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">32.5</td>
+  <td class="td-num">28.3</td>
+  <td class="td-num edge-neg">-4.2</td>
+  <td class="td-num td-muted">28.6</td>
+  <td class="td-num">73%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Bub Carrington</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.0</td>
+  <td class="td-num">12.8</td>
+  <td class="td-num edge-neg">-4.2</td>
+  <td class="td-num td-muted">12.3</td>
+  <td class="td-num">73%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Davion Mitchell</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">13.3</td>
+  <td class="td-num edge-neg">-4.2</td>
+  <td class="td-num td-muted">13.5</td>
+  <td class="td-num">73%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Justin Edwards</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">11.5</td>
+  <td class="td-num">7.4</td>
+  <td class="td-num edge-neg">-4.1</td>
+  <td class="td-num td-muted">7.2</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Dylan Harper</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">14.4</td>
+  <td class="td-num edge-neg">-4.1</td>
+  <td class="td-num td-muted">16.1</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jonathan Kuminga</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">15.5</td>
+  <td class="td-num edge-neg">-4.0</td>
+  <td class="td-num td-muted">14.2</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Dominick Barlow</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">20.0</td>
+  <td class="td-num">16.0</td>
+  <td class="td-num edge-neg">-4.0</td>
+  <td class="td-num td-muted">11.9</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Brandin Podziemski</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">25.5</td>
+  <td class="td-num edge-pos">+4.0</td>
+  <td class="td-num td-muted">25.9</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Ajay Mitchell</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">20.5</td>
+  <td class="td-num">24.5</td>
+  <td class="td-num edge-pos">+4.0</td>
+  <td class="td-num td-muted">23.6</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Chet Holmgren</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">20.5</td>
+  <td class="td-num edge-pos">+4.0</td>
+  <td class="td-num td-muted">18.0</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Oso Ighodaro</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">9.5</td>
+  <td class="td-num">5.5</td>
+  <td class="td-num edge-neg">-4.0</td>
+  <td class="td-num td-muted">7.4</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Bam Adebayo</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">36.0</td>
+  <td class="td-num">39.9</td>
+  <td class="td-num edge-pos">+3.9</td>
+  <td class="td-num td-muted">40.6</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Brandin Podziemski</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">26.5</td>
+  <td class="td-num">30.4</td>
+  <td class="td-num edge-pos">+3.9</td>
+  <td class="td-num td-muted">30.3</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Bam Adebayo</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">32.5</td>
+  <td class="td-num">36.4</td>
+  <td class="td-num edge-pos">+3.9</td>
+  <td class="td-num td-muted">37.4</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jalen Johnson</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">42.0</td>
+  <td class="td-num">38.1</td>
+  <td class="td-num edge-neg">-3.9</td>
+  <td class="td-num td-muted">37.6</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Keldon Johnson</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">10.6</td>
+  <td class="td-num edge-neg">-3.9</td>
+  <td class="td-num td-muted">10.3</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Kris Dunn</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">15.6</td>
+  <td class="td-num edge-neg">-3.9</td>
+  <td class="td-num td-muted">16.6</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Grayson Allen</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">17.4</td>
+  <td class="td-num edge-pos">+3.9</td>
+  <td class="td-num td-muted">19.2</td>
+  <td class="td-num">72%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Bilal Coulibaly</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.0</td>
+  <td class="td-num">16.8</td>
+  <td class="td-num edge-pos">+3.8</td>
+  <td class="td-num td-muted">13.4</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Alperen Sengun</td>
+  <td class="td-team">HOU</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">29.5</td>
+  <td class="td-num">25.7</td>
+  <td class="td-num edge-neg">-3.8</td>
+  <td class="td-num td-muted">27.8</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Naji Marshall</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">22.3</td>
+  <td class="td-num edge-pos">+3.8</td>
+  <td class="td-num td-muted">19.0</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Myles Turner</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">18.3</td>
+  <td class="td-num edge-pos">+3.8</td>
+  <td class="td-num td-muted">16.0</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Bub Carrington</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">13.8</td>
+  <td class="td-num edge-neg">-3.7</td>
+  <td class="td-num td-muted">13.2</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Bub Carrington</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">17.8</td>
+  <td class="td-num edge-neg">-3.7</td>
+  <td class="td-num td-muted">17.4</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Moussa Diabaté</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">17.8</td>
+  <td class="td-num edge-neg">-3.7</td>
+  <td class="td-num td-muted">18.7</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Brandin Podziemski</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">20.0</td>
+  <td class="td-num">23.7</td>
+  <td class="td-num edge-pos">+3.7</td>
+  <td class="td-num td-muted">22.6</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Brandon Miller</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">20.8</td>
+  <td class="td-num edge-neg">-3.7</td>
+  <td class="td-num td-muted">21.5</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Oso Ighodaro</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">8.5</td>
+  <td class="td-num">4.8</td>
+  <td class="td-num edge-neg">-3.7</td>
+  <td class="td-num td-muted">5.7</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Herbert Jones</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.0</td>
+  <td class="td-num">17.7</td>
+  <td class="td-num edge-pos">+3.7</td>
+  <td class="td-num td-muted">15.9</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">James Harden</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">32.0</td>
+  <td class="td-num">28.3</td>
+  <td class="td-num edge-neg">-3.7</td>
+  <td class="td-num td-muted">27.6</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Dylan Harper</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">17.8</td>
+  <td class="td-num edge-neg">-3.7</td>
+  <td class="td-num td-muted">19.1</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Saddiq Bey</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">28.2</td>
+  <td class="td-num edge-pos">+3.7</td>
+  <td class="td-num td-muted">27.1</td>
+  <td class="td-num">71%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Chet Holmgren</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">18.1</td>
+  <td class="td-num edge-pos">+3.6</td>
+  <td class="td-num td-muted">15.6</td>
+  <td class="td-num">70%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jordan Goodwin</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.0</td>
+  <td class="td-num">9.4</td>
+  <td class="td-num edge-neg">-3.6</td>
+  <td class="td-num td-muted">11.3</td>
+  <td class="td-num">70%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Myles Turner</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">9.5</td>
+  <td class="td-num">13.0</td>
+  <td class="td-num edge-pos">+3.5</td>
+  <td class="td-num td-muted">11.7</td>
+  <td class="td-num">70%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Naji Marshall</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">17.9</td>
+  <td class="td-num edge-pos">+3.4</td>
+  <td class="td-num td-muted">14.9</td>
+  <td class="td-num">70%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">GG Jackson</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">17.9</td>
+  <td class="td-num edge-pos">+3.4</td>
+  <td class="td-num td-muted">17.0</td>
+  <td class="td-num">70%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ryan Nembhard</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.0</td>
+  <td class="td-num">13.7</td>
+  <td class="td-num edge-neg">-3.3</td>
+  <td class="td-num td-muted">11.4</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Keldon Johnson</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">15.2</td>
+  <td class="td-num edge-neg">-3.3</td>
+  <td class="td-num td-muted">14.9</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Bam Adebayo</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">27.0</td>
+  <td class="td-num">30.3</td>
+  <td class="td-num edge-pos">+3.3</td>
+  <td class="td-num td-muted">31.2</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Dylan Harper</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">10.3</td>
+  <td class="td-num edge-neg">-3.2</td>
+  <td class="td-num td-muted">11.7</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Kevin Durant</td>
+  <td class="td-team">HOU</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">34.5</td>
+  <td class="td-num">31.3</td>
+  <td class="td-num edge-neg">-3.2</td>
+  <td class="td-num td-muted">32.2</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jalen Green</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">26.5</td>
+  <td class="td-num">23.3</td>
+  <td class="td-num edge-neg">-3.2</td>
+  <td class="td-num td-muted">23.6</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Moussa Diabaté</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">15.3</td>
+  <td class="td-num edge-neg">-3.2</td>
+  <td class="td-num td-muted">15.8</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Myles Turner</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">16.7</td>
+  <td class="td-num edge-pos">+3.2</td>
+  <td class="td-num td-muted">14.6</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Daniel Gafford</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">13.7</td>
+  <td class="td-num edge-pos">+3.2</td>
+  <td class="td-num td-muted">10.6</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Kevin Durant</td>
+  <td class="td-team">HOU</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">33.0</td>
+  <td class="td-num">29.8</td>
+  <td class="td-num edge-neg">-3.2</td>
+  <td class="td-num td-muted">30.2</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Darius Garland</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">33.5</td>
+  <td class="td-num">30.3</td>
+  <td class="td-num edge-neg">-3.2</td>
+  <td class="td-num td-muted">28.1</td>
+  <td class="td-num">69%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Kawhi Leonard</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">34.5</td>
+  <td class="td-num">37.6</td>
+  <td class="td-num edge-pos">+3.1</td>
+  <td class="td-num td-muted">36.4</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Gui Santos</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">16.6</td>
+  <td class="td-num edge-pos">+3.1</td>
+  <td class="td-num td-muted">15.6</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jalen Green</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">27.5</td>
+  <td class="td-num">24.4</td>
+  <td class="td-num edge-neg">-3.1</td>
+  <td class="td-num td-muted">24.9</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Onyeka Okongwu</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.0</td>
+  <td class="td-num">16.1</td>
+  <td class="td-num edge-pos">+3.1</td>
+  <td class="td-num td-muted">14.6</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Kris Dunn</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">10.25</td>
+  <td class="td-num">7.2</td>
+  <td class="td-num edge-neg">-3.0</td>
+  <td class="td-num td-muted">6.9</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Julian Champagnie</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">14.5</td>
+  <td class="td-num edge-neg">-3.0</td>
+  <td class="td-num td-muted">16.9</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Ajay Mitchell</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">20.5</td>
+  <td class="td-num edge-pos">+3.0</td>
+  <td class="td-num td-muted">19.5</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jarace Walker</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">16.5</td>
+  <td class="td-num edge-neg">-3.0</td>
+  <td class="td-num td-muted">17.5</td>
+  <td class="td-num">68%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jarace Walker</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">19.6</td>
+  <td class="td-num edge-neg">-2.9</td>
+  <td class="td-num td-muted">21.1</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Myles Turner</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">8.5</td>
+  <td class="td-num">11.4</td>
+  <td class="td-num edge-pos">+2.9</td>
+  <td class="td-num td-muted">10.3</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">GG Jackson</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">23.5</td>
+  <td class="td-num">26.4</td>
+  <td class="td-num edge-pos">+2.9</td>
+  <td class="td-num td-muted">25.3</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Grayson Allen</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">20.4</td>
+  <td class="td-num edge-pos">+2.9</td>
+  <td class="td-num td-muted">22.1</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Saddiq Bey</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">22.4</td>
+  <td class="td-num edge-pos">+2.9</td>
+  <td class="td-num td-muted">21.8</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Kawhi Leonard</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">32.5</td>
+  <td class="td-num">35.4</td>
+  <td class="td-num edge-pos">+2.9</td>
+  <td class="td-num td-muted">34.4</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Jonathan Kuminga</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">22.3</td>
+  <td class="td-num edge-pos">+2.8</td>
+  <td class="td-num td-muted">20.4</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Davion Mitchell</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">16.7</td>
+  <td class="td-num edge-neg">-2.8</td>
+  <td class="td-num td-muted">17.2</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">De'Anthony Melton</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">24.3</td>
+  <td class="td-num edge-pos">+2.8</td>
+  <td class="td-num td-muted">23.2</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Kevin Durant</td>
+  <td class="td-team">HOU</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">28.0</td>
+  <td class="td-num">25.2</td>
+  <td class="td-num edge-neg">-2.8</td>
+  <td class="td-num td-muted">26.1</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Davion Mitchell</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">AST</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">7.5</td>
+  <td class="td-num">4.7</td>
+  <td class="td-num edge-neg">-2.8</td>
+  <td class="td-num td-muted">5.1</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Miles Bridges</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">18.7</td>
+  <td class="td-num edge-neg">-2.8</td>
+  <td class="td-num td-muted">17.4</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Dylan Harper</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">13.7</td>
+  <td class="td-num edge-neg">-2.8</td>
+  <td class="td-num td-muted">14.7</td>
+  <td class="td-num">67%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Norman Powell</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">19.8</td>
+  <td class="td-num edge-neg">-2.7</td>
+  <td class="td-num td-muted">18.6</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Alex Sarr</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">16.2</td>
+  <td class="td-num edge-pos">+2.7</td>
+  <td class="td-num td-muted">19.3</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Donovan Mitchell</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">33.0</td>
+  <td class="td-num">30.3</td>
+  <td class="td-num edge-neg">-2.7</td>
+  <td class="td-num td-muted">28.9</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jordan Goodwin</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">7.8</td>
+  <td class="td-num edge-neg">-2.7</td>
+  <td class="td-num td-muted">9.6</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Bub Carrington</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">11.5</td>
+  <td class="td-num">8.8</td>
+  <td class="td-num edge-neg">-2.7</td>
+  <td class="td-num td-muted">8.1</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Dominick Barlow</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">10.8</td>
+  <td class="td-num edge-neg">-2.7</td>
+  <td class="td-num td-muted">8.2</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Alperen Sengun</td>
+  <td class="td-team">HOU</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">33.5</td>
+  <td class="td-num">30.8</td>
+  <td class="td-num edge-neg">-2.7</td>
+  <td class="td-num td-muted">33.0</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">GG Jackson</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">20.2</td>
+  <td class="td-num edge-pos">+2.7</td>
+  <td class="td-num td-muted">18.9</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">CJ McCollum</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">27.1</td>
+  <td class="td-num edge-pos">+2.6</td>
+  <td class="td-num td-muted">25.9</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Kel'el Ware</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">20.5</td>
+  <td class="td-num">23.1</td>
+  <td class="td-num edge-pos">+2.6</td>
+  <td class="td-num td-muted">22.0</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jevon Carter</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">7.5</td>
+  <td class="td-num">4.9</td>
+  <td class="td-num edge-neg">-2.6</td>
+  <td class="td-num td-muted">6.7</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Olivier-Maxence Prosper</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">13.9</td>
+  <td class="td-num edge-neg">-2.6</td>
+  <td class="td-num td-muted">13.4</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Paolo Banchero</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">32.5</td>
+  <td class="td-num">35.1</td>
+  <td class="td-num edge-pos">+2.6</td>
+  <td class="td-num td-muted">35.2</td>
+  <td class="td-num">66%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Gui Santos</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">21.0</td>
+  <td class="td-num edge-pos">+2.5</td>
+  <td class="td-num td-muted">19.9</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Jonathan Kuminga</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">13.0</td>
+  <td class="td-num edge-pos">+2.5</td>
+  <td class="td-num td-muted">11.9</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Keldon Johnson</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">14.0</td>
+  <td class="td-num edge-neg">-2.5</td>
+  <td class="td-num td-muted">14.0</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jordan Goodwin</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">6.0</td>
+  <td class="td-num">3.5</td>
+  <td class="td-num edge-neg">-2.5</td>
+  <td class="td-num td-muted">4.1</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Draymond Green</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">7.5</td>
+  <td class="td-num">5.0</td>
+  <td class="td-num edge-neg">-2.5</td>
+  <td class="td-num td-muted">5.1</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Cason Wallace</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">13.0</td>
+  <td class="td-num edge-pos">+2.5</td>
+  <td class="td-num td-muted">16.9</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Coby White</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">15.5</td>
+  <td class="td-num">13.0</td>
+  <td class="td-num edge-neg">-2.5</td>
+  <td class="td-num td-muted">13.4</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jalen Johnson</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">32.5</td>
+  <td class="td-num">30.0</td>
+  <td class="td-num edge-neg">-2.5</td>
+  <td class="td-num td-muted">30.3</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Miles Bridges</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">24.0</td>
+  <td class="td-num">21.6</td>
+  <td class="td-num edge-neg">-2.4</td>
+  <td class="td-num td-muted">20.1</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Herbert Jones</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">12.0</td>
+  <td class="td-num">14.4</td>
+  <td class="td-num edge-pos">+2.4</td>
+  <td class="td-num td-muted">12.8</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Grayson Allen</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">24.9</td>
+  <td class="td-num edge-pos">+2.4</td>
+  <td class="td-num td-muted">26.9</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Ajay Mitchell</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">16.9</td>
+  <td class="td-num edge-pos">+2.4</td>
+  <td class="td-num td-muted">16.0</td>
+  <td class="td-num">65%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Isaiah Hartenstein</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">8.0</td>
+  <td class="td-num">5.7</td>
+  <td class="td-num edge-neg">-2.3</td>
+  <td class="td-num td-muted">7.3</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">CJ McCollum</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">21.0</td>
+  <td class="td-num">23.3</td>
+  <td class="td-num edge-pos">+2.3</td>
+  <td class="td-num td-muted">22.1</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Cason Wallace</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">7.5</td>
+  <td class="td-num">9.8</td>
+  <td class="td-num edge-pos">+2.3</td>
+  <td class="td-num td-muted">12.2</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">James Harden</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">28.0</td>
+  <td class="td-num">25.7</td>
+  <td class="td-num edge-neg">-2.3</td>
+  <td class="td-num td-muted">25.2</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Cody Williams</td>
+  <td class="td-team">UTA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">15.2</td>
+  <td class="td-num edge-neg">-2.3</td>
+  <td class="td-num td-muted">9.1</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Chet Holmgren</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">8.0</td>
+  <td class="td-num">10.3</td>
+  <td class="td-num edge-pos">+2.3</td>
+  <td class="td-num td-muted">10.6</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Max Strus</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">12.5</td>
+  <td class="td-num">14.8</td>
+  <td class="td-num edge-pos">+2.3</td>
+  <td class="td-num td-muted">13.5</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Jalen Johnson</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">20.2</td>
+  <td class="td-num edge-neg">-2.3</td>
+  <td class="td-num td-muted">21.3</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Ryan Rollins</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">25.5</td>
+  <td class="td-num">27.7</td>
+  <td class="td-num edge-pos">+2.2</td>
+  <td class="td-num td-muted">25.6</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Kris Dunn</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">11.3</td>
+  <td class="td-num edge-neg">-2.2</td>
+  <td class="td-num td-muted">11.5</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Klay Thompson</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">12.7</td>
+  <td class="td-num edge-pos">+2.2</td>
+  <td class="td-num td-muted">13.0</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ryan Nembhard</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">11.0</td>
+  <td class="td-num">8.8</td>
+  <td class="td-num edge-neg">-2.2</td>
+  <td class="td-num td-muted">7.2</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Khris Middleton</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">8.5</td>
+  <td class="td-num">10.7</td>
+  <td class="td-num edge-pos">+2.2</td>
+  <td class="td-num td-muted">11.5</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Sam Merrill</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">14.0</td>
+  <td class="td-num">11.8</td>
+  <td class="td-num edge-neg">-2.2</td>
+  <td class="td-num td-muted">12.2</td>
+  <td class="td-num">64%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Austin Reaves</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">21.6</td>
+  <td class="td-num edge-pos">+2.1</td>
+  <td class="td-num td-muted">21.2</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Keldon Johnson</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">11.5</td>
+  <td class="td-num">9.4</td>
+  <td class="td-num edge-neg">-2.1</td>
+  <td class="td-num td-muted">9.4</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">De'Anthony Melton</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">20.6</td>
+  <td class="td-num edge-pos">+2.1</td>
+  <td class="td-num td-muted">19.5</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Oso Ighodaro</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">AST</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">4.5</td>
+  <td class="td-num">2.4</td>
+  <td class="td-num edge-neg">-2.1</td>
+  <td class="td-num td-muted">3.0</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">De'Aaron Fox</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">23.6</td>
+  <td class="td-num edge-pos">+2.1</td>
+  <td class="td-num td-muted">22.1</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Sam Merrill</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">11.4</td>
+  <td class="td-num edge-neg">-2.1</td>
+  <td class="td-num td-muted">12.2</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Herbert Jones</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">11.5</td>
+  <td class="td-num">13.6</td>
+  <td class="td-num edge-pos">+2.1</td>
+  <td class="td-num td-muted">11.9</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Kawhi Leonard</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">29.0</td>
+  <td class="td-num">31.1</td>
+  <td class="td-num edge-pos">+2.1</td>
+  <td class="td-num td-muted">30.3</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">VJ Edgecombe</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">AST</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">5.25</td>
+  <td class="td-num">3.2</td>
+  <td class="td-num edge-neg">-2.0</td>
+  <td class="td-num td-muted">2.8</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Brandon Miller</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">26.5</td>
+  <td class="td-num">24.5</td>
+  <td class="td-num edge-neg">-2.0</td>
+  <td class="td-num td-muted">25.0</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">De'Anthony Melton</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">15.5</td>
+  <td class="td-num">17.5</td>
+  <td class="td-num edge-pos">+2.0</td>
+  <td class="td-num td-muted">16.7</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Alex Sarr</td>
+  <td class="td-team">WAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">20.5</td>
+  <td class="td-num edge-pos">+2.0</td>
+  <td class="td-num td-muted">25.1</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Austin Reaves</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">24.0</td>
+  <td class="td-num">26.0</td>
+  <td class="td-num edge-pos">+2.0</td>
+  <td class="td-num td-muted">25.4</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Dominick Barlow</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">11.5</td>
+  <td class="td-num">9.5</td>
+  <td class="td-num edge-neg">-2.0</td>
+  <td class="td-num td-muted">7.4</td>
+  <td class="td-num">63%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Saddiq Bey</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">23.5</td>
+  <td class="td-num">25.4</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">24.5</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Justin Edwards</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">4.5</td>
+  <td class="td-num">2.6</td>
+  <td class="td-num edge-neg">-1.9</td>
+  <td class="td-num td-muted">2.1</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Dyson Daniels</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">12.4</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">10.8</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Deandre Ayton</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">10.0</td>
+  <td class="td-num">11.9</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">10.4</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Davion Mitchell</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">8.6</td>
+  <td class="td-num edge-neg">-1.9</td>
+  <td class="td-num td-muted">8.4</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Jay Huff</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.0</td>
+  <td class="td-num">14.9</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">15.8</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Austin Reaves</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">29.5</td>
+  <td class="td-num">31.4</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">30.5</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Onyeka Okongwu</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">25.5</td>
+  <td class="td-num">27.4</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">25.9</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Norman Powell</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">24.0</td>
+  <td class="td-num">22.1</td>
+  <td class="td-num edge-neg">-1.9</td>
+  <td class="td-num td-muted">20.9</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">P.J. Washington</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">14.6</td>
+  <td class="td-num edge-neg">-1.9</td>
+  <td class="td-num td-muted">15.1</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Brook Lopez</td>
+  <td class="td-team">LAC</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">12.5</td>
+  <td class="td-num">10.6</td>
+  <td class="td-num edge-neg">-1.9</td>
+  <td class="td-num td-muted">12.5</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Rui Hachimura</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">7.5</td>
+  <td class="td-num">9.4</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">9.7</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">P.J. Washington</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">12.6</td>
+  <td class="td-num edge-neg">-1.9</td>
+  <td class="td-num td-muted">13.2</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Brandon Miller</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">29.5</td>
+  <td class="td-num">31.4</td>
+  <td class="td-num edge-pos">+1.9</td>
+  <td class="td-num td-muted">31.8</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Ryan Nembhard</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">AST</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">6.75</td>
+  <td class="td-num">4.9</td>
+  <td class="td-num edge-neg">-1.8</td>
+  <td class="td-num td-muted">4.2</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ryan Nembhard</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">12.5</td>
+  <td class="td-num">10.7</td>
+  <td class="td-num edge-neg">-1.8</td>
+  <td class="td-num td-muted">9.2</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jalen Green</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">22.0</td>
+  <td class="td-num">20.2</td>
+  <td class="td-num edge-neg">-1.8</td>
+  <td class="td-num td-muted">21.1</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Onyeka Okongwu</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">24.3</td>
+  <td class="td-num edge-pos">+1.8</td>
+  <td class="td-num td-muted">22.7</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Ryan Kalkbrenner</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">11.7</td>
+  <td class="td-num edge-neg">-1.8</td>
+  <td class="td-num td-muted">13.2</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">CJ McCollum</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">19.3</td>
+  <td class="td-num edge-pos">+1.8</td>
+  <td class="td-num td-muted">18.0</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Donovan Mitchell</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">26.3</td>
+  <td class="td-num edge-pos">+1.8</td>
+  <td class="td-num td-muted">25.0</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Dominick Barlow</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">16.5</td>
+  <td class="td-num">14.7</td>
+  <td class="td-num edge-neg">-1.8</td>
+  <td class="td-num td-muted">11.1</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Taylor Hendricks</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">18.5</td>
+  <td class="td-num">16.7</td>
+  <td class="td-num edge-neg">-1.8</td>
+  <td class="td-num td-muted">18.2</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Herbert Jones</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">8.5</td>
+  <td class="td-num">10.3</td>
+  <td class="td-num edge-pos">+1.8</td>
+  <td class="td-num td-muted">8.8</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Brandon Miller</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">29.5</td>
+  <td class="td-num">27.7</td>
+  <td class="td-num edge-neg">-1.8</td>
+  <td class="td-num td-muted">28.3</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Derik Queen</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">16.3</td>
+  <td class="td-num edge-pos">+1.8</td>
+  <td class="td-num td-muted">15.5</td>
+  <td class="td-num">62%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Victor Wembanyama</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">32.0</td>
+  <td class="td-num">30.3</td>
+  <td class="td-num edge-neg">-1.7</td>
+  <td class="td-num td-muted">27.9</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Gui Santos</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">25.5</td>
+  <td class="td-num">27.2</td>
+  <td class="td-num edge-pos">+1.7</td>
+  <td class="td-num td-muted">26.8</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Amen Thompson</td>
+  <td class="td-team">HOU</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">25.5</td>
+  <td class="td-num">27.2</td>
+  <td class="td-num edge-pos">+1.7</td>
+  <td class="td-num td-muted">27.9</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ryan Nembhard</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">7.5</td>
+  <td class="td-num">5.8</td>
+  <td class="td-num edge-neg">-1.7</td>
+  <td class="td-num td-muted">5.0</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Khris Middleton</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">16.2</td>
+  <td class="td-num edge-pos">+1.7</td>
+  <td class="td-num td-muted">17.1</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">De'Anthony Melton</td>
+  <td class="td-team">GSW</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">19.5</td>
+  <td class="td-num">21.2</td>
+  <td class="td-num edge-pos">+1.7</td>
+  <td class="td-num td-muted">20.4</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jarace Walker</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">22.8</td>
+  <td class="td-num edge-neg">-1.7</td>
+  <td class="td-num td-muted">24.4</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Ousmane Dieng</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">10.5</td>
+  <td class="td-num">8.8</td>
+  <td class="td-num edge-neg">-1.7</td>
+  <td class="td-num td-muted">7.5</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Onyeka Okongwu</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">19.2</td>
+  <td class="td-num edge-pos">+1.7</td>
+  <td class="td-num td-muted">17.8</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Miles Bridges</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">15.5</td>
+  <td class="td-num">13.8</td>
+  <td class="td-num edge-neg">-1.7</td>
+  <td class="td-num td-muted">12.8</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Collin Gillespie</td>
+  <td class="td-team">PHX</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">5.5</td>
+  <td class="td-num">3.8</td>
+  <td class="td-num edge-neg">-1.7</td>
+  <td class="td-num td-muted">4.6</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Paolo Banchero</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">38.5</td>
+  <td class="td-num">40.2</td>
+  <td class="td-num edge-pos">+1.7</td>
+  <td class="td-num td-muted">40.6</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Brandon Miller</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">5.25</td>
+  <td class="td-num">6.9</td>
+  <td class="td-num edge-pos">+1.7</td>
+  <td class="td-num td-muted">6.8</td>
+  <td class="td-num">61%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Saddiq Bey</td>
+  <td class="td-team">NOP</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">18.0</td>
+  <td class="td-num">19.6</td>
+  <td class="td-num edge-pos">+1.6</td>
+  <td class="td-num td-muted">19.2</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Ace Bailey</td>
+  <td class="td-team">UTA</td>
+  <td class="td-prop"><span class="prop-badge">AST</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">3.5</td>
+  <td class="td-num">1.9</td>
+  <td class="td-num edge-neg">-1.6</td>
+  <td class="td-num td-muted">1.7</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Sam Merrill</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">15.5</td>
+  <td class="td-num">13.9</td>
+  <td class="td-num edge-neg">-1.6</td>
+  <td class="td-num td-muted">14.6</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Devin Vassell</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">19.1</td>
+  <td class="td-num edge-pos">+1.6</td>
+  <td class="td-num td-muted">18.4</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">CJ McCollum</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">21.5</td>
+  <td class="td-num">23.1</td>
+  <td class="td-num edge-pos">+1.6</td>
+  <td class="td-num td-muted">21.8</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Bobby Portis</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">23.5</td>
+  <td class="td-num">21.9</td>
+  <td class="td-num edge-neg">-1.6</td>
+  <td class="td-num td-muted">19.5</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Olivier-Maxence Prosper</td>
+  <td class="td-team">MEM</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">6.0</td>
+  <td class="td-num">4.4</td>
+  <td class="td-num edge-neg">-1.6</td>
+  <td class="td-num td-muted">4.6</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Kyle Kuzma</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">13.5</td>
+  <td class="td-num">15.1</td>
+  <td class="td-num edge-pos">+1.6</td>
+  <td class="td-num td-muted">17.3</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Dylan Harper</td>
+  <td class="td-team">SAS</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">5.0</td>
+  <td class="td-num">3.4</td>
+  <td class="td-num edge-neg">-1.6</td>
+  <td class="td-num td-muted">3.0</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Coby White</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">15.9</td>
+  <td class="td-num edge-neg">-1.6</td>
+  <td class="td-num td-muted">16.8</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Marcus Smart</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">12.0</td>
+  <td class="td-num">13.6</td>
+  <td class="td-num edge-pos">+1.6</td>
+  <td class="td-num td-muted">12.4</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Jonathan Kuminga</td>
+  <td class="td-team">ATL</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">5.25</td>
+  <td class="td-num">6.8</td>
+  <td class="td-num edge-pos">+1.6</td>
+  <td class="td-num td-muted">6.2</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Tyler Herro</td>
+  <td class="td-team">MIA</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">5.5</td>
+  <td class="td-num">4.0</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">4.1</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Jalen Suggs</td>
+  <td class="td-team">ORL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">24.5</td>
+  <td class="td-num">23.0</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">18.8</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Justin Edwards</td>
+  <td class="td-team">PHI</td>
+  <td class="td-prop"><span class="prop-badge">AST</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">3.5</td>
+  <td class="td-num">2.0</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">2.0</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Donovan Mitchell</td>
+  <td class="td-team">CLE</td>
+  <td class="td-prop"><span class="prop-badge">TRB</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">5.5</td>
+  <td class="td-num">4.0</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">3.9</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Jay Huff</td>
+  <td class="td-team">IND</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">9.5</td>
+  <td class="td-num">11.0</td>
+  <td class="td-num edge-pos">+1.5</td>
+  <td class="td-num td-muted">11.5</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">LaMelo Ball</td>
+  <td class="td-team">CHA</td>
+  <td class="td-prop"><span class="prop-badge">PR</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">24.0</td>
+  <td class="td-num">25.5</td>
+  <td class="td-num edge-pos">+1.5</td>
+  <td class="td-num td-muted">25.8</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Luka Dončić</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">AST</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">9.0</td>
+  <td class="td-num">7.5</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">8.1</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">LeBron James</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">33.0</td>
+  <td class="td-num">31.5</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">30.5</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="UNDER">
+  <td class="td-player">Cooper Flagg</td>
+  <td class="td-team">DAL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">22.5</td>
+  <td class="td-num">21.0</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">20.3</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="OVER">
+  <td class="td-player">Cason Wallace</td>
+  <td class="td-team">OKC</td>
+  <td class="td-prop"><span class="prop-badge">PRA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">14.5</td>
+  <td class="td-num">16.0</td>
+  <td class="td-num edge-pos">+1.5</td>
+  <td class="td-num td-muted">20.3</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-even" data-dir="OVER">
+  <td class="td-player">Austin Reaves</td>
+  <td class="td-team">LAL</td>
+  <td class="td-prop"><span class="prop-badge">PA</span></td>
+  <td><span class="dir-badge dir-over">OVER</span></td>
+  <td class="td-num">25.5</td>
+  <td class="td-num">27.0</td>
+  <td class="td-num edge-pos">+1.5</td>
+  <td class="td-num td-muted">26.3</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+<tr class="row-odd" data-dir="UNDER">
+  <td class="td-player">Bobby Portis</td>
+  <td class="td-team">MIL</td>
+  <td class="td-prop"><span class="prop-badge">PTS</span></td>
+  <td><span class="dir-badge dir-under">UNDER</span></td>
+  <td class="td-num">17.5</td>
+  <td class="td-num">16.0</td>
+  <td class="td-num edge-neg">-1.5</td>
+  <td class="td-num td-muted">15.1</td>
+  <td class="td-num">60%</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+  <td class="td-num td-muted">-</td>
+</tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-text">
+      <strong>NBA PROP MODEL</strong> &nbsp;&mdash;&nbsp;
+      March 21, 2026 &nbsp;&mdash;&nbsp;
+      XGBoost + LightGBM &nbsp;|&nbsp; 239 features &nbsp;|&nbsp; Time-series CV
+    </div>
+    <div class="footer-text">
+      For informational use only. Not financial advice.
+    </div>
+  </footer>
+
+</div><!-- /wrapper -->
+
+<script>
+(function() {
+  let sortCol = -1, sortAsc = true;
+
+  window.sortTable = function(col, th) {
+    const tbody = document.getElementById('tableBody');
+    const rows  = Array.from(tbody.querySelectorAll('tr'));
+    if (sortCol === col) { sortAsc = !sortAsc; }
+    else { sortAsc = true; sortCol = col; }
+
+    document.querySelectorAll('thead th').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+    th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+
+    rows.sort((a, b) => {
+      let av = a.cells[col].innerText.replace(/[%+]/g,'').trim();
+      let bv = b.cells[col].innerText.replace(/[%+]/g,'').trim();
+      const an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) return sortAsc ? an - bn : bn - an;
+      return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+    applyFilters();
+  };
+
+  window.applyFilters = function() {
+    const dir    = document.getElementById('dirFilter').value;
+    const prop   = document.getElementById('propFilter').value;
+    const search = document.getElementById('searchBox').value.toLowerCase();
+    let vis = 0;
+    document.querySelectorAll('#tableBody tr').forEach(row => {
+      const d      = row.dataset.dir;
+      const pCell  = row.cells[2].innerText.trim();
+      const player = row.cells[0].innerText.toLowerCase();
+      const show   = (dir   === '' || d === dir)
+                  && (prop  === '' || pCell === prop)
+                  && (search === '' || player.includes(search));
+      row.style.display = show ? '' : 'none';
+      if (show) vis++;
+    });
+    document.getElementById('visCount').innerText = vis;
+  };
+})();
+</script>
+</body>
+</html>
