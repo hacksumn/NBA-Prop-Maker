@@ -76,7 +76,7 @@ TEAM_LUCK_OUT   = DATA_DIR / "team_luck_scores.csv"
 PLAYER_LUCK_OUT = DATA_DIR / "player_luck_scores.csv"
 LUCK_ADJ_OUT    = DATA_DIR / "luck_adjusted_proj.csv"
 
-SEASON    = "2024-25"
+SEASON    = "2025-26"
 API_DELAY = 0.65
 
 # League-average FG% by shot zone (2024-25 season averages)
@@ -428,6 +428,8 @@ def build_player_luck_scores(season: str = SEASON, min_gp: int = MIN_GP) -> pd.D
 
     rows = []
     for _, row in merged.iterrows():
+        if row.get("GP", 0) <= 0:
+            continue
         # --- Luck 1: 3PT% ---
         fg3a_season = row.get("FG3A", 0) * row["GP"]
         if fg3a_season >= 10:

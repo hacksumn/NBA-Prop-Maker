@@ -27,6 +27,9 @@ SEASONS = ["2023-24", "2024-25", "2025-26"]
 
 # nba_api column name -> our target column name
 COLUMN_MAP = {
+    "PLAYER_ID":      "PLAYER_ID",
+    "TEAM_ID":        "TEAM_ID",
+    "GAME_ID":        "GAME_ID",
     "PLAYER_NAME":    "player",
     "TEAM_ABBREVIATION": "team",
     "GAME_DATE":      "game_date",
@@ -48,14 +51,16 @@ COLUMN_MAP = {
     "TOV":            "tov",
     "PTS":            "pts",
     "PLUS_MINUS":     "plus_minus",
+    "PF":             "pf",
 }
 
 FINAL_COLUMNS = [
+    "PLAYER_ID", "TEAM_ID", "GAME_ID",
     "player", "team", "game_date", "matchup", "home_away",
     "pts", "trb", "ast", "stl", "blk", "tov", "mp",
     "fga", "fg", "fg_pct", "fta", "ft",
     "3pa", "3p", "3p_pct",
-    "result", "plus_minus", "season",
+    "result", "plus_minus", "pf", "season",
 ]
 
 

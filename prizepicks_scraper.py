@@ -345,15 +345,52 @@ def save_lines(output_path: str = "data/historical_lines.csv",
         logger.warning("No lines fetched; historical_lines.csv not updated.")
         return os.path.abspath(output_path)
 
+    fresh = fresh.copy()
+    fresh["num_books"] = pd.to_numeric(fresh.get("num_books", 1), errors="coerce").fillna(1).clip(lower=1)
+    fresh["source"] = "prizepicks_scraper"
+    fresh["snapshot_ts"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+
     if os.path.exists(output_path):
-        existing = pd.read_csv(output_path, dtype=str)
-        existing = existing[existing["game_date"] != today_str]
-        combined = pd.concat([existing, fresh.astype(str)], ignore_index=True)
+        existing = pd.read_csv(output_path, low_memory=False)
+        if "player_norm" not in existing.columns and "player" in existing.columns:
+            existing["player_norm"] = existing["player"].apply(_normalize_name)
+        if "num_books" not in existing.columns:
+            existing["num_books"] = 1
+        if "source" not in existing.columns:
+            existing["source"] = "legacy"
+        if "snapshot_ts" not in existing.columns:
+            existing["snapshot_ts"] = ""
+        combined = pd.concat([existing, fresh], ignore_index=True)
     else:
         combined = fresh
 
+    combined["game_date"] = pd.to_datetime(combined["game_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    combined["line"] = pd.to_numeric(combined["line"], errors="coerce")
+    combined["num_books"] = pd.to_numeric(combined["num_books"], errors="coerce").fillna(1).clip(lower=1)
+    combined["source"] = combined["source"].fillna("unknown").astype(str)
+    combined["snapshot_ts"] = combined["snapshot_ts"].replace("", pd.NA).fillna(pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")).astype(str)
+    combined = combined.dropna(subset=["game_date", "player", "player_norm", "prop", "line"])
+    combined["_snapshot_sort"] = pd.to_datetime(combined["snapshot_ts"], errors="coerce")
+    combined = combined.sort_values(
+        ["game_date", "player_norm", "prop", "num_books", "_snapshot_sort", "line"],
+        ascending=[True, True, True, True, True, True],
+    )
+    combined = combined.drop_duplicates(subset=["game_date", "player_norm", "prop"], keep="last")
+    combined = combined.drop(columns=["_snapshot_sort"], errors="ignore")
     combined.to_csv(output_path, index=False)
     logger.info(f"Prop lines saved -> {output_path}  ({len(combined):,} total rows)")
+
+    data_dir = Path(output_path).resolve().parent
+    morning_path = data_dir / f"lines_morning_{today_str}.csv"
+    if not morning_path.exists():
+        fresh[["player", "prop", "line", "player_norm"]].to_csv(morning_path, index=False)
+        logger.info(f"Morning snapshot saved -> {morning_path.name}")
+
+    archive_dir = data_dir / "line_archive" / today_str
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    stamp = pd.Timestamp.now().strftime("%Y-%m-%d_%H%M%S")
+    fresh.to_csv(archive_dir / f"lines_{today_str}.csv", index=False)
+    fresh.to_csv(archive_dir / f"lines_{stamp}.csv", index=False)
     return os.path.abspath(output_path)
 
 

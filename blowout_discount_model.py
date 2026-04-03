@@ -83,7 +83,7 @@ GAME_INDEX_OUT    = DATA_DIR / "game_blowout_index.csv"
 PLAYER_LOG_OUT    = DATA_DIR / "player_blowout_log.csv"
 CLEAN_BASELINE_OUT = DATA_DIR / "player_clean_baselines.csv"
 
-SEASON    = "2024-25"
+SEASON    = "2025-26"
 API_DELAY = 0.65
 
 # Blowout tier thresholds (absolute final margin)
@@ -191,10 +191,10 @@ def build_game_blowout_index(season: str = SEASON) -> pd.DataFrame:
 
     # Summary
     tier_counts = df["blowout_tier"].value_counts()
-    log.info(f"  FULL (≤{TIER_FULL_MAX}):    {tier_counts.get('FULL', 0)} games")
-    log.info(f"  PARTIAL (≤{TIER_PARTIAL_MAX}): {tier_counts.get('PARTIAL', 0)} games")
-    log.info(f"  HEAVY (≤{TIER_HEAVY_MAX}):   {tier_counts.get('HEAVY', 0)} games")
-    log.info(f"  EXCLUDE (≥35): {tier_counts.get('EXCLUDE', 0)} games")
+    log.info(f"  FULL (<={TIER_FULL_MAX}):    {tier_counts.get('FULL', 0)} games")
+    log.info(f"  PARTIAL (<={TIER_PARTIAL_MAX}): {tier_counts.get('PARTIAL', 0)} games")
+    log.info(f"  HEAVY (<={TIER_HEAVY_MAX}):   {tier_counts.get('HEAVY', 0)} games")
+    log.info(f"  EXCLUDE (>=35): {tier_counts.get('EXCLUDE', 0)} games")
 
     return df.reset_index(drop=True)
 

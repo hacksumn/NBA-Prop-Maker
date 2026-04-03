@@ -76,7 +76,7 @@ PLAYER_PROFILES_OUT  = DATA_DIR / "player_profiles.csv"
 TEAM_ONOFF_OUT       = DATA_DIR / "team_onoff.csv"
 INJURY_PROJ_OUT      = DATA_DIR / "injury_projections.csv"
 
-SEASON = "2024-25"
+SEASON = "2025-26"
 API_DELAY = 0.65  # seconds between API calls
 
 # Dean Oliver Skill Curve: efficiency penalty per 1% USG above baseline
@@ -541,26 +541,23 @@ def detect_recent_absences(
 
     log.info(f"Scanning last {last_n_games} games for {team_abbr} absences...")
 
-    # Fetch recent team game log (last_n_games not supported — filter manually)
+    # Use locally cached nba_data.csv — avoids broken team_id_nullable API param
+    local_data = BASE_DIR / "data" / "nba_data.csv"
     try:
-        lg = leaguegamelog.LeagueGameLog(
-            season=season,
-            player_or_team_abbreviation="P",
-            season_type_all_star="Regular Season",
-            team_id_nullable=str(
-                player_profiles.loc[
-                    player_profiles["team_abbr"] == team_abbr, "team_id"
-                ].iloc[0]
-            )
-        )
-        gl = lg.get_data_frames()[0]
-        # Keep only the most recent last_n_games unique game dates
-        if "GAME_DATE" in gl.columns:
-            recent_dates = sorted(gl["GAME_DATE"].unique())[-last_n_games:]
-            gl = gl[gl["GAME_DATE"].isin(recent_dates)]
-        time.sleep(API_DELAY)
+        if not local_data.exists():
+            log.warning(f"nba_data.csv not found at {local_data} — skipping absence detection")
+            return []
+        gl_full = pd.read_csv(local_data, usecols=["PLAYER_ID", "game_date", "GAME_ID", "team"])
+        gl_full = gl_full[gl_full["team"] == team_abbr].copy()
+        if gl_full.empty:
+            log.warning(f"No game log rows for {team_abbr} in nba_data.csv")
+            return []
+        gl_full["game_date"] = pd.to_datetime(gl_full["game_date"])
+        recent_dates = sorted(gl_full["game_date"].unique())[-last_n_games:]
+        gl = gl_full[gl_full["game_date"].isin(recent_dates)].copy()
+        gl = gl.rename(columns={"PLAYER_ID": "PLAYER_ID", "GAME_ID": "GAME_ID"})
     except Exception as e:
-        log.warning(f"Could not fetch game log: {e}")
+        log.warning(f"Could not read local game log: {e}")
         return []
 
     # Players who appeared in at least one game
