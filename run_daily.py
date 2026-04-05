@@ -18,22 +18,26 @@ Pipeline Execution Order:
     STEP 8   — Merge & Output         (→ data/player_projections_today.csv)
 
 Usage:
-    python3 run_daily.py                    # full daily run (recommended)
+    python3 run_daily.py                    # full daily run incl. grading, lines, layers, picks
     python3 run_daily.py --full-refresh     # re-pull all seasons from scratch
     python3 run_daily.py --lines-only       # only update PrizePicks lines
     python3 run_daily.py --logs-only        # only update NBA game logs
     python3 run_daily.py --skip-layers      # skip layers 1-5, only fetch data
     python3 run_daily.py --layers-only      # skip data fetch, only run layers
+    python3 run_daily.py --skip-picks       # run pipeline but do not generate today's picks
+    python3 run_daily.py --skip-weekly-retrain  # skip Sunday model maintenance
     python3 run_daily.py --seasons 2024-25  # custom season list
 """
 
 import argparse
 import logging
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 # Force UTF-8 output on Windows so Unicode chars in log messages don't crash
 if hasattr(sys.stdout, "reconfigure"):
@@ -151,6 +155,42 @@ def _archive_projection_snapshot(df, archive_dir: Path, stamp: str):
     archive_path = archive_dir / f"player_projections_{stamp}.csv"
     _atomic_csv(df, archive_path)
     return archive_path
+
+
+def _run_python_step(step_no, title: str, script_args, errors, error_label: str,
+                     success_msg: str, skip_msg: Optional[str] = None) -> bool:
+    """Run a Python subprocess, stream output into the daily log, and track failures."""
+    _step_header(step_no, title)
+    cmd = [sys.executable, *script_args]
+    logger.info(f"  Running: {' '.join(str(part) for part in cmd)}")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(SCRIPT_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            logger.info(f"  {line.rstrip()}")
+        rc = proc.wait()
+    except Exception as exc:
+        _fail(f"{error_label} failed to start: {exc}")
+        logger.debug(exc, exc_info=True)
+        errors.append(f"{error_label}: {exc}")
+        return False
+
+    if rc == 0:
+        _ok(success_msg)
+        return True
+
+    msg = skip_msg or f"{error_label} exited with code {rc}"
+    _fail(msg)
+    errors.append(f"{error_label}: exit code {rc}")
+    return False
 
 
 # ── Step 1: NBA Game Logs ──────────────────────────────────────────────────────
@@ -700,7 +740,10 @@ def step5_ppp_engine(errors):
 def step6_usage_injury(errors):
     _step_header(6, "Layer 3 — Usage & Injury Model")
     try:
-        from usage_injury_model import build_player_profiles, detect_recent_absences
+        from usage_injury_model import (
+            build_player_profiles,
+            detect_recent_absences,
+        )
         import pandas as pd
 
         # Rebuild profiles only if stale (>12 hours old)
@@ -979,6 +1022,56 @@ def step8_merge_projections(errors):
         errors.append(f"Step 8 Merge: {exc}")
 
 
+def step8_5_weekly_maintenance(args, errors):
+    if args.skip_weekly_retrain:
+        logger.info("Skipping weekly maintenance (--skip-weekly-retrain)")
+        return
+    if datetime.now().weekday() != 6:
+        logger.info("Skipping weekly maintenance (runs automatically on Sunday only)")
+        return
+
+    _section("WEEKLY MODEL MAINTENANCE")
+    _run_python_step(
+        "8.5a",
+        "Weekly Feature Pipeline Rebuild",
+        ["feature_pipeline.py"],
+        errors,
+        "Weekly feature rebuild",
+        "Weekly feature rebuild complete",
+    )
+    _run_python_step(
+        "8.5b",
+        "Weekly Advanced Model Retrain",
+        ["train_advanced_models.py"],
+        errors,
+        "Weekly advanced retrain",
+        "Weekly advanced retrain complete",
+    )
+    _run_python_step(
+        "8.5c",
+        "Weekly Confidence Calibration",
+        ["calibrate_confidence.py"],
+        errors,
+        "Weekly confidence calibration",
+        "Weekly confidence calibration complete",
+    )
+
+
+def step9_generate_picks(args, errors):
+    if args.skip_picks:
+        logger.info("Skipping live pick generation (--skip-picks)")
+        return
+
+    _run_python_step(
+        9,
+        "Generate Today's Picks  (nba_props.py predict)",
+        ["nba_props.py", "predict"],
+        errors,
+        "Live pick generation",
+        "Today's pick generation complete",
+    )
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -999,6 +1092,10 @@ def main():
                         help="Skip all 5 model layers; only fetch data.")
     parser.add_argument("--layers-only",   action="store_true",
                         help="Skip data fetch; only run the 5 model layers.")
+    parser.add_argument("--skip-picks",    action="store_true",
+                        help="Skip live pick generation at the end of the daily run.")
+    parser.add_argument("--skip-weekly-retrain", action="store_true",
+                        help="Skip automatic Sunday feature/model/calibration refresh.")
     parser.add_argument("--seasons",       nargs="+", default=None, metavar="SEASON",
                         help="Override default seasons, e.g. --seasons 2023-24 2024-25")
     args = parser.parse_args()
@@ -1028,6 +1125,10 @@ def main():
         step6_usage_injury(errors)
         step7_luck_model(errors)
         step8_merge_projections(errors)
+        step8_5_weekly_maintenance(args, errors)
+
+    if not args.lines_only and not args.logs_only:
+        step9_generate_picks(args, errors)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     elapsed = time.time() - start_time

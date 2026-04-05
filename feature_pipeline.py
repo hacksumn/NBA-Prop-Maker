@@ -383,12 +383,19 @@ class FeaturePipeline:
                 df[f'{stat}_pct_diff'] = df[f'{stat}_pct_diff'].fillna(0)
         
         # Team scoring trends
+        team_key = None
         if 'TEAM_ABBREVIATION' in df.columns:
-            team_pts = df.groupby(['TEAM_ABBREVIATION', 'game_date'])['pts'].sum().reset_index()
-            team_pts.columns = ['TEAM_ABBREVIATION', 'game_date', 'team_total_pts']
-            team_pts = team_pts.sort_values(['TEAM_ABBREVIATION', 'game_date'])
+            team_key = 'TEAM_ABBREVIATION'
+        elif 'team' in df.columns:
+            team_key = 'team'
+
+        if team_key is not None:
+            df = df.drop(columns=['team_pts_l5', 'team_pts_l10', 'team_scoring_trend'], errors='ignore')
+            team_pts = df.groupby([team_key, 'game_date'])['pts'].sum().reset_index()
+            team_pts.columns = [team_key, 'game_date', 'team_total_pts']
+            team_pts = team_pts.sort_values([team_key, 'game_date'])
             
-            team_grouped = team_pts.groupby('TEAM_ABBREVIATION')
+            team_grouped = team_pts.groupby(team_key)
             team_pts['team_pts_l5'] = team_grouped['team_total_pts'].transform(
                 lambda x: x.shift(1).rolling(5, min_periods=1).mean()
             )
@@ -398,12 +405,16 @@ class FeaturePipeline:
             team_pts['team_scoring_trend'] = team_pts['team_pts_l5'] / team_pts['team_pts_l10'].replace(0, np.nan)
             
             df = df.merge(
-                team_pts[['TEAM_ABBREVIATION', 'game_date', 'team_pts_l5', 'team_pts_l10', 'team_scoring_trend']],
-                on=['TEAM_ABBREVIATION', 'game_date'],
+                team_pts[[team_key, 'game_date', 'team_pts_l5', 'team_pts_l10', 'team_scoring_trend']],
+                on=[team_key, 'game_date'],
                 how='left'
             )
+        
+        if 'team_scoring_trend' not in df.columns:
+            df['team_scoring_trend'] = 1.0
+        else:
             df['team_scoring_trend'] = df['team_scoring_trend'].fillna(1.0)
-            df['high_scoring_game'] = (df['team_scoring_trend'] > 1.05).astype(int)
+        df['high_scoring_game'] = (df['team_scoring_trend'] > 1.05).astype(int)
         
         # Game environment score
         pace     = df['opp_pace_factor']      if 'opp_pace_factor'      in df.columns else pd.Series(1.0,  index=df.index)

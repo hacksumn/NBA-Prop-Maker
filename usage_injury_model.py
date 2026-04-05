@@ -106,6 +106,72 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Local game-log context
+# ---------------------------------------------------------------------------
+
+def _load_latest_local_team_map() -> pd.DataFrame:
+    """Return each player's latest logged team/date from local nba_data.csv when available."""
+    local_data = BASE_DIR / "data" / "nba_data.csv"
+    if not local_data.exists():
+        return pd.DataFrame(columns=["player_id", "latest_played_team", "latest_game_date"])
+
+    try:
+        gl = pd.read_csv(local_data, usecols=["PLAYER_ID", "team", "game_date"])
+    except Exception as exc:
+        log.warning(f"Could not load local team map from {local_data}: {exc}")
+        return pd.DataFrame(columns=["player_id", "latest_played_team", "latest_game_date"])
+
+    gl = gl.dropna(subset=["PLAYER_ID", "team", "game_date"]).copy()
+    if gl.empty:
+        return pd.DataFrame(columns=["player_id", "latest_played_team", "latest_game_date"])
+
+    gl["game_date"] = pd.to_datetime(gl["game_date"], errors="coerce")
+    gl = gl.dropna(subset=["game_date"])
+    if gl.empty:
+        return pd.DataFrame(columns=["player_id", "latest_played_team", "latest_game_date"])
+
+    gl["PLAYER_ID"] = pd.to_numeric(gl["PLAYER_ID"], errors="coerce")
+    gl = gl.dropna(subset=["PLAYER_ID"])
+    gl["PLAYER_ID"] = gl["PLAYER_ID"].astype(int)
+    latest = (
+        gl.sort_values(["PLAYER_ID", "game_date"])
+        .groupby("PLAYER_ID", as_index=False)
+        .tail(1)
+        .rename(columns={
+            "PLAYER_ID": "player_id",
+            "team": "latest_played_team",
+            "game_date": "latest_game_date",
+        })
+    )
+    return latest[["player_id", "latest_played_team", "latest_game_date"]]
+
+
+def attach_latest_local_team_context(player_profiles: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add latest local game-log team/date without overwriting the official current team.
+
+    The official season profile may reflect a traded player's current roster before
+    they have appeared in a game for that team. Local game logs only show the last
+    team they actually played for, so they should be treated as context, not truth.
+    """
+    if player_profiles is None or len(player_profiles) == 0:
+        return player_profiles
+    if "player_id" not in player_profiles.columns:
+        return player_profiles
+
+    latest = _load_latest_local_team_map()
+    if latest.empty:
+        return player_profiles
+
+    out = player_profiles.copy()
+    out["player_id"] = pd.to_numeric(out["player_id"], errors="coerce")
+    out = out.dropna(subset=["player_id"]).copy()
+    out["player_id"] = out["player_id"].astype(int)
+    out = out.merge(latest, on="player_id", how="left")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Step 1: Build baseline player profiles
 # ---------------------------------------------------------------------------
 
@@ -535,9 +601,9 @@ def detect_recent_absences(
     This is a proxy for injury detection — not a real injury report,
     but a reliable signal for who is likely to miss upcoming games.
     """
-    team_players = player_profiles[
-        player_profiles["team_abbr"] == team_abbr
-    ]["player_id"].tolist()
+    player_profiles = attach_latest_local_team_context(player_profiles)
+    team_roster = player_profiles[player_profiles["team_abbr"] == team_abbr].copy()
+    team_players = team_roster["player_id"].tolist()
 
     log.info(f"Scanning last {last_n_games} games for {team_abbr} absences...")
 
@@ -569,16 +635,27 @@ def detect_recent_absences(
     for pid in team_players:
         gp = games_played.get(pid, 0)
         if gp <= max(1, last_n_games - 3):
-            name = player_profiles.loc[
-                player_profiles["player_id"] == pid, "player_name"
-            ].values
-            if len(name) > 0:
-                likely_out.append({"player_id": pid, "player_name": name[0], "recent_gp": gp})
+            row = team_roster.loc[team_roster["player_id"] == pid].head(1)
+            if not row.empty:
+                row = row.iloc[0]
+                likely_out.append({
+                    "player_id": pid,
+                    "player_name": row["player_name"],
+                    "team_abbr": team_abbr,
+                    "recent_gp": gp,
+                    "latest_played_team": row.get("latest_played_team"),
+                    "latest_game_date": row.get("latest_game_date"),
+                })
 
     if likely_out:
         log.info(f"  Likely absent players for {team_abbr}:")
         for p in likely_out:
-            log.info(f"    {p['player_name']} — {p['recent_gp']}/{last_n_games} recent games")
+            latest_team = p.get("latest_played_team")
+            latest_date = p.get("latest_game_date")
+            transfer_note = ""
+            if pd.notna(latest_team) and latest_team != team_abbr:
+                transfer_note = f" (latest played for {latest_team} on {pd.to_datetime(latest_date).strftime('%Y-%m-%d') if pd.notna(latest_date) else 'unknown date'})"
+            log.info(f"    {p['player_name']} — {p['recent_gp']}/{last_n_games} recent games{transfer_note}")
 
     return likely_out
 

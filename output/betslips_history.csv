@@ -40,3 +40,13 @@ game_date,slip_type,wager,potential_payout,Pick_1_Player,Pick_1_Prop,Pick_1_Dir,
 2026-04-02,2-pick Power Play,20.0,60.0,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,,,,,,,,,WIN,60.0
 2026-04-02,3-pick Power Play,20.0,100.0,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,De'Anthony Melton,PTS,UNDER,13.5,,,,,WIN,100.0
 2026-04-02,4-pick Power Play,20.0,200.0,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,De'Anthony Melton,PTS,UNDER,13.5,Donovan Mitchell,PA,UNDER,32.0,WIN,200.0
+2026-04-03,2-pick Power Play,20.0,60.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,,,,,,,,,LOSS,0.0
+2026-04-03,3-pick Power Play,20.0,100.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,,,,,LOSS,0.0
+2026-04-03,4-pick Power Play,20.0,200.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,Myles Turner,BLK,UNDER,1.5,LOSS,0.0
+2026-04-03,2-pick UNDER-Only,20.0,60.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,,,,,,,,,LOSS,0.0
+2026-04-03,3-pick UNDER-Only,20.0,100.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,,,,,LOSS,0.0
+2026-04-05,2-pick Power Play,20.0,60.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,,,,,,,,,,
+2026-04-05,3-pick Power Play,20.0,100.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,,,,,,
+2026-04-05,4-pick Power Play,20.0,200.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,,
+2026-04-05,2-pick UNDER-Only,20.0,60.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,,,,,,,,,,
+2026-04-05,3-pick UNDER-Only,20.0,100.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,,,,,,

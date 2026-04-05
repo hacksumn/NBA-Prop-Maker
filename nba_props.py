@@ -53,7 +53,9 @@ CONFIG = {
     'confidence_threshold': 0.6,  # Min confidence for picks
     'edge_threshold': 1.5,     # Min edge (points) for picks — legacy fallback
     'edge_z_threshold': 0.5,   # Min edge in units of player std dev (primary filter)
-    
+    'require_meta_for_live_picks': True,   # Only allow picks supported by the abstention layer
+    'allow_structural_micro_props': False, # Disable hardcoded STL/BLK fallback picks by default
+
     # Targets
     'targets': ['pts', 'trb', 'ast', 'pra', 'pr', 'pa'],
 }
@@ -2078,6 +2080,17 @@ def _attach_market_model_scores(pred_df: pd.DataFrame,
                                 meta_models: Dict[str, object],
                                 market_feature_sets: Dict[str, Dict[str, List[str]]]) -> pd.DataFrame:
     """Attach market-edge and abstention scores using the advanced line-aware models."""
+    def _model_feature_names(model) -> Optional[List[str]]:
+        try:
+            if hasattr(model, 'get_booster'):
+                names = model.get_booster().feature_names
+                if names:
+                    return list(names)
+        except Exception:
+            pass
+        names = getattr(model, 'feature_names_in_', None)
+        return list(names) if names is not None else None
+
     if len(pred_df) == 0 or not edge_models:
         return pred_df
 
@@ -2111,7 +2124,7 @@ def _attach_market_model_scores(pred_df: pd.DataFrame,
             continue
 
         market_block = _build_market_feature_block(merged, target, merged[line_col], raw_pred=merged[pred_col])
-        edge_features = market_feature_sets.get('edge', {}).get(target, list(market_block.columns))
+        edge_features = _model_feature_names(edge_model) or market_feature_sets.get('edge', {}).get(target, list(market_block.columns))
         for col in edge_features:
             if col not in market_block.columns:
                 market_block[col] = 0.0
@@ -2130,7 +2143,7 @@ def _attach_market_model_scores(pred_df: pd.DataFrame,
                 raw_edge=raw_edge,
                 market_edge_pred=pd.Series(edge_pred, index=market_block.index),
             )
-            meta_features = market_feature_sets.get('meta', {}).get(target, list(meta_block.columns))
+            meta_features = _model_feature_names(meta_models[target]) or market_feature_sets.get('meta', {}).get(target, list(meta_block.columns))
             for col in meta_features:
                 if col not in meta_block.columns:
                     meta_block[col] = 0.0
@@ -3468,6 +3481,19 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             min_meta_prob -= 0.01
         min_meta_prob = min(0.70, max(0.52, min_meta_prob))
 
+        if meta_auc is not None and meta_auc >= 0.62 and meta_top_hit is not None and meta_top_hit >= 0.54:
+            meta_gate_mode = 'hard'
+            meta_blend_weight = 0.30
+            meta_conf_weight = 0.10
+        elif (meta_auc is not None and meta_auc >= 0.56) or (meta_top_hit is not None and meta_top_hit >= 0.53):
+            meta_gate_mode = 'medium'
+            meta_blend_weight = 0.18
+            meta_conf_weight = 0.07
+        else:
+            meta_gate_mode = 'soft'
+            meta_blend_weight = 0.10
+            meta_conf_weight = 0.04
+
         baseline_allowed = (
             n_real >= 1500 and
             shrunk_acc >= 0.56 and
@@ -3486,7 +3512,19 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             shrunk_acc >= 0.58 and
             clv_corr >= 0.14
         )
-        allowed = baseline_allowed and (strong_allowed or under_only_allowed)
+        # Tracking lane: if the market is clearly only useful on UNDERS,
+        # keep it available even when the broader model/proxy relationship is noisy.
+        # This avoids the all-or-nothing behavior where every prop is disabled.
+        tracking_under_allowed = (
+            n_real >= 1500 and
+            under_n >= 500 and
+            under_hit is not None and under_hit >= 0.61 and
+            (
+                (market_hit is not None and market_hit >= 0.50) or
+                clv_corr >= 0.10
+            )
+        )
+        allowed = (baseline_allowed and (strong_allowed or under_only_allowed)) or tracking_under_allowed
 
         allow_under = (
             allowed and
@@ -3518,11 +3556,18 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             min_edge_over = max(min_edge_over, min_edge + 0.50)
         if not allow_under:
             min_edge_under = max(min_edge_under, min_edge + 0.30)
+        elif tracking_under_allowed and not allow_over:
+            min_prob = min(min_prob, 0.585)
+            min_meta_prob = min(min_meta_prob, 0.56)
+            min_edge_under = min(min_edge_under, max(0.60, rmse * 0.30))
 
         policy[stat] = {
             'allowed': allowed,
             'allow_over': allow_over,
             'allow_under': allow_under,
+            'meta_gate_mode': meta_gate_mode,
+            'meta_blend_weight': round(meta_blend_weight, 3),
+            'meta_conf_weight': round(meta_conf_weight, 3),
             'shrunk_acc': round(shrunk_acc, 4),
             'min_prob': round(min_prob, 4),
             'min_meta_prob': round(min_meta_prob, 4),
@@ -3537,6 +3582,7 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             'strong_hit': round(strong_hit, 4) if strong_hit is not None else None,
             'under_hit': round(under_hit, 4) if under_hit is not None else None,
             'over_hit': round(over_hit, 4) if over_hit is not None else None,
+            'tracking_under_allowed': tracking_under_allowed,
             'market_hit': round(market_hit, 4) if market_hit is not None else None,
             'meta_auc': round(meta_auc, 4) if meta_auc is not None else None,
             'meta_top_hit': round(meta_top_hit, 4) if meta_top_hit is not None else None,
@@ -3906,13 +3952,24 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
 
             meta_prob_raw = row.get(f'{prop}_meta_prob')
             meta_prob = float(meta_prob_raw) if meta_prob_raw is not None and not pd.isna(meta_prob_raw) else None
+            meta_gate_mode = str(quality[prop].get('meta_gate_mode', 'hard')).lower()
+            meta_blend_weight = float(quality[prop].get('meta_blend_weight', 0.35))
+            meta_conf_weight = float(quality[prop].get('meta_conf_weight', 0.10))
+            if CONFIG.get('require_meta_for_live_picks', False) and meta_prob is None and meta_gate_mode == 'hard':
+                continue
             regime_score = row.get(f'{prop}_regime_score')
             regime_score = float(regime_score) if regime_score is not None and not pd.isna(regime_score) else 0.0
             edge_disagreement = row.get(f'{prop}_edge_disagreement')
             edge_disagreement = float(edge_disagreement) if edge_disagreement is not None and not pd.isna(edge_disagreement) else (abs(model_edge - market_edge_pred) if market_edge_pred is not None else 0.0)
             market_prob = 1.0 / (1.0 + math.exp(-abs(market_edge_pred if market_edge_pred is not None else combined_edge) / rmse))
             if meta_prob is not None:
-                dir_prob = dir_prob * 0.50 + meta_prob * 0.35 + market_prob * 0.15
+                market_blend_weight = 0.15 if meta_gate_mode == 'hard' else 0.20
+                model_blend_weight = max(0.0, 1.0 - meta_blend_weight - market_blend_weight)
+                dir_prob = (
+                    dir_prob * model_blend_weight +
+                    meta_prob * meta_blend_weight +
+                    market_prob * market_blend_weight
+                )
             else:
                 dir_prob = dir_prob * 0.75 + market_prob * 0.25
 
@@ -3924,8 +3981,16 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if l5_agrees is False:
                 min_prob += 0.02
             min_meta_prob = float(quality[prop].get('min_meta_prob', 0.55))
-            if meta_prob is not None and meta_prob < min_meta_prob:
-                continue
+            if meta_prob is None:
+                if meta_gate_mode == 'medium':
+                    min_prob += 0.01
+            elif meta_prob < min_meta_prob:
+                if meta_gate_mode == 'hard':
+                    continue
+                if meta_gate_mode == 'medium':
+                    min_prob += 0.015
+                else:
+                    min_prob += 0.01
             if regime_score >= 0.55 and edge_disagreement >= min_edge * 0.75:
                 continue
             if dir_prob < min_prob:
@@ -3956,7 +4021,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 edge_strength * 0.15
             )
             if meta_prob is not None:
-                base_conf += meta_prob * 0.10
+                base_conf += meta_prob * meta_conf_weight
             if market_edge_pred is not None:
                 base_conf += min(0.08, abs(market_edge_pred) / max(1.0, rmse) * 0.08)
             if l10_agrees:
@@ -4002,6 +4067,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 'market_edge':    round(float(market_edge_pred), 2) if market_edge_pred is not None else None,
                 'regime_score':   round(regime_score, 3),
                 'edge_disagreement': round(edge_disagreement, 3),
+                'pick_source':    'market_model',
                 'mp_predicted':   round(float(mp_exp), 1) if mp_exp is not None and not pd.isna(mp_exp) else None,
                 'l10_avg':        round(float(l10_val), 1) if l10_val is not None and not pd.isna(l10_val) else None,
                 'l10_edge':       round(float(l10_edge), 1) if l10_edge is not None else None,
@@ -4019,48 +4085,54 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
     # These are excluded from the model path because the regressor is too noisy.
     # The structural edge is pure: PrizePicks sets STL/BLK lines at 1.5+ for players
     # who average < 1.0 in those categories. No model needed — the line itself is wrong.
-    _structural_meta = [
-        ('stl', 73.0, 'STL'),
-        ('blk', 78.0, 'BLK'),
-    ]
-    for prop_name, hist_wr, prop_upper in _structural_meta:
-        line_col = f'{prop_name}_line'
-        l10_col  = f'{prop_name}_l10'
-        l5_col   = f'{prop_name}_l5'
-        for _, row in pred_df.iterrows():
-            line   = row.get(line_col)
-            l10_val = row.get(l10_col)
-            if line is None or l10_val is None or pd.isna(line) or pd.isna(l10_val):
-                continue
-            if float(line) < 1.5:
-                continue  # line too low — might be a different PrizePicks type
-            # L10 must be below the line to confirm the structural UNDER thesis
-            if float(l10_val) >= float(line):
-                continue
-            l5_val   = row.get(l5_col)
-            edge_val = round(float(l10_val) - float(line), 1)  # negative = UNDER edge
-            picks.append({
-                'player':         row['player'],
-                'team':           row.get('team', ''),
-                'prop':           prop_upper,
-                'direction':      'UNDER',
-                'line':           float(line),
-                'prediction':     round(float(l10_val), 1),  # L10 avg as proxy prediction
-                'edge':           edge_val,
-                'confidence':     hist_wr,
-                'ou_prob':        None,
-                'dir_prob':       hist_wr,
-                'mp_predicted':   None,
-                'l10_avg':        round(float(l10_val), 1),
-                'l10_edge':       edge_val,
-                'l5_avg':         round(float(l5_val), 1) if l5_val is not None and not pd.isna(l5_val) else None,
-                'line_move':      None,
-                'model_wr':       hist_wr,
-                'min_edge_req':   0.5,
-                'injury_adj':     row.get('injury_adj', False),
-                'teammates_out':  row.get('teammates_out', ''),
-                'regression_flag': False,
-            })
+    if CONFIG.get('allow_structural_micro_props', False):
+        _structural_meta = [
+            ('stl', 73.0, 'STL'),
+            ('blk', 78.0, 'BLK'),
+        ]
+        for prop_name, hist_wr, prop_upper in _structural_meta:
+            line_col = f'{prop_name}_line'
+            l10_col  = f'{prop_name}_l10'
+            l5_col   = f'{prop_name}_l5'
+            for _, row in pred_df.iterrows():
+                line   = row.get(line_col)
+                l10_val = row.get(l10_col)
+                if line is None or l10_val is None or pd.isna(line) or pd.isna(l10_val):
+                    continue
+                if float(line) < 1.5:
+                    continue  # line too low — might be a different PrizePicks type
+                # L10 must be below the line to confirm the structural UNDER thesis
+                if float(l10_val) >= float(line):
+                    continue
+                l5_val   = row.get(l5_col)
+                edge_val = round(float(l10_val) - float(line), 1)  # negative = UNDER edge
+                picks.append({
+                    'player':         row['player'],
+                    'team':           row.get('team', ''),
+                    'prop':           prop_upper,
+                    'direction':      'UNDER',
+                    'line':           float(line),
+                    'prediction':     round(float(l10_val), 1),  # L10 avg as proxy prediction
+                    'edge':           edge_val,
+                    'confidence':     hist_wr,
+                    'ou_prob':        None,
+                    'dir_prob':       hist_wr,
+                    'meta_prob':      None,
+                    'market_edge':    None,
+                    'regime_score':   None,
+                    'edge_disagreement': None,
+                    'pick_source':    'structural_micro',
+                    'mp_predicted':   None,
+                    'l10_avg':        round(float(l10_val), 1),
+                    'l10_edge':       edge_val,
+                    'l5_avg':         round(float(l5_val), 1) if l5_val is not None and not pd.isna(l5_val) else None,
+                    'line_move':      None,
+                    'model_wr':       hist_wr,
+                    'min_edge_req':   0.5,
+                    'injury_adj':     row.get('injury_adj', False),
+                    'teammates_out':  row.get('teammates_out', ''),
+                    'regression_flag': False,
+                })
 
     picks_df = pd.DataFrame(picks)
     if len(picks_df) == 0:
@@ -5200,6 +5272,215 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
     return picks.loc[clean_idx].reset_index(drop=True)
 
 
+def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict = None) -> pd.DataFrame:
+    """
+    Remove picks that fail a role-change or injury sanity check.
+
+    For STL/BLK unders, ratio-only mismatch checks are too harsh because the
+    denominator is tiny. Use model/L10/L3 support together instead.
+    """
+    if picks.empty:
+        return picks
+
+    injured_out = set()
+    if injury_data:
+        for team_data in injury_data.values():
+            for name in team_data.get('out', []):
+                injured_out.add(name)
+            for name in team_data.get('doubtful', []):
+                injured_out.add(name)
+
+    df = df.copy()
+    for col in ['mp', 'pts', 'trb', 'ast', 'stl', 'blk', 'tov']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        else:
+            df[col] = 0.0
+    df = df.sort_values('game_date')
+
+    df['pa_val'] = df['pts'] + df['ast']
+    df['pr_val'] = df['pts'] + df['trb']
+    df['pra_val'] = df['pts'] + df['trb'] + df['ast']
+
+    base_stat_cols = ['mp', 'pts', 'trb', 'ast', 'stl', 'blk', 'tov']
+    last_game = df.groupby('player').tail(1).set_index('player')[base_stat_cols]
+    last3_rows = df.groupby('player').tail(3)
+    last10_rows = df.groupby('player').tail(10)
+    l3 = last3_rows.groupby('player')[base_stat_cols].mean()
+    l10 = last10_rows.groupby('player')[base_stat_cols].mean()
+    last3_hist = {name: grp for name, grp in last3_rows.groupby('player')}
+    last10_hist = {name: grp for name, grp in last10_rows.groupby('player')}
+
+    stat_cols_for_vol = ['pts', 'trb', 'ast', 'stl', 'blk', 'tov', 'pa_val', 'pr_val', 'pra_val']
+    l10_std = df.groupby('player').tail(10).groupby('player')[stat_cols_for_vol].std()
+    l10_max = df.groupby('player').tail(10).groupby('player')[stat_cols_for_vol].max()
+
+    vol_col = {
+        'pts': 'pts',
+        'trb': 'trb',
+        'ast': 'ast',
+        'stl': 'stl',
+        'blk': 'blk',
+        'tov': 'tov',
+        'pa': 'pa_val',
+        'pr': 'pr_val',
+        'pra': 'pra_val',
+    }
+
+    def get_prop_avg(table, player_name, prop_name):
+        if player_name not in table.index:
+            return None
+        row = table.loc[player_name]
+        if prop_name == 'pts':
+            return float(row['pts'])
+        if prop_name == 'trb':
+            return float(row['trb'])
+        if prop_name == 'ast':
+            return float(row['ast'])
+        if prop_name == 'stl':
+            return float(row['stl'])
+        if prop_name == 'blk':
+            return float(row['blk'])
+        if prop_name == 'tov':
+            return float(row['tov'])
+        if prop_name == 'pa':
+            return float(row['pts']) + float(row['ast'])
+        if prop_name == 'pr':
+            return float(row['pts']) + float(row['trb'])
+        if prop_name == 'pra':
+            return float(row['pts']) + float(row['trb']) + float(row['ast'])
+        return None
+
+    flagged = []
+    clean_idx = []
+
+    for idx, row in picks.iterrows():
+        player = row['player']
+        direction = row.get('direction', '')
+        line = float(row.get('line', 0))
+        pred = float(row.get('prediction', 0))
+        prop = str(row.get('prop', '')).lower()
+
+        last_mp = float(last_game.loc[player, 'mp']) if player in last_game.index else None
+        avg_mp = float(l10.loc[player, 'mp']) if player in l10.index else None
+
+        mp_expected = row.get('mp_expected', None)
+        if pd.isna(mp_expected) if mp_expected is not None else True:
+            mp_expected = None
+
+        reason = None
+
+        player_norm = _normalize_name(player)
+        if player_norm in injured_out:
+            reason = "PLAYER OUT/DOUBTFUL on today's injury report -- never bet on players who may not play"
+
+        if reason is None and mp_expected is not None and avg_mp and avg_mp > 5 and pred > 0:
+            per_min = (pred / avg_mp) if avg_mp > 0 else None
+            if per_min and per_min > 0:
+                implied_mp = line / per_min
+                if direction == 'UNDER' and implied_mp > mp_expected * 1.4:
+                    reason = (
+                        f"MINUTES MODEL: predicted {mp_expected:.0f}min but line implies "
+                        f"{implied_mp:.0f}min -- Vegas pricing more playing time than model expects"
+                    )
+                elif direction == 'OVER' and implied_mp < mp_expected * 0.65:
+                    reason = (
+                        f"MINUTES MODEL: predicted {mp_expected:.0f}min but line implies only "
+                        f"{implied_mp:.0f}min -- model may be overestimating playing time"
+                    )
+
+        if reason is None and last_mp is not None and avg_mp is not None and avg_mp > 5:
+            ratio = last_mp / avg_mp
+            if ratio >= 1.6 and direction == 'UNDER':
+                reason = f"MINUTES SPIKE: {last_mp:.0f}min last game vs {avg_mp:.0f}min L10 avg -- Vegas line may reflect new role"
+            elif ratio <= 0.4 and direction == 'OVER':
+                reason = f"MINUTES CRASH: {last_mp:.0f}min last game vs {avg_mp:.0f}min L10 avg -- player may have reduced role"
+
+        if reason is None and line > 0:
+            vcol = vol_col.get(prop)
+            avg_val = get_prop_avg(l10, player, prop) or 0
+            if vcol and player in l10_std.index and player in l10.index:
+                std_val = float(l10_std.loc[player, vcol]) if vcol in l10_std.columns else 0
+                max_val = float(l10_max.loc[player, vcol]) if vcol in l10_max.columns else 0
+                cv_val = (std_val / avg_val) if avg_val > 0 else None
+                micro_prop_under = prop in {'stl', 'blk'} and direction == 'UNDER'
+                strict_under_l10 = None
+                strict_under_l3 = None
+                relaxed_micro_profile = False
+                if micro_prop_under and player in last10_hist and prop in last10_hist[player].columns:
+                    recent10 = pd.to_numeric(last10_hist[player][prop], errors='coerce').fillna(0)
+                    strict_under_l10 = float((recent10 < line).mean()) if len(recent10) else None
+                    if player in last3_hist and prop in last3_hist[player].columns:
+                        recent3 = pd.to_numeric(last3_hist[player][prop], errors='coerce').fillna(0)
+                        strict_under_l3 = float((recent3 < line).mean()) if len(recent3) else None
+                    elite_under_profile = (
+                        strict_under_l10 is not None and strict_under_l10 >= 0.85 and
+                        (strict_under_l3 is None or strict_under_l3 >= 0.67)
+                    )
+                    low_line_binary_profile = (
+                        line <= 1.5 and
+                        strict_under_l10 is not None and strict_under_l10 >= 0.70 and
+                        (strict_under_l3 is None or strict_under_l3 >= 0.67) and
+                        pred <= line - 0.4
+                    )
+                    relaxed_micro_profile = elite_under_profile or low_line_binary_profile
+
+                cv_limit = 0.70
+                spike_limit = avg_val * 3.0 if avg_val > 0 else None
+                if relaxed_micro_profile:
+                    cv_limit = 1.75 if line <= 1.5 else 0.95
+                    spike_limit = max(line + 1.5, avg_val * (4.5 if line <= 1.5 else 4.0))
+
+                if cv_val is not None and cv_val > cv_limit:
+                    reason = (
+                        f"HIGH VOLATILITY: L10 std dev {std_val:.1f} vs avg {avg_val:.1f} "
+                        f"(CV={cv_val:.2f}) -- stat is too unpredictable to bet"
+                    )
+                elif spike_limit is not None and max_val > spike_limit:
+                    reason = (
+                        f"VOLATILITY SPIKE: L10 max {max_val:.0f} vs avg {avg_val:.1f} "
+                        f"-- single huge outlier game inflates L10 avg, line may not be mispriced"
+                    )
+
+        if reason is None and pred > 0:
+            prop_l10 = get_prop_avg(l10, player, prop)
+            prop_l3 = get_prop_avg(l3, player, prop)
+            if prop in {'stl', 'blk'} and direction == 'UNDER':
+                support_vals = [float(v) for v in [pred, prop_l10, prop_l3] if v is not None and not pd.isna(v)]
+                support_floor = max(support_vals) if support_vals else pred
+                support_gap = line - support_floor
+                support_ratio = (line / support_floor) if support_floor and support_floor > 0 else np.inf
+                if support_gap >= 1.0 and support_ratio >= 2.0:
+                    reason = (
+                        f"MICRO-PROP ROLE MISMATCH: line {line} is still {support_ratio:.1f}x above "
+                        f"best support {support_floor:.1f} (model/L10/L3) -- Vegas likely pricing a role shift"
+                    )
+            else:
+                if direction == 'UNDER' and line >= 1.6 * pred:
+                    reason = f"LINE/PRED MISMATCH: line {line} is {line/pred:.1f}x model prediction {pred} -- Vegas likely pricing a role change"
+                elif direction == 'OVER' and pred >= 1.6 * line:
+                    reason = f"LINE/PRED MISMATCH: prediction {pred} is {pred/line:.1f}x line {line} -- model may be using stale data"
+
+        if reason:
+            flagged.append({
+                'player': player,
+                'prop': row.get('prop', ''),
+                'direction': direction,
+                'line': line,
+                'prediction': pred,
+                'reason': reason,
+            })
+        else:
+            clean_idx.append(idx)
+
+    if flagged:
+        print(f"\n  Sanity check removed {len(flagged)} pick(s):")
+        for item in flagged:
+            print(f"    [REMOVED] {item['player']} {item['prop']} {item['direction']} {item['line']} -- {item['reason']}")
+
+    return picks.loc[clean_idx].reset_index(drop=True)
+
+
 def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame):
     """Save picks to CSV and generate simple HTML report."""
     _migrate_legacy_output_artifacts()
@@ -5918,7 +6199,7 @@ def main():
                     break
             top_display_df = pd.DataFrame(top_display)
             print("\nTop 10 picks (1 per player):")
-            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'model_wr', 'mp_predicted', 'ou_prob']
+            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'mp_predicted', 'ou_prob']
             display_cols = [c for c in display_cols if c in top_display_df.columns]
             print(top_display_df[display_cols].to_string(index=False))
 
@@ -6002,7 +6283,7 @@ def main():
             print(f"\n{len(picks)} picks found:")
             
             print("\n=== TOP 20 PICKS (by rank score) ===")
-            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'model_wr', 'l10_avg']
+            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'l10_avg']
             display_cols = [c for c in display_cols if c in picks.columns]
             print(picks.head(20)[display_cols].to_string(index=False))
             
