@@ -14,6 +14,30 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+def _season_from_game_date(date_value) -> str:
+    """Infer NBA season string from a game date."""
+    ts = pd.to_datetime(date_value, errors='coerce')
+    if pd.isna(ts):
+        return ""
+    start_year = ts.year if ts.month >= 10 else ts.year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
+def _ensure_nba_season_columns(df: pd.DataFrame, date_col: str = "game_date") -> pd.DataFrame:
+    """Attach season labels when the source frame only has game dates."""
+    out = df.copy()
+    if date_col in out.columns:
+        out[date_col] = pd.to_datetime(out[date_col], errors='coerce')
+    if 'season' not in out.columns:
+        out['season'] = out[date_col].apply(_season_from_game_date) if date_col in out.columns else ""
+    else:
+        if date_col in out.columns:
+            inferred = out[date_col].apply(_season_from_game_date)
+            out['season'] = out['season'].replace('', np.nan).fillna(inferred)
+        out['season'] = out['season'].astype(str)
+    return out
+
+
 class FeaturePipeline:
     """
     Complete feature engineering pipeline for NBA player props.
@@ -67,6 +91,7 @@ class FeaturePipeline:
 
         # Ensure datetime
         df['game_date'] = pd.to_datetime(df['game_date'])
+        df = _ensure_nba_season_columns(df)
         df = df.sort_values(['player', 'game_date']).reset_index(drop=True)
 
         # Alias team column so team scoring trends work
@@ -136,22 +161,29 @@ class FeaturePipeline:
     def _create_base_rolling(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create base rolling average features."""
         grouped = df.groupby('player')
+        season_grouped = df.groupby(['player', 'season'], dropna=False)
         
         stats = ['pts', 'trb', 'ast', 'mp', 'fga', 'fta', '3pa', 'tov', 'stl', 'blk']
         windows = [5, 10, 20]
         
         # Games played counter
         df['games_played'] = grouped.cumcount()
+        df['season_games_played'] = season_grouped.cumcount()
+        df['season_sample_reliability'] = (
+            df['season_games_played'] / (df['season_games_played'] + 10.0)
+        ).fillna(0.0).clip(0.0, 1.0)
         
         for stat in stats:
             if stat not in df.columns:
                 continue
-            shifted = grouped[stat].shift(1)
             
             for w in windows:
                 df[f'{stat}_l{w}'] = grouped[stat].transform(
                     lambda x: x.shift(1).rolling(w, min_periods=1).mean()
                 )
+            df[f'{stat}_season_avg'] = season_grouped[stat].transform(
+                lambda x: x.shift(1).expanding(min_periods=1).mean()
+            )
         
         # Std dev for main stats
         for stat in ['pts', 'trb', 'ast', 'mp']:
@@ -173,6 +205,7 @@ class FeaturePipeline:
         """Create EWMA-weighted features."""
         grouped = df.groupby('player')
         span = self.ewma_span
+        season_reliability = df.get('season_sample_reliability', pd.Series(0.0, index=df.index)).fillna(0.0)
         
         stats = ['pts', 'trb', 'ast', 'mp', 'fga', 'fta', '3pa', 'stl', 'blk', 'tov']
         
@@ -191,6 +224,32 @@ class FeaturePipeline:
                 )
                 df[f'{stat}_consistency'] = df[f'{stat}_ewma_std'] / df[f'{stat}_ewma{span}'].replace(0, np.nan)
                 df[f'{stat}_consistency'] = df[f'{stat}_consistency'].fillna(1.0)
+
+        # Blend short, medium, and season-long form into a single recency-aware anchor.
+        for stat in stats:
+            ewma_col = f'{stat}_ewma{span}'
+            season_col = f'{stat}_season_avg'
+            l5_col = f'{stat}_l5'
+            l10_col = f'{stat}_l10'
+            l20_col = f'{stat}_l20'
+            if not all(col in df.columns for col in [ewma_col, l5_col, l10_col, l20_col]):
+                continue
+
+            recent_stack = (
+                df[ewma_col] * 0.40 +
+                df[l5_col] * 0.25 +
+                df[l10_col] * 0.20 +
+                df[l20_col] * 0.15
+            )
+            season_anchor = df[season_col] if season_col in df.columns else df[l20_col]
+            season_anchor = season_anchor.fillna(df[l20_col]).fillna(recent_stack)
+            season_share = 0.12 + 0.23 * season_reliability
+            df[f'{stat}_recency_anchor'] = (
+                recent_stack * (1.0 - season_share) +
+                season_anchor * season_share
+            )
+            if season_col in df.columns:
+                df[f'{stat}_form_vs_season'] = df[f'{stat}_recency_anchor'] - df[season_col]
         
         print(f"  Created EWMA features (span={span})")
         return df
@@ -373,8 +432,15 @@ class FeaturePipeline:
         
         # Synthetic lines from averages
         for stat in ['pts', 'trb', 'ast']:
-            df[f'{stat}_synthetic_line'] = df[f'{stat}_l10']
-            pred_col = f'{stat}_ewma5' if f'{stat}_ewma5' in df.columns else f'{stat}_l5'
+            synthetic_source = (
+                df.get(f'{stat}_season_avg',
+                df.get(f'{stat}_l20',
+                df.get(f'{stat}_l10')))
+            )
+            df[f'{stat}_synthetic_line'] = synthetic_source
+            pred_col = f'{stat}_recency_anchor' if f'{stat}_recency_anchor' in df.columns else (
+                f'{stat}_ewma5' if f'{stat}_ewma5' in df.columns else f'{stat}_l5'
+            )
             
             if pred_col in df.columns:
                 df[f'{stat}_edge_vs_avg'] = df[pred_col] - df[f'{stat}_synthetic_line']
@@ -442,17 +508,28 @@ class FeaturePipeline:
             components = []
             weights = []
             
-            if f'{stat}_ewma5' in df.columns:
+            if f'{stat}_recency_anchor' in df.columns:
+                components.append(df[f'{stat}_recency_anchor'])
+                weights.append(0.40)
+            elif f'{stat}_ewma5' in df.columns:
                 components.append(df[f'{stat}_ewma5'])
-                weights.append(0.4)
+                weights.append(0.35)
             
             if f'{stat}_defense_adj' in df.columns:
                 components.append(df[f'{stat}_defense_adj'])
-                weights.append(0.3)
+                weights.append(0.20)
             
             if f'{stat}_situational_avg' in df.columns:
                 components.append(df[f'{stat}_situational_avg'])
-                weights.append(0.3)
+                weights.append(0.15)
+
+            if f'{stat}_season_avg' in df.columns:
+                components.append(df[f'{stat}_season_avg'].fillna(df.get(f'{stat}_l20')))
+                weights.append(0.15)
+
+            if f'{stat}_l20' in df.columns:
+                components.append(df[f'{stat}_l20'])
+                weights.append(0.10)
             
             if components:
                 total_weight = sum(weights)
@@ -463,7 +540,8 @@ class FeaturePipeline:
             if f'{stat}_consistency' in df.columns:
                 consistency_penalty = df[f'{stat}_consistency'].clip(0.2, 2.0)
                 games_factor = (df['games_played'] / 20).clip(0, 1)
-                df[f'{stat}_confidence'] = (1 / consistency_penalty) * games_factor
+                sample_factor = 0.6 + 0.4 * df.get('season_sample_reliability', pd.Series(0.0, index=df.index)).fillna(0.0)
+                df[f'{stat}_confidence'] = (1 / consistency_penalty) * games_factor * sample_factor
                 df[f'{stat}_confidence'] = df[f'{stat}_confidence'].clip(0, 1)
         
         # Risk factor (high variance + bad matchup + B2B)

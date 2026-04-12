@@ -30,11 +30,14 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -64,6 +67,8 @@ TEAM_RATINGS    = DATA_DIR / "team_ratings.csv"
 PLAYER_ADJ_PPP  = DATA_DIR / "player_adj_ppp.csv"
 PLAYER_PROFILES = DATA_DIR / "player_profiles.csv"
 PLAYER_LUCK     = DATA_DIR / "player_luck_scores.csv"
+LIVE_INJURY_JSON = DATA_DIR / "live_injury_status.json"
+LIVE_INJURY_CSV  = DATA_DIR / "live_injury_status.csv"
 
 # Final merged output — this is what your prediction model reads every day
 PROJECTIONS_TODAY = DATA_DIR / "player_projections_today.csv"
@@ -98,6 +103,72 @@ def _atomic_csv(df, path):
     tmp = path.with_suffix(".tmp")
     df.to_csv(tmp, index=False)
     os.replace(tmp, path)
+
+
+def _atomic_json(payload, path):
+    """Write JSON atomically to avoid partial files on interrupted runs."""
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _normalize_player_name(name: object) -> str:
+    """ASCII-normalized player name key for cross-artifact joins."""
+    normalized = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized.lower()).strip()
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _flatten_live_injury_status(injury_data: dict, fetched_at: Optional[str] = None):
+    """Flatten nested team injury payload into a CSV-friendly row contract."""
+    import pandas as pd
+
+    fetched_at = fetched_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows = []
+    for team_abbr, team_data in sorted((injury_data or {}).items()):
+        base = {
+            "team_abbr": str(team_abbr or "").upper(),
+            "team_status_pending": bool(team_data.get("not_yet_submitted", False)),
+            "report_label": team_data.get("report_label", ""),
+            "report_url": team_data.get("report_url", ""),
+            "fetched_at": fetched_at,
+        }
+        status_map = team_data.get("status_map", {}) or {}
+        if not status_map:
+            rows.append({
+                **base,
+                "player_norm": "",
+                "injury_bucket": "",
+                "injury_status": "",
+                "injury_comment": "",
+                "injury_source": "",
+            })
+            continue
+        for player_norm, detail in sorted(status_map.items()):
+            rows.append({
+                **base,
+                "player_norm": str(player_norm or ""),
+                "injury_bucket": detail.get("bucket", ""),
+                "injury_status": detail.get("status", ""),
+                "injury_comment": detail.get("comment", ""),
+                "injury_source": detail.get("source", ""),
+            })
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "team_abbr",
+            "player_norm",
+            "injury_bucket",
+            "injury_status",
+            "injury_comment",
+            "injury_source",
+            "team_status_pending",
+            "report_label",
+            "report_url",
+            "fetched_at",
+        ],
+    )
 
 
 def _banner():
@@ -161,9 +232,11 @@ def _run_python_step(step_no, title: str, script_args, errors, error_label: str,
                      success_msg: str, skip_msg: Optional[str] = None) -> bool:
     """Run a Python subprocess, stream output into the daily log, and track failures."""
     _step_header(step_no, title)
-    cmd = [sys.executable, *script_args]
+    cmd = [sys.executable, "-u", *script_args]
     logger.info(f"  Running: {' '.join(str(part) for part in cmd)}")
     try:
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
         proc = subprocess.Popen(
             cmd,
             cwd=str(SCRIPT_DIR),
@@ -172,6 +245,8 @@ def _run_python_step(step_no, title: str, script_args, errors, error_label: str,
             text=True,
             encoding="utf-8",
             errors="replace",
+            bufsize=1,
+            env=env,
         )
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -271,9 +346,11 @@ def step1_5_grade_picks(errors):
             "PTS": "pts", "TRB": "trb", "AST": "ast", "STL": "stl",
             "BLK": "blk", "TOV": "tov", "PRA": "pra", "PR": "pr", "PA": "pa"
         }
+        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+        gradeable = ungraded[ungraded["game_date"].fillna("").astype(str) < today_str].copy()
 
         # Fetch missing dates directly from nba_api (handles the 2-3 day data lag)
-        missing_dates = sorted(set(ungraded["game_date"].dropna().unique()) - available_dates)
+        missing_dates = sorted(set(gradeable["game_date"].dropna().unique()) - available_dates)
         if missing_dates:
             try:
                 from nba_api.stats.endpoints import leaguegamelog
@@ -313,7 +390,7 @@ def step1_5_grade_picks(errors):
 
         wins = losses = pushes = graded_count = 0
         newly_graded_rows = []  # track only picks graded in this run
-        for date, group in ungraded.groupby("game_date"):
+        for date, group in gradeable.groupby("game_date"):
             if date not in available_dates:
                 logger.info(f"  No box score data for {date} yet — skipping")
                 continue
@@ -392,23 +469,32 @@ def step1_5_grade_picks(errors):
             at_pct   = at_wins / at_total * 100 if at_total > 0 else 0
             _ok(f"Graded {graded_count} new picks: {wins}W / {losses}L / {pushes}P  ({pct:.1f}%)  |  All-time: {at_wins}W / {at_loss}L / {at_push}P  ({at_pct:.1f}%)")
         else:
-            _ok("No ungraded picks with available box scores")
+            if len(gradeable) == 0:
+                _ok("No completed-slate picks pending grading")
+            else:
+                _ok("No ungraded picks with available box scores")
 
         # ── Diagnostic: pipeline health report ───────────────────────────────
-        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
         today_picks = hist[hist["game_date"] == today_str]
         still_ungraded = hist[_blank_text_mask(hist["result"])]
-        ungraded_by_date = still_ungraded.groupby("game_date").size()
+        overdue_ungraded = still_ungraded[still_ungraded["game_date"].fillna("").astype(str) < today_str]
+        pending_ungraded = still_ungraded[still_ungraded["game_date"].fillna("").astype(str) >= today_str]
+        overdue_by_date = overdue_ungraded.groupby("game_date").size()
+        pending_by_date = pending_ungraded.groupby("game_date").size()
 
         logger.info("  ── Pick pipeline health ──────────────────────────────")
         logger.info(f"  Picks generated today ({today_str}): {len(today_picks)}")
-        if len(still_ungraded) > 0:
-            logger.info(f"  Still ungraded: {len(still_ungraded)} picks across {len(ungraded_by_date)} dates")
-            for date, cnt in sorted(ungraded_by_date.items()):
+        if len(overdue_ungraded) > 0:
+            logger.info(f"  Overdue ungraded: {len(overdue_ungraded)} picks across {len(overdue_by_date)} completed dates")
+            for date, cnt in sorted(overdue_by_date.items()):
                 in_box = date in available_dates
                 logger.info(f"    {date}: {cnt} ungraded  [box score {'available' if in_box else 'NOT FOUND'}]")
         else:
-            logger.info("  All picks graded — no gaps")
+            logger.info("  All completed-slate picks graded — no gaps")
+        if len(pending_ungraded) > 0:
+            logger.info(f"  Pending current/future slates: {len(pending_ungraded)} picks across {len(pending_by_date)} dates")
+            for date, cnt in sorted(pending_by_date.items()):
+                logger.info(f"    {date}: {cnt} pending (not gradeable yet)")
         logger.info("  ─────────────────────────────────────────────────────")
 
     except Exception as exc:
@@ -438,6 +524,11 @@ def step1_6_grade_betslips(errors):
         if len(ungraded) == 0:
             _ok("All betslips already graded")
             return
+        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+        gradeable = ungraded[ungraded["game_date"].fillna("").astype(str) < today_str].copy()
+        if len(gradeable) == 0:
+            _ok("No completed-slate betslips pending grading")
+            return
 
         def _norm(name):
             n = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode("ascii")
@@ -456,7 +547,7 @@ def step1_6_grade_betslips(errors):
 
         # Live-fetch fallback: same as Step 1.5 — fetch any missing dates from nba_api
         missing_dates = sorted(
-            set(ungraded["game_date"].dropna().astype(str).unique()) - available_dates
+            set(gradeable["game_date"].dropna().astype(str).unique()) - available_dates
         )
         if missing_dates:
             try:
@@ -524,7 +615,7 @@ def step1_6_grade_betslips(errors):
                 return "LOSS"
 
         newly_graded = 0
-        for idx, slip in ungraded.iterrows():
+        for idx, slip in gradeable.iterrows():
             slip_date = str(slip.get("game_date", ""))
             if slip_date not in available_dates:
                 continue
@@ -644,6 +735,17 @@ def step3_blowout_index(args, errors):
             import pandas as pd
             from nba_api.stats.endpoints import leaguedashplayerstats
 
+            player_log_delay = float(os.getenv("NBA_PLAYER_LOG_DELAY", "1.5"))
+            player_log_retries = int(os.getenv("NBA_PLAYER_LOG_RETRIES", "3"))
+            player_log_retry_backoff = float(os.getenv("NBA_PLAYER_LOG_RETRY_BACKOFF", "4.0"))
+            player_log_failure_cooldown = float(os.getenv("NBA_PLAYER_LOG_FAILURE_COOLDOWN", "6.0"))
+
+            # Minimum games played to qualify for blowout-corrected baseline.
+            # 5 GP is enough for meaningful sample while including injured returners
+            # and callups who may have had blowout-distorted numbers in limited games.
+            # 15 GP (old threshold) was excluding 40%+ of active players with props.
+            MIN_GP_FOR_BASELINE = 5
+
             logger.info("  Fetching active player list for clean baselines...")
             time.sleep(0.65)
             player_df = leaguedashplayerstats.LeagueDashPlayerStats(
@@ -651,16 +753,43 @@ def step3_blowout_index(args, errors):
                 per_mode_detailed="PerGame",
                 measure_type_detailed_defense="Base"
             ).get_data_frames()[0]
-            active = player_df[player_df["GP"] >= 15].copy()
+            n_total_active = len(player_df)
+            active = player_df[player_df["GP"] >= MIN_GP_FOR_BASELINE].copy()
+            n_excluded = n_total_active - len(active)
             player_ids = list(zip(
                 active["PLAYER_ID"].astype(str),
                 active["PLAYER_NAME"],
                 active["TEAM_ABBREVIATION"]
             ))
+            logger.info(
+                f"  Active players this season: {n_total_active} total | "
+                f"{len(active)} with GP≥{MIN_GP_FOR_BASELINE} | "
+                f"{n_excluded} excluded (fewer than {MIN_GP_FOR_BASELINE} games)"
+            )
             logger.info(f"  Building clean baselines for {len(player_ids)} players...")
-            baselines = build_clean_baselines(player_ids, blowout_index, "2025-26", last_n=20)
+            logger.info(
+                "  Clean baseline throttle: %.2fs between player logs | %s retries | %.2fs retry backoff | %.2fs failure cooldown",
+                player_log_delay,
+                player_log_retries,
+                player_log_retry_backoff,
+                player_log_failure_cooldown,
+            )
+            baselines = build_clean_baselines(
+                player_ids,
+                blowout_index,
+                "2025-26",
+                last_n=20,
+                request_delay=player_log_delay,
+                request_retries=player_log_retries,
+                retry_backoff=player_log_retry_backoff,
+                failure_cooldown=player_log_failure_cooldown,
+            )
             baselines.to_csv(CLEAN_BASELINES, index=False)
-            _ok(f"Clean baselines: {len(baselines)} players → {CLEAN_BASELINES.name}")
+            coverage_pct = 100.0 * len(baselines) / len(active) if len(active) > 0 else 0.0
+            _ok(
+                f"Clean baselines: {len(baselines)}/{len(active)} qualifying players "
+                f"({coverage_pct:.0f}% coverage) → {CLEAN_BASELINES.name}"
+            )
 
     except Exception as exc:
         _fail(f"Layer 5 (Blowout) failed: {exc}")
@@ -783,6 +912,31 @@ def step6_usage_injury(errors):
         else:
             _ok("No new absences detected")
 
+        logger.info("  Fetching live injury report (NBA official + ESPN fallback)...")
+        live_injuries = {}
+        try:
+            from nba_props import fetch_injury_data
+            live_injuries = fetch_injury_data() or {}
+        except Exception as exc:
+            logger.warning(f"  Live injury feed unavailable: {exc}")
+
+        fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        live_injury_df = _flatten_live_injury_status(live_injuries, fetched_at=fetched_at)
+        _atomic_json(live_injuries, LIVE_INJURY_JSON)
+        _atomic_csv(live_injury_df, LIVE_INJURY_CSV)
+        player_rows = int((live_injury_df["player_norm"] != "").sum()) if len(live_injury_df) > 0 else 0
+        team_rows = int(live_injury_df["team_abbr"].nunique()) if len(live_injury_df) > 0 else 0
+        pending_teams = int(
+            live_injury_df.loc[live_injury_df["team_status_pending"] == True, "team_abbr"].nunique()
+        ) if len(live_injury_df) > 0 else 0
+        if player_rows > 0 or pending_teams > 0:
+            _ok(
+                f"Live injury feed: {player_rows} player statuses across {team_rows} teams "
+                f"({pending_teams} pending official reports) → {LIVE_INJURY_CSV.name}"
+            )
+        else:
+            _warn("Live injury feed returned no statuses; Step 8 will fall back to the absence proxy only")
+
     except Exception as exc:
         _fail(f"Layer 3 (Usage/Injury) failed: {exc}")
         logger.debug(exc, exc_info=True)
@@ -794,29 +948,20 @@ def step6_usage_injury(errors):
 def step7_luck_model(errors):
     _step_header(7, "Layer 4 — Luck & Regression Model")
     try:
-        # Rebuild luck scores only if stale (>24 hours — luck scores are stable)
-        rebuild = True
-        if PLAYER_LUCK.exists():
-            age_hours = (time.time() - PLAYER_LUCK.stat().st_mtime) / 3600
-            if age_hours < 24:
-                rebuild = False
-                _ok(f"Luck scores are fresh ({age_hours:.1f}h old) — skipping rebuild")
+        from luck_regression_model import build_player_luck_scores
+        # Layer 3 makes 30+ API calls — give the NBA API a cooldown before hitting it again
+        logger.info("  Waiting 15s for API rate-limit cooldown after Layer 3...")
+        time.sleep(15)
+        logger.info("  Computing player luck scores (3PT%, eFG% vs xeFG%, FT%)...")
+        luck_df = build_player_luck_scores(season="2025-26")
+        luck_df.to_csv(PLAYER_LUCK, index=False)
 
-        if rebuild:
-            from luck_regression_model import build_player_luck_scores
-            # Layer 3 makes 30+ API calls — give the NBA API a cooldown before hitting it again
-            logger.info("  Waiting 15s for API rate-limit cooldown after Layer 3...")
-            time.sleep(15)
-            logger.info("  Computing player luck scores (3PT%, eFG% vs xeFG%, FT%)...")
-            luck_df = build_player_luck_scores(season="2025-26")
-            luck_df.to_csv(PLAYER_LUCK, index=False)
-
-            very_lucky = (luck_df["luck_label"] == "VERY LUCKY").sum()
-            very_unlucky = (luck_df["luck_label"] == "VERY UNLUCKY").sum()
-            _ok(
-                f"Luck scores: {len(luck_df)} players | "
-                f"Very Lucky: {very_lucky} | Very Unlucky: {very_unlucky}"
-            )
+        very_lucky = (luck_df["luck_label"] == "VERY LUCKY").sum()
+        very_unlucky = (luck_df["luck_label"] == "VERY UNLUCKY").sum()
+        _ok(
+            f"Luck scores: {len(luck_df)} players | "
+            f"Very Lucky: {very_lucky} | Very Unlucky: {very_unlucky}"
+        )
 
     except Exception as exc:
         _fail(f"Layer 4 (Luck Model) failed: {exc}")
@@ -888,6 +1033,7 @@ def step8_merge_projections(errors):
                  "pts_delta", "reb_delta", "ast_delta",
                  "n_full", "n_partial", "n_heavy", "n_exclude"]
             ].rename(columns={"player_name": "player"})
+            bl = bl.drop_duplicates(subset=["player"], keep="first")
             proj = proj.merge(bl, on="player", how="left")
             merged_count = proj["clean_pts"].notna().sum()
             _ok(f"Layer 5 merged: {merged_count} players have blowout-clean baselines")
@@ -949,6 +1095,109 @@ def step8_merge_projections(errors):
         else:
             _warn("player_luck_scores.csv not found — Layer 4 not merged")
 
+        # Dedup: merges can produce multiple rows per player if source data has duplicates
+        proj = proj.drop_duplicates(subset=["player"], keep="first").reset_index(drop=True)
+        logger.info(f"  After dedup: {len(proj)} unique players")
+
+        # ── Merge detected absences (Step 6 output) ──────────────────────────
+        detected_absences_path = DATA_DIR / "detected_absences.csv"
+        if detected_absences_path.exists():
+            logger.info("  Merging detected absences (Layer 3 absence scan)...")
+            absences = pd.read_csv(detected_absences_path)
+            if "player_id" in absences.columns and "player_id" in proj.columns:
+                absences["player_id"] = pd.to_numeric(absences["player_id"], errors="coerce")
+                proj["player_id"] = pd.to_numeric(proj["player_id"], errors="coerce")
+                proj = proj.merge(
+                    absences[["player_id", "recent_gp"]].rename(columns={"recent_gp": "absence_recent_gp"}),
+                    on="player_id", how="left"
+                )
+                flagged = proj["absence_recent_gp"].notna().sum()
+                _ok(f"Absence data merged: {flagged} players flagged with recent absence data")
+            else:
+                proj["absence_recent_gp"] = float("nan")
+        else:
+            proj["absence_recent_gp"] = float("nan")
+
+        # Merge live injury report data captured in Step 6 so the projection
+        # artifact has current availability context, not just a recent-games proxy.
+        proj["live_team_status_pending"] = False
+        if LIVE_INJURY_CSV.exists():
+            logger.info("  Merging live injury feed (NBA official + ESPN fallback)...")
+            live_inj = pd.read_csv(LIVE_INJURY_CSV)
+            if len(live_inj) > 0:
+                live_inj["team_abbr"] = live_inj["team_abbr"].astype(str).str.upper()
+                live_inj["player_norm"] = live_inj["player_norm"].fillna("").astype(str)
+                proj["team_abbr"] = proj["team_abbr"].astype(str).str.upper()
+                proj["player_norm"] = proj["player"].apply(_normalize_player_name)
+
+                pending_teams = set(
+                    live_inj.loc[live_inj["team_status_pending"] == True, "team_abbr"].astype(str).tolist()
+                )
+                live_player_rows = live_inj[live_inj["player_norm"] != ""].copy()
+                if len(live_player_rows) > 0:
+                    live_player_rows = live_player_rows.drop_duplicates(
+                        subset=["team_abbr", "player_norm"], keep="first"
+                    )
+                    proj = proj.merge(
+                        live_player_rows[
+                            [
+                                "team_abbr",
+                                "player_norm",
+                                "injury_bucket",
+                                "injury_status",
+                                "injury_comment",
+                                "injury_source",
+                            ]
+                        ].rename(columns={
+                            "injury_bucket": "live_injury_bucket",
+                            "injury_status": "live_injury_status",
+                            "injury_comment": "live_injury_comment",
+                            "injury_source": "live_injury_source",
+                        }),
+                        on=["team_abbr", "player_norm"],
+                        how="left",
+                    )
+                proj["live_team_status_pending"] = proj["team_abbr"].isin(pending_teams)
+                merged_count = int(proj["live_injury_bucket"].notna().sum())
+                _ok(
+                    f"Live injury feed merged: {merged_count} player statuses "
+                    f"across {len(pending_teams)} pending-report teams"
+                )
+            else:
+                _warn("Live injury status file is empty — Step 8 is using the absence proxy only")
+        else:
+            _warn("Live injury status file not found — Step 8 is using the absence proxy only")
+
+        for col in ["live_injury_bucket", "live_injury_status", "live_injury_comment", "live_injury_source"]:
+            if col not in proj.columns:
+                proj[col] = pd.NA
+
+        # Suppress luck-driven signals for players flagged by the recent-absence scan.
+        # These historical luck metrics remain valid in the standalone Layer 4 artifact,
+        # but they are misleading in today's projection output when availability is uncertain.
+        absence_recent_gp = pd.to_numeric(proj.get("absence_recent_gp"), errors="coerce")
+        absence_risk_mask = absence_recent_gp.notna() & absence_recent_gp.le(2)
+        live_injury_bucket = proj.get("live_injury_bucket", pd.Series(pd.NA, index=proj.index))
+        live_injury_bucket = live_injury_bucket.fillna("").astype(str).str.lower()
+        live_report_risk_mask = live_injury_bucket.isin(["out", "doubtful", "questionable", "day_to_day"])
+        suppress_luck_mask = absence_risk_mask | live_report_risk_mask
+        if suppress_luck_mask.any():
+            numeric_luck_cols = [
+                c for c in [
+                    "total_luck_score", "pts_luck_adj", "fg3_luck_score", "ft_luck_score",
+                    "efg_luck_score", "fg3_pts_luck_adj", "fg3_regressed", "ft_regressed",
+                ]
+                if c in proj.columns
+            ]
+            if numeric_luck_cols:
+                proj.loc[suppress_luck_mask, numeric_luck_cols] = float("nan")
+            if "luck_label" in proj.columns:
+                proj.loc[suppress_luck_mask, "luck_label"] = pd.NA
+            _ok(
+                f"Suppressed luck adjustments for {int(suppress_luck_mask.sum())} players with "
+                f"absence-risk or live injury flags"
+            )
+
         # ── Compute final composite projection ────────────────────────────────
         logger.info("  Computing final composite projections...")
 
@@ -989,6 +1238,7 @@ def step8_merge_projections(errors):
 
         # Sort by projected points descending
         proj = proj.sort_values("proj_pts_final", ascending=False)
+        proj = proj.drop(columns=["player_norm"], errors="ignore")
 
         # Save current working file plus archived snapshots.
         _atomic_csv(proj, PROJECTIONS_TODAY)
@@ -1000,20 +1250,55 @@ def step8_merge_projections(errors):
         logger.info(f"  Archived daily snapshot: {daily_archive.name}")
         logger.info(f"  Archived run snapshot:   {run_archive.name}")
 
-        # Print top 10 projected scorers
-        logger.info("\n  ── Top 10 Projected Scorers Today ──────────────────────────")
-        top10 = proj.head(10)
+        # Print top 10 projected scorers — skip players with 0 recent games (fully absent)
+        logger.info("\n  ── Top 10 Projected Scorers Today (active players only) ──────────────")
+        display_rows = []
+        skipped_absent = []
+        skipped_live_out = []
+        for _, row in proj.iterrows():
+            live_bucket = str(row.get("live_injury_bucket") or "").strip().lower()
+            if live_bucket in {"out", "doubtful"}:
+                skipped_live_out.append(f"{row['player']} ({live_bucket.upper()})")
+                continue
+            recent_gp = row.get("absence_recent_gp")
+            if pd.notna(recent_gp) and int(recent_gp) == 0:
+                skipped_absent.append(row["player"])
+                continue
+            display_rows.append(row)
+            if len(display_rows) >= 10:
+                break
+        top10 = pd.DataFrame(display_rows) if display_rows else proj.head(10)
         for _, row in top10.iterrows():
             luck_tag = ""
             if "luck_label" in row and pd.notna(row.get("luck_label")):
                 luck_tag = f"  [{row['luck_label']}]"
+            absence_tag = ""
+            recent_gp = row.get("absence_recent_gp")
+            if pd.notna(recent_gp) and int(recent_gp) <= 2:
+                absence_tag = f"  [ABSENCE RISK: {int(recent_gp)}/5 games]"
+            injury_tag = ""
+            live_bucket = str(row.get("live_injury_bucket") or "").strip().lower()
+            if live_bucket in {"questionable", "day_to_day", "probable"}:
+                injury_tag = f"  [{live_bucket.replace('_', ' ').upper()}]"
+            elif bool(row.get("live_team_status_pending", False)) and not live_bucket:
+                injury_tag = "  [TEAM STATUS PENDING]"
             logger.info(
                 f"  {row['player']:<28} "
                 f"Pts: {row['proj_pts_final']:>5.1f}  "
                 f"Reb: {row.get('proj_reb', 0):>4.1f}  "
                 f"Ast: {row.get('proj_ast', 0):>4.1f}  "
                 f"PRA: {row.get('proj_pra', 0):>5.1f}"
-                f"{luck_tag}"
+                f"{injury_tag}{luck_tag}{absence_tag}"
+            )
+        if skipped_absent:
+            logger.info(
+                f"\n  [Suppressed from top-10 (0/5 recent games): "
+                f"{', '.join(skipped_absent[:8])}{'...' if len(skipped_absent) > 8 else ''}]"
+            )
+        if skipped_live_out:
+            logger.info(
+                f"  [Suppressed from top-10 (official OUT/DOUBTFUL): "
+                f"{', '.join(skipped_live_out[:8])}{'...' if len(skipped_live_out) > 8 else ''}]"
             )
 
     except Exception as exc:

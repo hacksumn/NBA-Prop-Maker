@@ -19,6 +19,7 @@ import numpy as np
 import requests
 import json
 import pickle
+import io
 import os
 import sys
 import math
@@ -29,6 +30,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
+
+from player_pool_guard import sanitize_player_names
+from probability_utils import apply_isotonic_calibrators, over_probability_from_quantiles, quantile_tags
 
 # =============================================================================
 # CONFIGURATION
@@ -55,6 +59,9 @@ CONFIG = {
     'edge_z_threshold': 0.5,   # Min edge in units of player std dev (primary filter)
     'require_meta_for_live_picks': True,   # Only allow picks supported by the abstention layer
     'allow_structural_micro_props': False, # Disable hardcoded STL/BLK fallback picks by default
+    'live_pick_min': 5,        # Minimum number of live picks to publish each day
+    'live_pick_target': 5,     # Target size of the final live card
+    'live_pick_candidate_pool': 25,  # Pull a deeper pool, then sanitize and diversify
 
     # Targets
     'targets': ['pts', 'trb', 'ast', 'pra', 'pr', 'pa'],
@@ -78,6 +85,387 @@ _ODDS_PROP_TO_STAT = {
 }
 
 _STAT_TO_ODDS_PROP = {v: k for k, v in _ODDS_PROP_TO_STAT.items()}
+
+
+def _season_from_game_date(date_value) -> str:
+    """Infer NBA season string from a game date."""
+    ts = pd.to_datetime(date_value, errors='coerce')
+    if pd.isna(ts):
+        return ""
+    start_year = ts.year if ts.month >= 10 else ts.year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
+def _ensure_nba_season_columns(df: pd.DataFrame, date_col: str = 'game_date') -> pd.DataFrame:
+    """Attach season labels when the frame only has game dates."""
+    out = df.copy()
+    if date_col in out.columns:
+        out[date_col] = pd.to_datetime(out[date_col], errors='coerce')
+    if 'season' not in out.columns:
+        out['season'] = out[date_col].apply(_season_from_game_date) if date_col in out.columns else ""
+    else:
+        if date_col in out.columns:
+            inferred = out[date_col].apply(_season_from_game_date)
+            out['season'] = out['season'].replace('', np.nan).fillna(inferred)
+        out['season'] = out['season'].astype(str)
+    return out
+
+
+def _prop_component_cols(target: str, suffix: str) -> List[str]:
+    combo_map = {
+        'pra': ['pts', 'trb', 'ast'],
+        'pr': ['pts', 'trb'],
+        'pa': ['pts', 'ast'],
+    }
+    if target in combo_map:
+        return [f'{part}_{suffix}' for part in combo_map[target]]
+    return [f'{target}_{suffix}']
+
+
+def _series_prop_feature(df: pd.DataFrame, target: str, suffix: str, default=np.nan) -> pd.Series:
+    cols = [c for c in _prop_component_cols(target, suffix) if c in df.columns]
+    if not cols:
+        return pd.Series(default, index=df.index, dtype=float)
+    stacked = pd.concat([pd.to_numeric(df[c], errors='coerce') for c in cols], axis=1)
+    if len(cols) == 1:
+        return stacked.iloc[:, 0]
+    return stacked.sum(axis=1, min_count=len(cols))
+
+
+def _row_prop_feature(row: pd.Series, target: str, suffix: str):
+    cols = _prop_component_cols(target, suffix)
+    values = []
+    for col in cols:
+        if col not in row.index:
+            return None
+        value = row.get(col)
+        if value is None or pd.isna(value):
+            return None
+        values.append(float(value))
+    return values[0] if len(values) == 1 else sum(values)
+
+
+def _series_fp_projection(df: pd.DataFrame, target: str) -> pd.Series:
+    """Return the best available first-principles projection proxy for a stat."""
+    def _series(col: str) -> pd.Series:
+        if col in df.columns:
+            return pd.to_numeric(df[col], errors='coerce')
+        return pd.Series(np.nan, index=df.index, dtype=float)
+
+    if target == 'pts':
+        if 'proj_pts_final' in df.columns:
+            return pd.to_numeric(df['proj_pts_final'], errors='coerce')
+        base = _series('pts_luck_adj')
+        if base.isna().all():
+            base = _series('clean_pts')
+        if base.isna().all():
+            base = _series_prop_feature(df, 'pts', 'best_estimate')
+        if 'adj_ppp' in df.columns:
+            scale = (pd.to_numeric(df['adj_ppp'], errors='coerce') / 1.15).clip(0.7, 1.3)
+            return base.fillna(_series_prop_feature(df, 'pts', 'best_estimate')).fillna(_series_prop_feature(df, 'pts', 'recency_anchor')) * scale.fillna(1.0)
+        return base.fillna(_series_prop_feature(df, 'pts', 'best_estimate')).fillna(_series_prop_feature(df, 'pts', 'recency_anchor'))
+    if target == 'trb':
+        series = _series('proj_reb')
+        if series.isna().all():
+            series = _series('clean_reb')
+        return series.fillna(_series_prop_feature(df, 'trb', 'best_estimate')).fillna(_series_prop_feature(df, 'trb', 'recency_anchor'))
+    if target == 'ast':
+        series = _series('proj_ast')
+        if series.isna().all():
+            series = _series('clean_ast')
+        return series.fillna(_series_prop_feature(df, 'ast', 'best_estimate')).fillna(_series_prop_feature(df, 'ast', 'recency_anchor'))
+    return pd.Series(np.nan, index=df.index, dtype=float)
+
+
+def _load_live_fp_projection_lookup():
+    proj_path = _HERE / 'data' / 'player_projections_today.csv'
+    if not proj_path.exists():
+        return None
+    fp = pd.read_csv(proj_path)
+    if 'player' not in fp.columns:
+        return None
+    fp['_norm'] = fp['player'].apply(_normalize_name)
+    return fp.drop_duplicates(subset='_norm', keep='first').set_index('_norm')
+
+
+def _row_fp_projection(row: pd.Series, target: str, fp_lookup=None):
+    if fp_lookup is not None:
+        key = _normalize_name(row.get('player', ''))
+        if key in fp_lookup.index:
+            fp_row = fp_lookup.loc[key]
+            mapping = {
+                'pts': 'proj_pts_final',
+                'trb': 'proj_reb',
+                'ast': 'proj_ast',
+            }
+            fp_col = mapping.get(target)
+            if fp_col and fp_col in fp_row and pd.notna(fp_row[fp_col]):
+                return float(fp_row[fp_col])
+
+    if target == 'pts':
+        if pd.notna(row.get('proj_pts_final')):
+            return float(row.get('proj_pts_final'))
+        base = row.get('pts_luck_adj')
+        if pd.isna(base):
+            base = row.get('clean_pts')
+        if pd.isna(base):
+            base = _row_prop_feature(row, 'pts', 'best_estimate')
+        scale = row.get('adj_ppp')
+        if pd.notna(scale):
+            return float(base or 0.0) * float(np.clip(float(scale) / 1.15, 0.7, 1.3))
+        return float(base or 0.0)
+    if target == 'trb':
+        value = row.get('proj_reb', row.get('clean_reb'))
+        if pd.isna(value):
+            value = _row_prop_feature(row, 'trb', 'best_estimate')
+        return float(value or 0.0)
+    if target == 'ast':
+        value = row.get('proj_ast', row.get('clean_ast'))
+        if pd.isna(value):
+            value = _row_prop_feature(row, 'ast', 'best_estimate')
+        return float(value or 0.0)
+    return None
+
+
+def _safe_float(value, default=np.nan) -> float:
+    """Best-effort float coercion that preserves NaN defaults."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return out if np.isfinite(out) else default
+
+
+def _adaptive_fp_blend_weights(
+    stat: str,
+    pred_row: pd.Series,
+    fp_row: pd.Series,
+    feature_row: Optional[pd.Series],
+    base_weights: Dict[str, float],
+) -> Tuple[float, float, float]:
+    """Return per-player model/FP weights using only current-row live features."""
+    base_model = float(base_weights.get('model_weight', 0.65))
+    base_fp = float(base_weights.get('fp_weight', 0.35))
+    intercept = float(base_weights.get('intercept', 0.0))
+
+    feature_row = feature_row if feature_row is not None else pred_row
+    games_played = max(0.0, _safe_float(feature_row.get('games_played', pred_row.get('games_played', 0.0)), 0.0))
+    season_games = max(0.0, _safe_float(feature_row.get('season_games_played', games_played), games_played))
+    mp_cv = _safe_float(feature_row.get('mp_cv', pred_row.get('mp_cv')), np.nan)
+    mp_trend_pct = _safe_float(feature_row.get('mp_trend_pct', pred_row.get('mp_trend_pct')), np.nan)
+    best_estimate = _safe_float(feature_row.get(f'{stat}_best_estimate', pred_row.get(f'{stat}_anchor')), np.nan)
+    form_vs_season = _safe_float(feature_row.get(f'{stat}_form_vs_season'), np.nan)
+    absence_recent_gp = _safe_float(fp_row.get('absence_recent_gp'), np.nan)
+
+    clean_col = {'pts': 'clean_pts', 'trb': 'clean_reb', 'ast': 'clean_ast'}.get(stat)
+    clean_available = 1.0 if clean_col and clean_col in fp_row.index and pd.notna(fp_row.get(clean_col)) else 0.0
+
+    career_depth = float(np.clip(np.log1p(games_played) / np.log1p(250.0), 0.0, 1.0))
+    current_season_share = float(np.clip(season_games / max(games_played, 1.0), 0.0, 1.0))
+
+    stability_parts = []
+    if pd.notna(mp_cv):
+        stability_parts.append(1.0 - float(np.clip(mp_cv / 0.45, 0.0, 1.0)))
+    if pd.notna(mp_trend_pct):
+        stability_parts.append(1.0 - float(np.clip(abs(mp_trend_pct) / 0.35, 0.0, 1.0)))
+    role_stability = float(np.mean(stability_parts)) if stability_parts else 0.5
+
+    form_scale = max(abs(best_estimate), 4.0) if pd.notna(best_estimate) else 8.0
+    form_shift = (
+        float(np.clip(abs(form_vs_season) / form_scale, 0.0, 1.0))
+        if pd.notna(form_vs_season)
+        else 0.0
+    )
+
+    delta = 0.0
+    delta += 0.22 * (0.55 - career_depth)
+    delta += 0.18 * (current_season_share - 0.35)
+    delta += 0.08 * (role_stability - 0.70)
+    delta += 0.08 * (form_shift - 0.15)
+    delta += 0.03 if clean_available else -0.05
+    if pd.notna(absence_recent_gp) and absence_recent_gp <= 2:
+        delta -= 0.10
+
+    fp_weight = float(np.clip(base_fp + delta, 0.15, 0.60))
+    model_weight = float(np.clip(base_model - delta, 0.40, 0.85))
+    total = model_weight + fp_weight
+    if total <= 0:
+        return base_model, base_fp, intercept
+    return model_weight / total, fp_weight / total, intercept
+
+
+def _build_pick_probability_payload(
+    direction: str,
+    dir_prob: Optional[float],
+    raw_p_over: Optional[float] = None,
+    cal_p_over: Optional[float] = None,
+    prob_source: str = 'unknown',
+) -> Dict[str, Optional[float]]:
+    """Return a pick-safe probability payload with explicit side semantics."""
+    dir_prob_val = (
+        float(dir_prob)
+        if dir_prob is not None and not pd.isna(dir_prob)
+        else None
+    )
+    raw_over_val = (
+        float(raw_p_over)
+        if raw_p_over is not None and not pd.isna(raw_p_over)
+        else None
+    )
+    cal_over_val = (
+        float(cal_p_over)
+        if cal_p_over is not None and not pd.isna(cal_p_over)
+        else None
+    )
+
+    raw_under_val = (1.0 - raw_over_val) if raw_over_val is not None else None
+    cal_under_val = (1.0 - cal_over_val) if cal_over_val is not None else None
+
+    return {
+        # Legacy alias: keep the column but make it match the selected pick side.
+        'ou_prob': round(dir_prob_val * 100, 1) if dir_prob_val is not None else None,
+        'dir_prob': round(dir_prob_val * 100, 1) if dir_prob_val is not None else None,
+        'p_over_raw': round(raw_over_val * 100, 1) if raw_over_val is not None else None,
+        'p_over_cal': round(cal_over_val * 100, 1) if cal_over_val is not None else None,
+        'p_under_raw': round(raw_under_val * 100, 1) if raw_under_val is not None else None,
+        'p_under_cal': round(cal_under_val * 100, 1) if cal_under_val is not None else None,
+        'prob_source': prob_source,
+    }
+
+
+def _load_probability_sidecars():
+    sidecars = {}
+    for target in ['pts', 'trb', 'ast', 'stl', 'blk', 'tov']:
+        path = CONFIG['models_dir'] / f'prob_sidecar_{target}_advanced.pkl'
+        if not path.exists():
+            continue
+        try:
+            with open(path, 'rb') as f:
+                sidecars[target] = pickle.load(f)
+        except Exception:
+            continue
+    return sidecars
+
+
+def _load_probability_calibrators():
+    path = CONFIG['models_dir'] / 'probability_calibrator_advanced.pkl'
+    if not path.exists():
+        return {}
+    try:
+        with open(path, 'rb') as f:
+            payload = pickle.load(f)
+        return payload.get('calibrators', {})
+    except Exception:
+        return {}
+
+
+def _attach_probability_outputs(pred_df: pd.DataFrame,
+                                feature_df: pd.DataFrame,
+                                probability_sidecars: Dict[str, object],
+                                probability_calibrators: Optional[Dict[str, object]] = None) -> pd.DataFrame:
+    if len(pred_df) == 0 or not probability_sidecars:
+        return pred_df
+
+    from train_advanced_models import _predict_probability_sidecar
+
+    working = pred_df.copy().reset_index(drop=True)
+    feature_working = feature_df.copy().reset_index(drop=True)
+    probability_calibrators = probability_calibrators or {}
+
+    for target, sidecar in probability_sidecars.items():
+        feature_names = sidecar.get('feature_names', [])
+        X_prob = pd.DataFrame(index=feature_working.index)
+        for col in feature_names:
+            if col in feature_working.columns:
+                X_prob[col] = pd.to_numeric(feature_working[col], errors='coerce')
+            else:
+                X_prob[col] = 0.0
+        line_col = f'{target}_line'
+        lines = working[line_col] if line_col in working.columns else pd.Series(np.nan, index=working.index)
+        details = _predict_probability_sidecar(sidecar, X_prob.fillna(0.0), lines=lines)
+
+        qtags = [tag for tag in quantile_tags() if tag in details]
+        if qtags:
+            scale = pd.Series(1.0, index=working.index, dtype=float)
+            if 'game_total_scale' in working.columns and target in {'pts', 'ast'}:
+                scale = scale * pd.to_numeric(working['game_total_scale'], errors='coerce').fillna(1.0)
+            if 'injury_adj_strength' in working.columns:
+                boost = pd.to_numeric(working['injury_adj_strength'], errors='coerce').fillna(0.0)
+                if target == 'pts':
+                    scale = scale * (1.0 + boost)
+                elif target == 'ast':
+                    scale = scale * (1.0 + boost * 0.90)
+            q_matrix = np.column_stack([np.asarray(details[tag], dtype=float) for tag in qtags])
+            q_matrix = q_matrix * scale.values.reshape(-1, 1)
+            for idx, tag in enumerate(qtags):
+                details[tag] = q_matrix[:, idx]
+                working[f'{target}_{tag}'] = np.round(q_matrix[:, idx], 3)
+            valid_line_mask = pd.to_numeric(lines, errors='coerce').notna().values
+            raw = np.full(len(working), np.nan, dtype=float)
+            if valid_line_mask.any():
+                raw[valid_line_mask] = over_probability_from_quantiles(
+                    pd.to_numeric(lines.loc[valid_line_mask], errors='coerce').values,
+                    q_matrix[valid_line_mask],
+                )
+            details['p_over_raw'] = raw
+
+            # σ = (q75 - q25) / 1.35  — unbiased normal-equivalent std from quantile spread.
+            # Context-conditioned because the quantile models are trained on minutes, usage,
+            # pace, and matchup features.  Exposed as {target}_sigma for downstream use.
+            q25_tag = 'q25'
+            q75_tag = 'q75'
+            if q25_tag in qtags and q75_tag in qtags:
+                q25_idx = qtags.index(q25_tag)
+                q75_idx = qtags.index(q75_tag)
+                sigma_vals = np.clip(
+                    (q_matrix[:, q75_idx] - q_matrix[:, q25_idx]) / 1.35,
+                    0.1, None,
+                )
+                working[f'{target}_sigma'] = np.round(sigma_vals, 3)
+
+        raw_probs = np.asarray(details.get('p_over_raw', np.full(len(working), np.nan)), dtype=float)
+        cal_probs = apply_isotonic_calibrators(raw_probs, target, probability_calibrators) if probability_calibrators else raw_probs
+        working[f'{target}_p_over_raw'] = np.round(raw_probs, 4)
+        working[f'{target}_p_over_cal'] = np.round(cal_probs, 4)
+        if 'rate' in details:
+            working[f'{target}_rate'] = np.round(np.asarray(details['rate'], dtype=float), 4)
+
+    return working
+
+_OFFICIAL_NBA_TEAM_TO_ABBR = {
+    'Atlanta Hawks': 'ATL',
+    'Boston Celtics': 'BOS',
+    'Brooklyn Nets': 'BKN',
+    'Charlotte Hornets': 'CHA',
+    'Chicago Bulls': 'CHI',
+    'Cleveland Cavaliers': 'CLE',
+    'Dallas Mavericks': 'DAL',
+    'Denver Nuggets': 'DEN',
+    'Detroit Pistons': 'DET',
+    'Golden State Warriors': 'GSW',
+    'Houston Rockets': 'HOU',
+    'Indiana Pacers': 'IND',
+    'LA Clippers': 'LAC',
+    'Los Angeles Lakers': 'LAL',
+    'Memphis Grizzlies': 'MEM',
+    'Miami Heat': 'MIA',
+    'Milwaukee Bucks': 'MIL',
+    'Minnesota Timberwolves': 'MIN',
+    'New Orleans Pelicans': 'NOP',
+    'New York Knicks': 'NYK',
+    'Oklahoma City Thunder': 'OKC',
+    'Orlando Magic': 'ORL',
+    'Philadelphia 76ers': 'PHI',
+    'Phoenix Suns': 'PHX',
+    'Portland Trail Blazers': 'POR',
+    'Sacramento Kings': 'SAC',
+    'San Antonio Spurs': 'SAS',
+    'Toronto Raptors': 'TOR',
+    'Utah Jazz': 'UTA',
+    'Washington Wizards': 'WAS',
+}
+
+_INJURY_BUCKET_ORDER = ['out', 'doubtful', 'questionable', 'probable', 'day_to_day', 'available']
 
 
 def _atomic_csv(df: pd.DataFrame, path: Path) -> None:
@@ -181,7 +569,21 @@ def _merge_historical_lines(existing: pd.DataFrame, incoming: pd.DataFrame) -> p
 def _write_historical_lines(df: pd.DataFrame, path: Optional[Path] = None) -> Path:
     path = path or (CONFIG['data_dir'] / 'historical_lines.csv')
     clean = _normalize_historical_lines_frame(df)
+    clean, summary = sanitize_player_names(
+        clean,
+        player_col='player',
+        date_col='game_date',
+        player_norm_col='player_norm',
+        data_dir=CONFIG['data_dir'],
+        drop_unknown=True,
+        require_roster=False,
+    )
     _atomic_csv(clean, Path(path))
+    if summary['canonicalized_rows'] or summary['dropped_rows']:
+        print(
+            f"  Historical line cleanup: {summary['canonicalized_rows']} canonicalized, "
+            f"{summary['dropped_rows']} dropped"
+        )
     return Path(path)
 
 
@@ -535,6 +937,59 @@ def _normalize_name(name: str) -> str:
     return re.sub(r"[^a-z ]", '', name.lower()).strip()
 
 
+def _coerce_slate_date(value: object) -> Optional[str]:
+    ts = pd.to_datetime(value, errors='coerce')
+    if pd.isna(ts):
+        return None
+    return ts.strftime('%Y-%m-%d')
+
+
+def _resolve_active_slate_date(lines_df: pd.DataFrame,
+                               as_of: Optional[datetime] = None) -> Optional[str]:
+    if lines_df is None or len(lines_df) == 0 or 'game_date' not in lines_df.columns:
+        return None
+
+    dates = pd.to_datetime(lines_df['game_date'], errors='coerce').dropna()
+    if dates.empty:
+        return None
+
+    unique_dates = sorted(dates.dt.normalize().unique())
+    as_of_ts = pd.Timestamp(as_of or datetime.now()).normalize()
+    upcoming = [d for d in unique_dates if d >= as_of_ts]
+    chosen = upcoming[0] if upcoming else unique_dates[-1]
+    return pd.Timestamp(chosen).strftime('%Y-%m-%d')
+
+
+def _select_active_slate_lines(lines_df: pd.DataFrame,
+                               as_of: Optional[datetime] = None) -> Tuple[pd.DataFrame, Optional[str]]:
+    if lines_df is None or len(lines_df) == 0:
+        return pd.DataFrame(), None
+
+    working = lines_df.copy()
+    if 'game_date' not in working.columns:
+        fallback_date = pd.Timestamp(as_of or datetime.now()).strftime('%Y-%m-%d')
+        return working.reset_index(drop=True), fallback_date
+
+    working['game_date'] = pd.to_datetime(working['game_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+    working = working.dropna(subset=['game_date']).copy()
+    slate_date = _resolve_active_slate_date(working, as_of=as_of)
+    if slate_date is None:
+        return working.iloc[0:0].copy(), None
+    active = working[working['game_date'] == slate_date].copy()
+    return active.reset_index(drop=True), slate_date
+
+
+def _infer_line_source(lines_df: pd.DataFrame, default: str = 'cached_unknown') -> str:
+    if lines_df is None or len(lines_df) == 0 or 'source' not in lines_df.columns:
+        return default
+    src_vals = lines_df['source'].dropna().astype(str).tolist()
+    if any('prizepicks' in s.lower() for s in src_vals):
+        return 'prizepicks'
+    if any('odds_api' in s.lower() for s in src_vals):
+        return 'odds_api'
+    return default
+
+
 def fetch_prizepicks_lines() -> pd.DataFrame:
     """Fetch today's NBA player props from PrizePicks (free, no API key required)."""
     # PrizePicks stat type → our internal prop key
@@ -561,11 +1016,14 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
 
         # Build player id → name lookup from included
         player_lookup = {}
+        game_lookup = {}
         for item in data.get('included', []):
             if item.get('type') in ('new_player', 'player'):
                 pid = item['id']
                 attrs = item.get('attributes', {})
                 player_lookup[pid] = attrs.get('display_name', attrs.get('name', ''))
+            elif item.get('type') == 'game':
+                game_lookup[item['id']] = item.get('attributes', {})
 
         rows = []
         for proj in data.get('data', []):
@@ -584,7 +1042,20 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
             player_name = player_lookup.get(pid, attrs.get('description', ''))
             if not player_name:
                 continue
+            game_rel = rels.get('game') or {}
+            game_id = (game_rel.get('data') or {}).get('id', '')
+            game_attrs = game_lookup.get(game_id, {})
+            slate_date = (
+                _coerce_slate_date(attrs.get('start_time')) or
+                _coerce_slate_date(attrs.get('board_time')) or
+                _coerce_slate_date(attrs.get('end_time')) or
+                _coerce_slate_date(game_attrs.get('start_time')) or
+                _coerce_slate_date(game_attrs.get('end_time'))
+            )
+            if slate_date is None:
+                continue
             rows.append({
+                'game_date': slate_date,
                 'player': player_name,
                 'prop': prop_key,
                 'line': float(line),
@@ -597,11 +1068,24 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
             return pd.DataFrame()
 
         df = pd.DataFrame(rows)
-        # De-dup: one line per (player, prop)
-        df = df.groupby(['player', 'prop']).agg(
+        # De-dup per slate; PrizePicks can expose tomorrow's board before the
+        # calendar day rolls over, so the real slate date must survive grouping.
+        df = df.groupby(['game_date', 'player', 'prop'], as_index=False).agg(
             line=('line', 'median'), odds=('odds', 'first'), num_books=('num_books', 'sum')
-        ).reset_index()
-        print(f"  Fetched {len(df)} player props from PrizePicks")
+        )
+        df, summary = sanitize_player_names(
+            df,
+            player_col='player',
+            date_col='game_date',
+            player_norm_col=None,
+            data_dir=CONFIG['data_dir'],
+            drop_unknown=True,
+            require_roster=True,
+        )
+        print(
+            f"  Fetched {len(df)} validated player props from PrizePicks "
+            f"({summary['canonicalized_rows']} canonicalized, {summary['dropped_rows']} dropped)"
+        )
         return df
 
     except Exception as e:
@@ -609,8 +1093,12 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def fetch_vegas_lines() -> pd.DataFrame:
-    """Fetch current NBA player prop lines. Tries Odds API first, falls back to PrizePicks."""
+def fetch_vegas_lines() -> tuple:
+    """Fetch current NBA player prop lines. Tries Odds API first, falls back to PrizePicks.
+
+    Returns:
+        (DataFrame, source_label) where source_label is 'odds_api' or 'prizepicks'.
+    """
     api_key = CONFIG['odds_api_key']
 
     # Check if Odds API has remaining credits
@@ -631,6 +1119,7 @@ def fetch_vegas_lines() -> pd.DataFrame:
                     'player_turnovers'
                 ]
                 for event in events[:10]:
+                    event_game_date = _coerce_slate_date(event.get('commence_time')) or datetime.now().strftime('%Y-%m-%d')
                     props_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/events/{event['id']}/odds"
                     pr = requests.get(props_url, params={
                         'apiKey': api_key, 'regions': 'us',
@@ -642,6 +1131,7 @@ def fetch_vegas_lines() -> pd.DataFrame:
                         for market in bookmaker.get('markets', []):
                             for outcome in market.get('outcomes', []):
                                 all_lines.append({
+                                    'game_date': event_game_date,
                                     'player': outcome.get('description', ''),
                                     'prop': market['key'],
                                     'line': outcome.get('point', 0),
@@ -651,43 +1141,62 @@ def fetch_vegas_lines() -> pd.DataFrame:
                                 })
                 if all_lines:
                     df = pd.DataFrame(all_lines)
-                    consolidated = df.groupby(['player', 'prop']).agg(
+                    consolidated = df.groupby(['game_date', 'player', 'prop'], as_index=False).agg(
                         line=('line', 'median'), odds=('odds', 'first'), num_books=('book', 'count')
-                    ).reset_index()
-                    print(f"  Fetched {len(consolidated)} player props (Odds API, {remaining} credits left)")
-                    return consolidated
+                    )
+                    consolidated, summary = sanitize_player_names(
+                        consolidated,
+                        player_col='player',
+                        date_col='game_date',
+                        player_norm_col=None,
+                        data_dir=CONFIG['data_dir'],
+                        drop_unknown=True,
+                        require_roster=True,
+                    )
+                    print(
+                        f"  Fetched {len(consolidated)} validated player props "
+                        f"(Odds API, {remaining} credits left; "
+                        f"{summary['canonicalized_rows']} canonicalized, {summary['dropped_rows']} dropped)"
+                    )
+                    return consolidated, 'odds_api'
         else:
             print(f"  Odds API: {remaining} credits remaining — switching to PrizePicks")
     except Exception as e:
         print(f"  Odds API unavailable ({e}) — switching to PrizePicks")
 
-    return fetch_prizepicks_lines()
+    pp_df = fetch_prizepicks_lines()
+    return pp_df, 'prizepicks'
 
 
-def save_lines_snapshot(vegas_df: pd.DataFrame, game_date: str):
-    """Append today's fetched lines to data/historical_lines.csv.
-    Also saves a morning snapshot on first fetch so line movement can be tracked.
-    """
+def save_lines_snapshot(vegas_df: pd.DataFrame, game_date: Optional[str] = None, source: str = 'live_fetch'):
+    """Append fetched lines to data/historical_lines.csv keyed by their real slate date."""
     if vegas_df is None or len(vegas_df) == 0:
         return
     path = CONFIG['data_dir'] / 'historical_lines.csv'
-    snap = _normalize_historical_lines_frame(
-        vegas_df[['player', 'prop', 'line', 'num_books']].copy(),
-        game_date=game_date,
-        source='live_fetch',
-    )
+    if 'game_date' in vegas_df.columns:
+        snap_input = vegas_df[[c for c in ['game_date', 'player', 'prop', 'line', 'num_books'] if c in vegas_df.columns]].copy()
+        snap_input['game_date'] = pd.to_datetime(snap_input['game_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+        snap_input = snap_input.dropna(subset=['game_date']).copy()
+    else:
+        resolved_game_date = game_date or datetime.now().strftime('%Y-%m-%d')
+        snap_input = vegas_df[[c for c in ['player', 'prop', 'line', 'num_books'] if c in vegas_df.columns]].copy()
+        snap_input['game_date'] = resolved_game_date
+    snap = _normalize_historical_lines_frame(snap_input, source=source)
+    if len(snap) == 0:
+        return
     combined = _merge_historical_lines(_load_historical_lines_frame(path), snap)
     _write_historical_lines(combined, path)
-    _archive_line_snapshot(snap, game_date, stem='lines')
-    day_total = int((combined['game_date'] == game_date).sum())
-    print(f"  Saved {len(snap)} lines -> historical_lines.csv ({game_date}, {day_total} rows kept for day)")
-    # Save morning snapshot on first fetch of the day (used to track line movement)
-    morning_path = CONFIG['data_dir'] / f'lines_morning_{game_date}.csv'
-    if not morning_path.exists():
-        snap[['player', 'prop', 'line']].assign(
-            player_norm=snap['player'].apply(_normalize_name)
-        ).to_csv(morning_path, index=False)
-        print(f"  Morning snapshot saved -> {morning_path.name}")
+    for slate_date in sorted(snap['game_date'].dropna().unique()):
+        slate_snap = snap[snap['game_date'] == slate_date].copy()
+        _archive_line_snapshot(slate_snap, slate_date, stem='lines')
+        day_total = int((combined['game_date'] == slate_date).sum())
+        print(f"  Saved {len(slate_snap)} lines -> historical_lines.csv ({slate_date}, {day_total} rows kept for day)")
+        morning_path = CONFIG['data_dir'] / f'lines_morning_{slate_date}.csv'
+        if not morning_path.exists():
+            slate_snap[['player', 'prop', 'line']].assign(
+                player_norm=slate_snap['player'].apply(_normalize_name)
+            ).to_csv(morning_path, index=False)
+            print(f"  Morning snapshot saved -> {morning_path.name}")
 
 
 def backfill_historical_lines(days: int = 30):
@@ -866,8 +1375,177 @@ def fetch_player_positions() -> pd.DataFrame:
         return pd.DataFrame(columns=['player_norm', 'position_group'])
 
 
-def fetch_injury_data() -> dict:
-    """Fetch current NBA injury report from ESPN. Returns {team: {'out': [...], 'questionable': [...]}}"""
+def _classify_injury_bucket(item: dict) -> Optional[str]:
+    """Map ESPN injury payloads to a coarse pregame availability bucket."""
+    status = str(item.get('status', '') or '').strip().lower()
+    type_desc = str(item.get('type', {}).get('description', '') or '').strip().lower()
+    short_comment = str(item.get('shortComment', '') or '').strip().lower()
+    long_comment = str(item.get('longComment', '') or '').strip().lower()
+    text = ' '.join([type_desc, short_comment, long_comment])
+
+    if status == 'out' or type_desc == 'out':
+        return 'out'
+    if 'doubtful' in text:
+        return 'doubtful'
+    if 'questionable' in text or 'game-time decision' in text or 'gameday decision' in text:
+        return 'questionable'
+    if 'probable' in text or 'expected to play' in text or 'will play' in text:
+        return 'probable'
+    if status == 'day-to-day' or 'day-to-day' in text or 'day to day' in text:
+        return 'day_to_day'
+    return None
+
+
+def _new_injury_entry() -> Dict[str, object]:
+    entry = {bucket: [] for bucket in _INJURY_BUCKET_ORDER}
+    entry['status_map'] = {}
+    entry['not_yet_submitted'] = False
+    entry['report_label'] = ''
+    entry['report_url'] = ''
+    return entry
+
+
+def _ensure_injury_entry(injuries: dict, team_abbr: str) -> Dict[str, object]:
+    if team_abbr not in injuries:
+        injuries[team_abbr] = _new_injury_entry()
+    return injuries[team_abbr]
+
+
+def _set_injury_status(entry: Dict[str, object],
+                       player_norm: str,
+                       bucket: str,
+                       *,
+                       status: str = '',
+                       comment: str = '',
+                       source: str = '',
+                       overwrite: bool = False) -> None:
+    if bucket not in _INJURY_BUCKET_ORDER:
+        return
+    current = entry.get('status_map', {}).get(player_norm)
+    if current and not overwrite:
+        return
+    for existing_bucket in _INJURY_BUCKET_ORDER:
+        if player_norm in entry.get(existing_bucket, []):
+            entry[existing_bucket] = [x for x in entry[existing_bucket] if x != player_norm]
+    entry.setdefault(bucket, []).append(player_norm)
+    entry.setdefault('status_map', {})[player_norm] = {
+        'bucket': bucket,
+        'status': status,
+        'comment': comment,
+        'source': source,
+    }
+
+
+def _parse_official_report_name(tokens: List[str]) -> Optional[str]:
+    for i in range(len(tokens) - 1, -1, -1):
+        if ',' not in tokens[i]:
+            continue
+        start = i
+        if tokens[i] in {'Jr.,', 'Sr.,', 'II,', 'III,', 'IV,', 'V,'} and start > 0:
+            start -= 1
+        while start > 0 and tokens[start - 1].endswith('-'):
+            start -= 1
+        raw = ' '.join(tokens[start:]).replace('- ', '-').strip()
+        if ',' not in raw:
+            continue
+        last, first = raw.split(',', 1)
+        full_name = f"{first.strip()} {last.strip()}".strip()
+        return full_name or None
+    return None
+
+
+def fetch_official_nba_injury_data() -> dict:
+    """Fetch the latest official NBA injury report PDF for current-day statuses."""
+    try:
+        from bs4 import BeautifulSoup
+        from pypdf import PdfReader
+    except Exception:
+        return {}
+
+    page_url = "https://official.nba.com/nba-injury-report-2025-26-season/"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        page = requests.get(page_url, headers=headers, timeout=45)
+        if page.status_code != 200:
+            return {}
+        soup = BeautifulSoup(page.text, 'html.parser')
+        report_links = []
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            text = a.get_text(' ', strip=True)
+            if 'ak-static.cms.nba.com' in href and 'report' in text.lower():
+                report_links.append((text, href))
+        if not report_links:
+            return {}
+
+        report_label, report_url = report_links[-1]
+        pdf_resp = requests.get(report_url, headers=headers, timeout=45)
+        if pdf_resp.status_code != 200 or not pdf_resp.content:
+            return {}
+
+        reader = PdfReader(io.BytesIO(pdf_resp.content))
+        flat_text = re.sub(r'\s+', ' ', ' '.join(page.extract_text() or '' for page in reader.pages)).strip()
+        if not flat_text:
+            return {}
+
+        team_names = sorted(_OFFICIAL_NBA_TEAM_TO_ABBR, key=len, reverse=True)
+        team_alt = '|'.join(re.escape(name) for name in team_names)
+        team_pat = re.compile(
+            rf'({team_alt})(.*?)(?=({team_alt})|\d{{1,2}}:\d{{2}} \(ET\)|$)'
+        )
+        status_bucket_map = {
+            'Out': 'out',
+            'Doubtful': 'doubtful',
+            'Questionable': 'questionable',
+            'Probable': 'probable',
+            'Available': 'available',
+        }
+        injuries = {}
+        for team_name, segment, _ in team_pat.findall(flat_text):
+            team_abbr = _OFFICIAL_NBA_TEAM_TO_ABBR.get(team_name)
+            if not team_abbr:
+                continue
+            entry = _ensure_injury_entry(injuries, team_abbr)
+            entry['report_label'] = report_label
+            entry['report_url'] = report_url
+            pending_segment = 'NOT YET SUBMITTED' in segment.upper()
+            found_status = False
+
+            tokens = segment.split()
+            for idx, token in enumerate(tokens):
+                if token not in status_bucket_map:
+                    continue
+                full_name = _parse_official_report_name(tokens[max(0, idx - 5):idx])
+                if not full_name:
+                    continue
+                player_norm = _normalize_name(full_name)
+                _set_injury_status(
+                    entry,
+                    player_norm,
+                    status_bucket_map[token],
+                    status=token,
+                    comment='NBA official injury report',
+                    source='nba_official',
+                    overwrite=True,
+                )
+                found_status = True
+
+            if found_status:
+                entry['not_yet_submitted'] = False
+            elif pending_segment and not entry.get('status_map'):
+                entry['not_yet_submitted'] = True
+
+        return {
+            team: entry for team, entry in injuries.items()
+            if entry.get('not_yet_submitted') or entry.get('status_map')
+        }
+    except Exception as e:
+        print(f"  Official NBA injury report unavailable: {e}")
+        return {}
+
+
+def _fetch_espn_injury_data() -> dict:
+    """Fetch current ESPN injury data keyed by team abbreviation."""
     url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
     try:
         r = requests.get(url, timeout=10)
@@ -876,62 +1554,228 @@ def fetch_injury_data() -> dict:
         data = r.json()
         injuries = {}
         for team in data.get('injuries', []):
-            abbr = team.get('team', {}).get('abbreviation', '')
-            out, quest = [], []
             for item in team.get('injuries', []):
                 name = item.get('athlete', {}).get('displayName', '')
-                status = item.get('type', {}).get('description', '').lower()
-                if 'out' in status or 'doubtful' in status:
-                    out.append(_normalize_name(name))
-                elif 'questionable' in status:
-                    quest.append(_normalize_name(name))
-            if out or quest:
-                injuries[abbr] = {'out': out, 'questionable': quest}
+                abbr = (
+                    item.get('athlete', {}).get('team', {}).get('abbreviation', '') or
+                    team.get('abbreviation', '') or
+                    ''
+                )
+                if not abbr or not name:
+                    continue
+                bucket = _classify_injury_bucket(item)
+                if bucket is None:
+                    continue
+
+                team_entry = _ensure_injury_entry(injuries, abbr)
+                player_norm = _normalize_name(name)
+                _set_injury_status(
+                    team_entry,
+                    player_norm,
+                    bucket,
+                    status=item.get('status', ''),
+                    comment=item.get('shortComment', '') or item.get('longComment', ''),
+                    source='espn',
+                    overwrite=True,
+                )
         return injuries
     except Exception as e:
         print(f"  Injury data unavailable: {e}")
         return {}
 
 
+def fetch_injury_data() -> dict:
+    """Fetch combined injury/status data, preferring the official NBA report over ESPN."""
+    official = fetch_official_nba_injury_data()
+    espn = _fetch_espn_injury_data()
+
+    injuries = {}
+    for source_data in [official, espn]:
+        for team_abbr, team_data in source_data.items():
+            entry = _ensure_injury_entry(injuries, team_abbr)
+            if team_data.get('not_yet_submitted'):
+                entry['not_yet_submitted'] = True
+            if team_data.get('report_label'):
+                entry['report_label'] = team_data.get('report_label', '')
+            if team_data.get('report_url'):
+                entry['report_url'] = team_data.get('report_url', '')
+
+    for team_abbr, team_data in official.items():
+        entry = _ensure_injury_entry(injuries, team_abbr)
+        for player_norm, detail in team_data.get('status_map', {}).items():
+            _set_injury_status(
+                entry,
+                player_norm,
+                detail.get('bucket', ''),
+                status=detail.get('status', ''),
+                comment=detail.get('comment', ''),
+                source=detail.get('source', 'nba_official'),
+                overwrite=True,
+            )
+
+    for team_abbr, team_data in espn.items():
+        entry = _ensure_injury_entry(injuries, team_abbr)
+        for player_norm, detail in team_data.get('status_map', {}).items():
+            if player_norm in entry.get('status_map', {}):
+                continue
+            _set_injury_status(
+                entry,
+                player_norm,
+                detail.get('bucket', ''),
+                status=detail.get('status', ''),
+                comment=detail.get('comment', ''),
+                source=detail.get('source', 'espn'),
+                overwrite=False,
+            )
+
+    return injuries
+
+
 def apply_injury_adjustments(pred_df, injury_data, df):
-    """Boost predictions when star teammates are OUT."""
+    """Boost offensive predictions only for likely beneficiaries of high-impact absences."""
     pred_df = pred_df.copy()
     pred_df['injury_adj'] = False
     pred_df['teammates_out'] = ''
+    pred_df['injury_adj_strength'] = 0.0
     if not injury_data or pred_df is None or len(pred_df) == 0:
         return pred_df
-    # Build per-team roster from L10 averages
-    latest = df.sort_values('game_date').groupby('player').last().reset_index()
+
+    latest = df.sort_values('game_date').groupby('player').last().reset_index().copy()
     latest['player_norm'] = latest['player'].apply(_normalize_name)
-    stat_cols = ['pts_pred', 'trb_pred', 'ast_pred', 'pra_pred', 'pr_pred', 'pa_pred']
-    for idx, row in pred_df.iterrows():
-        team_injuries = injury_data.get(row.get('team', ''), {})
-        out_list = team_injuries.get('out', [])
-        if not out_list:
+    for col in ['mp_l10', 'pts_l10', 'ast_l10', 'trb_l10', 'usg_pct', 'likely_starter', 'is_starter_proxy']:
+        if col in latest.columns:
+            latest[col] = pd.to_numeric(latest[col], errors='coerce').fillna(0)
+        else:
+            latest[col] = 0.0
+    latest['starter_proxy'] = latest[['likely_starter', 'is_starter_proxy']].max(axis=1)
+    latest['starter_proxy'] = latest['starter_proxy'].where(latest['starter_proxy'] > 0, (latest['mp_l10'] >= 28).astype(float))
+
+    def _clip01(val: float, denom: float) -> float:
+        if denom <= 0:
+            return 0.0
+        return float(max(0.0, min(1.0, val / denom)))
+
+    def _absence_impact_score(player_row: pd.Series) -> float:
+        mp = float(player_row.get('mp_l10', 0.0) or 0.0)
+        pts = float(player_row.get('pts_l10', 0.0) or 0.0)
+        ast = float(player_row.get('ast_l10', 0.0) or 0.0)
+        usg = float(player_row.get('usg_pct', 0.0) or 0.0)
+        starter = float(player_row.get('starter_proxy', 0.0) or 0.0)
+        return (
+            0.38 * _clip01(mp, 36.0) +
+            0.32 * _clip01(pts, 25.0) +
+            0.18 * _clip01(ast, 8.0) +
+            0.08 * _clip01(usg, 0.30) +
+            0.04 * min(1.0, starter)
+        )
+
+    def _beneficiary_score(player_row: pd.Series) -> float:
+        mp = float(player_row.get('mp_l10', 0.0) or 0.0)
+        pts = float(player_row.get('pts_l10', 0.0) or 0.0)
+        ast = float(player_row.get('ast_l10', 0.0) or 0.0)
+        starter = float(player_row.get('starter_proxy', 0.0) or 0.0)
+        return (
+            0.42 * _clip01(mp, 36.0) +
+            0.30 * _clip01(pts, 20.0) +
+            0.20 * _clip01(ast, 6.0) +
+            0.08 * min(1.0, starter)
+        )
+
+    team_adjustments: Dict[str, Dict[str, Dict[str, object]]] = {}
+    for team, team_data in injury_data.items():
+        team_players = latest[latest['team'] == team].copy()
+        if len(team_players) == 0:
             continue
-        team_players = latest[latest['team'] == row.get('team', '')]
-        star_out = 0
-        min_out = 0.0
-        out_names = []
-        for out_norm in out_list:
+
+        absent_norms = set(team_data.get('out', [])) | set(team_data.get('doubtful', []))
+        if not absent_norms:
+            continue
+
+        high_impact_absences = []
+        for out_norm in absent_norms:
             match = team_players[team_players['player_norm'] == out_norm]
             if len(match) == 0:
                 continue
-            p = match.iloc[0]
-            if p.get('pts_l10', 0) > 20:
-                star_out += 1
-            min_out += p.get('mp_l10', 0)
-            out_names.append(p['player'])
-        if star_out == 0 and min_out < 10:
+            player_row = match.iloc[0]
+            impact_score = _absence_impact_score(player_row)
+            high_impact = (
+                impact_score >= 0.72 or
+                (
+                    float(player_row.get('mp_l10', 0.0) or 0.0) >= 28.0 and
+                    (
+                        float(player_row.get('pts_l10', 0.0) or 0.0) >= 18.0 or
+                        float(player_row.get('ast_l10', 0.0) or 0.0) >= 5.0 or
+                        float(player_row.get('usg_pct', 0.0) or 0.0) >= 0.24
+                    )
+                )
+            )
+            if not high_impact:
+                continue
+            high_impact_absences.append({
+                'player': player_row['player'],
+                'player_norm': out_norm,
+                'impact_score': impact_score,
+            })
+
+        if not high_impact_absences:
             continue
-        # Apply boost (capped at 20%)
-        boost = min(0.08 * star_out + 0.005 * (min_out / 10), 0.20)
-        for col in stat_cols:
-            if col in pred_df.columns and pd.notna(pred_df.at[idx, col]):
-                pred_df.at[idx, col] = pred_df.at[idx, col] * (1 + boost)
+
+        severity = sum(item['impact_score'] for item in high_impact_absences)
+        base_boost = min(0.12, 0.025 + 0.035 * severity)
+        blocked_norms = absent_norms | set(team_data.get('questionable', [])) | set(team_data.get('day_to_day', []))
+        active = team_players[~team_players['player_norm'].isin(blocked_norms)].copy()
+        active = active[active['mp_l10'] >= 18.0].copy()
+        if len(active) == 0:
+            continue
+
+        active['benefit_score'] = active.apply(_beneficiary_score, axis=1)
+        active = active[active['benefit_score'] >= 0.48].copy()
+        if len(active) == 0:
+            continue
+        active = active.sort_values(['benefit_score', 'mp_l10', 'pts_l10', 'ast_l10'], ascending=False).head(5)
+
+        multipliers = [1.00, 0.78, 0.58, 0.42, 0.28]
+        out_names = [item['player'] for item in high_impact_absences[:3]]
+        players_map: Dict[str, Dict[str, object]] = {}
+        for rank, (_, player_row) in enumerate(active.iterrows()):
+            player_boost = round(base_boost * multipliers[rank], 4)
+            if player_boost < 0.015:
+                continue
+            players_map[player_row['player_norm']] = {
+                'boost': player_boost,
+                'out_names': out_names,
+            }
+        if players_map:
+            team_adjustments[team] = players_map
+
+    for idx, row in pred_df.iterrows():
+        team = row.get('team', '')
+        player_norm = _normalize_name(str(row.get('player', '')))
+        player_adjustment = team_adjustments.get(team, {}).get(player_norm)
+        if not player_adjustment:
+            continue
+
+        boost = float(player_adjustment['boost'])
+        if 'pts_pred' in pred_df.columns and pd.notna(pred_df.at[idx, 'pts_pred']):
+            pred_df.at[idx, 'pts_pred'] = pred_df.at[idx, 'pts_pred'] * (1.0 + boost)
+        if 'ast_pred' in pred_df.columns and pd.notna(pred_df.at[idx, 'ast_pred']):
+            pred_df.at[idx, 'ast_pred'] = pred_df.at[idx, 'ast_pred'] * (1.0 + boost * 0.90)
+
+        pts_val = pd.to_numeric(pd.Series([pred_df.at[idx, 'pts_pred'] if 'pts_pred' in pred_df.columns else np.nan]), errors='coerce').iloc[0]
+        trb_val = pd.to_numeric(pd.Series([pred_df.at[idx, 'trb_pred'] if 'trb_pred' in pred_df.columns else np.nan]), errors='coerce').iloc[0]
+        ast_val = pd.to_numeric(pd.Series([pred_df.at[idx, 'ast_pred'] if 'ast_pred' in pred_df.columns else np.nan]), errors='coerce').iloc[0]
+        if pd.notna(pts_val) and pd.notna(ast_val):
+            pred_df.at[idx, 'pa_pred'] = round(float(pts_val + ast_val), 1)
+        if pd.notna(pts_val) and pd.notna(trb_val):
+            pred_df.at[idx, 'pr_pred'] = round(float(pts_val + trb_val), 1)
+        if pd.notna(pts_val) and pd.notna(trb_val) and pd.notna(ast_val):
+            pred_df.at[idx, 'pra_pred'] = round(float(pts_val + trb_val + ast_val), 1)
+
         pred_df.at[idx, 'injury_adj'] = True
-        pred_df.at[idx, 'teammates_out'] = ', '.join(out_names[:3])
-    n_adj = pred_df['injury_adj'].sum()
+        pred_df.at[idx, 'injury_adj_strength'] = round(boost, 4)
+        pred_df.at[idx, 'teammates_out'] = ', '.join(player_adjustment['out_names'])
+
+    n_adj = int(pred_df['injury_adj'].sum())
     if n_adj > 0:
         print(f"  Injury adjustments applied to {n_adj} players")
     return pred_df
@@ -959,6 +1803,7 @@ def create_features(df: pd.DataFrame, stats_cutoff=None) -> pd.DataFrame:
     df = df.copy()
     if 'game_date' in df.columns:
         df['game_date'] = pd.to_datetime(df['game_date'], errors='coerce')
+    df = _ensure_nba_season_columns(df)
     df = df.sort_values(['player', 'game_date']).reset_index(drop=True)
 
     # stats_cutoff: when set, global league-average constants are computed from
@@ -969,9 +1814,14 @@ def create_features(df: pd.DataFrame, stats_cutoff=None) -> pd.DataFrame:
     
     # Group by player
     grouped = df.groupby('player')
+    season_grouped = df.groupby(['player', 'season'], dropna=False)
     
     # Games played counter
     df['games_played'] = grouped.cumcount()
+    df['season_games_played'] = season_grouped.cumcount()
+    df['season_sample_reliability'] = (
+        df['season_games_played'] / (df['season_games_played'] + 10.0)
+    ).fillna(0.0).clip(0.0, 1.0)
     
     # -------------------------------------------------------------------------
     # 1. Rolling Averages (L5, L10, L20)
@@ -984,6 +1834,9 @@ def create_features(df: pd.DataFrame, stats_cutoff=None) -> pd.DataFrame:
             df[f'{stat}_l{window}'] = grouped[stat].transform(
                 lambda x: x.shift(1).rolling(window, min_periods=1).mean()
             )
+        df[f'{stat}_season_avg'] = season_grouped[stat].transform(
+            lambda x: x.shift(1).expanding(min_periods=1).mean()
+        )
     
     # Standard deviation
     for stat in ['pts', 'trb', 'ast', 'mp']:
@@ -1048,6 +1901,33 @@ def create_features(df: pd.DataFrame, stats_cutoff=None) -> pd.DataFrame:
         if f'{stat}_ewma' in df.columns and f'{stat}_std' in df.columns:
             df[f'{stat}_consistency'] = df[f'{stat}_std'] / df[f'{stat}_ewma'].replace(0, np.nan)
             df[f'{stat}_consistency'] = df[f'{stat}_consistency'].fillna(1.0).clip(0, 3)
+
+    # Recency-weighted anchor: combine multi-window form with a season-to-date baseline.
+    season_reliability = df.get('season_sample_reliability', pd.Series(0.0, index=df.index)).fillna(0.0)
+    for stat in stats:
+        ewma_col = f'{stat}_ewma'
+        season_col = f'{stat}_season_avg'
+        l5_col = f'{stat}_l5'
+        l10_col = f'{stat}_l10'
+        l20_col = f'{stat}_l20'
+        if not all(col in df.columns for col in [ewma_col, l5_col, l10_col, l20_col]):
+            continue
+
+        recent_stack = (
+            df[ewma_col] * 0.40 +
+            df[l5_col] * 0.25 +
+            df[l10_col] * 0.20 +
+            df[l20_col] * 0.15
+        )
+        season_anchor = df[season_col] if season_col in df.columns else df[l20_col]
+        season_anchor = season_anchor.fillna(df[l20_col]).fillna(recent_stack)
+        season_share = 0.12 + 0.23 * season_reliability
+        df[f'{stat}_recency_anchor'] = (
+            recent_stack * (1.0 - season_share) +
+            season_anchor * season_share
+        )
+        if season_col in df.columns:
+            df[f'{stat}_form_vs_season'] = df[f'{stat}_recency_anchor'] - df[season_col]
     
     # -------------------------------------------------------------------------
     # 3. Trends
@@ -1285,25 +2165,43 @@ def create_features(df: pd.DataFrame, stats_cutoff=None) -> pd.DataFrame:
         # Incorporates: EWMA (recency), situational avg, blowout-weighted L10,
         # luck-adjusted projection (pts only), quality-adjusted p100,
         # and L20 season baseline (regression anchor — prevents chasing hot/cold streaks).
-        ewma    = df.get(f'{stat}_ewma',   df.get(f'{stat}_l5', 0))
-        sit     = df.get(f'{stat}_sit_avg', ewma)
-        wt10    = df.get(f'{stat}_wt_l10',  df.get(f'{stat}_l10', ewma))  # blowout-weighted
-        qa      = df.get(f'{stat}_qa_p100_l10', df.get(f'{stat}_adj_l10', wt10))  # quality-adj
+        ewma = df.get(f'{stat}_ewma', df.get(f'{stat}_l5', 0))
+        sit = df.get(f'{stat}_sit_avg', ewma)
+        wt10 = df.get(f'{stat}_wt_l10', df.get(f'{stat}_l10', ewma))
+        qa = df.get(f'{stat}_qa_p100_l10', df.get(f'{stat}_adj_l10', wt10))
         # Season baseline — L20 prevents over-extrapolating recent streaks
-        season  = df.get(f'{stat}_l20', df.get(f'{stat}_l10', ewma))
+        season = df.get(f'{stat}_season_avg', df.get(f'{stat}_l20', df.get(f'{stat}_l10', ewma)))
+        anchor = df.get(f'{stat}_recency_anchor', ewma)
+        df[f'{stat}_best_estimate'] = (
+            anchor * 0.45 +
+            sit * 0.15 +
+            wt10 * 0.15 +
+            qa * 0.10 +
+            season * 0.15
+        )
+        df[f'{stat}_synthetic_line'] = season
 
         if stat == 'pts' and 'pts_regression_proj' in df.columns:
             luck_proj = df['pts_regression_proj']
-            df[f'{stat}_pred'] = (ewma * 0.20 + sit * 0.15 + wt10 * 0.15
+            df[f'{stat}_pred'] = (anchor * 0.25 + sit * 0.15 + wt10 * 0.10
                                   + qa * 0.10 + luck_proj * 0.15 + season * 0.25)
         else:
-            df[f'{stat}_pred'] = (ewma * 0.25 + sit * 0.15 + wt10 * 0.20
+            df[f'{stat}_pred'] = (anchor * 0.30 + sit * 0.15 + wt10 * 0.15
                                   + qa * 0.15 + season * 0.25)
+
+        df[f'{stat}_edge_vs_avg'] = df[f'{stat}_best_estimate'] - df[f'{stat}_synthetic_line']
+        df[f'{stat}_pct_diff'] = (
+            df[f'{stat}_edge_vs_avg'] / df[f'{stat}_synthetic_line'].replace(0, np.nan)
+        ).fillna(0.0)
+        df[f'{stat}_vegas_slow'] = (
+            df[f'{stat}_edge_vs_avg'].abs() > df[f'{stat}_synthetic_line'].abs().fillna(0) * 0.1
+        ).astype(int)
 
         # Confidence (inverse of consistency, scaled by games)
         cons = df.get(f'{stat}_consistency', 0.5)
         games_factor = (df['games_played'] / 20).clip(0, 1)
-        df[f'{stat}_conf'] = ((1 / cons.clip(0.3, 2)) * games_factor).clip(0, 1)
+        sample_factor = 0.6 + 0.4 * df.get('season_sample_reliability', pd.Series(0.0, index=df.index)).fillna(0.0)
+        df[f'{stat}_conf'] = ((1 / cons.clip(0.3, 2)) * games_factor * sample_factor).clip(0, 1)
     
     # Combo stats predictions
     df['pra_pred'] = df['pts_pred'] + df['trb_pred'] + df['ast_pred']
@@ -1857,13 +2755,21 @@ def _build_advanced_features(df: pd.DataFrame) -> pd.DataFrame:
         if f'{stat}_best_estimate' in df.columns:
             continue
         components, weights = [], []
+        anchor_col = f'{stat}_recency_anchor'
         ewma_col = f'{stat}_ewma5'
-        if ewma_col in df.columns:
-            components.append(df[ewma_col]); weights.append(0.4)
+        if anchor_col in df.columns:
+            components.append(df[anchor_col]); weights.append(0.45)
+        elif ewma_col in df.columns:
+            components.append(df[ewma_col]); weights.append(0.35)
         if f'{stat}_defense_adj' in df.columns:
-            components.append(df[f'{stat}_defense_adj']); weights.append(0.3)
+            components.append(df[f'{stat}_defense_adj']); weights.append(0.20)
         if f'{stat}_situational_avg' in df.columns:
-            components.append(df[f'{stat}_situational_avg']); weights.append(0.3)
+            components.append(df[f'{stat}_situational_avg']); weights.append(0.15)
+        if f'{stat}_season_avg' in df.columns:
+            components.append(df[f'{stat}_season_avg'].fillna(df.get(f'{stat}_l20')))
+            weights.append(0.15)
+        if f'{stat}_l20' in df.columns:
+            components.append(df[f'{stat}_l20']); weights.append(0.05)
         if components:
             total_w = sum(weights)
             df[f'{stat}_best_estimate'] = sum(c * w for c, w in zip(components, weights)) / total_w
@@ -1874,10 +2780,15 @@ def _build_advanced_features(df: pd.DataFrame) -> pd.DataFrame:
     for stat in stats:
         if f'{stat}_vegas_slow' in df.columns:
             continue
-        ewma_col = f'{stat}_ewma5'
-        if ewma_col in df.columns and f'{stat}_l10' in df.columns:
-            edge = df[ewma_col] - df[f'{stat}_l10']
-            df[f'{stat}_vegas_slow'] = (edge.abs() > df[f'{stat}_l10'].abs() * 0.1).astype(int)
+        anchor_col = f'{stat}_recency_anchor' if f'{stat}_recency_anchor' in df.columns else (
+            f'{stat}_ewma5' if f'{stat}_ewma5' in df.columns else None
+        )
+        baseline_col = f'{stat}_synthetic_line' if f'{stat}_synthetic_line' in df.columns else (
+            f'{stat}_season_avg' if f'{stat}_season_avg' in df.columns else f'{stat}_l10'
+        )
+        if anchor_col is not None and baseline_col in df.columns:
+            edge = df[anchor_col] - df[baseline_col]
+            df[f'{stat}_vegas_slow'] = (edge.abs() > df[baseline_col].abs().fillna(0) * 0.1).astype(int)
         else:
             df[f'{stat}_vegas_slow'] = 0
 
@@ -1968,11 +2879,15 @@ def _build_advanced_features(df: pd.DataFrame) -> pd.DataFrame:
         edge_col = f'{stat}_edge_vs_avg'
         pct_col  = f'{stat}_pct_diff'
         if edge_col not in df.columns:
-            ewma_col = f'{stat}_ewma5' if f'{stat}_ewma5' in df.columns else f'{stat}_ewma'
-            l10_col  = f'{stat}_l10'
-            if ewma_col in df.columns and l10_col in df.columns:
-                df[edge_col] = df[ewma_col] - df[l10_col]
-                df[pct_col]  = (df[edge_col] / df[l10_col].replace(0, np.nan)).fillna(0)
+            anchor_col = f'{stat}_recency_anchor' if f'{stat}_recency_anchor' in df.columns else (
+                f'{stat}_ewma5' if f'{stat}_ewma5' in df.columns else f'{stat}_ewma'
+            )
+            baseline_col = f'{stat}_synthetic_line' if f'{stat}_synthetic_line' in df.columns else (
+                f'{stat}_season_avg' if f'{stat}_season_avg' in df.columns else f'{stat}_l10'
+            )
+            if anchor_col in df.columns and baseline_col in df.columns:
+                df[edge_col] = df[anchor_col] - df[baseline_col]
+                df[pct_col]  = (df[edge_col] / df[baseline_col].replace(0, np.nan)).fillna(0)
 
     # --- Team scoring trend ---
     if 'team_scoring_trend' not in df.columns and 'team' in df.columns:
@@ -2032,14 +2947,24 @@ def _load_advanced_models():
         feature_cols = None
         ALL_STATS = ['pts', 'trb', 'ast', 'pra', 'pr', 'pa', 'stl', 'blk', 'tov']
 
+        selected_features = {}
+        sel_path = models_dir / 'selected_features_advanced.json'
+        if sel_path.exists():
+            with open(sel_path) as f:
+                selected_features = json.load(f)
+
         for stat in ALL_STATS:
             reg_path = models_dir / f'xgb_{stat}_advanced.pkl'
             if not reg_path.exists():
-                return None, None, {}, {}
+                return None, None, {}, {}, {}, {}, {'edge': {}, 'meta': {}}
             with open(reg_path, 'rb') as f:
                 models[stat] = pickle.load(f)
             if feature_cols is None:
-                feature_cols = models[stat].get_booster().feature_names
+                model_obj = models[stat]
+                if isinstance(model_obj, dict):
+                    feature_cols = model_obj.get('feature_names')
+                elif hasattr(model_obj, 'get_booster'):
+                    feature_cols = model_obj.get_booster().feature_names
 
             clf_path = models_dir / f'clf_{stat}_advanced.pkl'
             if clf_path.exists():
@@ -2053,13 +2978,11 @@ def _load_advanced_models():
             if meta_path.exists():
                 with open(meta_path, 'rb') as f:
                     meta_models[stat] = pickle.load(f)
-
-        # Load per-stat selected feature lists (used so classifier gets same columns as training)
-        selected_features = {}
-        sel_path = models_dir / 'selected_features_advanced.json'
-        if sel_path.exists():
-            with open(sel_path) as f:
-                selected_features = json.load(f)
+        if feature_cols is None and selected_features:
+            merged_features = []
+            for cols in selected_features.values():
+                merged_features.extend(cols)
+            feature_cols = list(dict.fromkeys(merged_features))
 
         market_feature_sets = {'edge': {}, 'meta': {}}
         market_path = models_dir / 'market_feature_sets_advanced.json'
@@ -2290,8 +3213,52 @@ def _merge_layer_features(df: pd.DataFrame) -> pd.DataFrame:
 
     merged = df.merge(layer_df[join_keys + cols_to_add],
                       on=join_keys, how='left')
-    matched = merged[cols_to_add[0]].notna().sum() if cols_to_add else 0
-    print(f"  [Layer features] Merged {len(cols_to_add)} features — {matched:,}/{len(df):,} rows matched")
+
+    unmatched_mask = merged[cols_to_add[0]].isna() if cols_to_add else pd.Series(False, index=merged.index)
+    n_recovered = 0
+
+    # Name-based fallback: when the primary join was on player_id and some rows still
+    # didn't match (e.g. new callups, ID format drift), attempt a second pass using
+    # diacritic-normalized player name + season.
+    if join_keys == ['player_id', 'season'] and unmatched_mask.any() \
+            and 'player' in layer_df.columns and 'player' in merged.columns:
+        import unicodedata
+
+        def _norm(s: str) -> str:
+            s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode('ascii')
+            return s.lower().strip()
+
+        nl = layer_df[['player', 'season'] + cols_to_add].copy()
+        nl['_pnorm'] = nl['player'].apply(_norm)
+        nl = nl.drop(columns=['player']).drop_duplicates(subset=['_pnorm', 'season'])
+
+        merged['_pnorm'] = merged['player'].apply(_norm)
+
+        um_rows = merged.loc[unmatched_mask, ['_pnorm', 'season']].merge(
+            nl, on=['_pnorm', 'season'], how='left'
+        )
+        for col in cols_to_add:
+            if col in um_rows.columns:
+                merged.loc[unmatched_mask, col] = um_rows[col].values
+
+        merged.drop(columns=['_pnorm'], inplace=True)
+
+        still_unmatched = merged[cols_to_add[0]].isna()
+        n_recovered = int(unmatched_mask.sum()) - int(still_unmatched.sum())
+        unmatched_mask = still_unmatched
+
+    n_matched_final = int((~unmatched_mask).sum())
+    recover_note = f" (+{n_recovered} via name fallback)" if n_recovered > 0 else ""
+    print(f"  [Layer features] Merged {len(cols_to_add)} features — {n_matched_final:,}/{len(df):,} rows matched{recover_note}")
+
+    if unmatched_mask.any() and 'player' in merged.columns:
+        missing = sorted(merged.loc[unmatched_mask, 'player'].dropna().unique().tolist())
+        print(f"  [Layer features] WARNING — {len(missing)} players without enriched features (predictions use rolling averages only):")
+        for name in missing[:40]:
+            print(f"    - {name}")
+        if len(missing) > 40:
+            print(f"    ... and {len(missing) - 40} more")
+
     return merged
 
 
@@ -2871,9 +3838,36 @@ def predict_ou_proba(pred_df, feat_df):
 # PREDICTION
 # =============================================================================
 
-def _predict(model_obj, X):
+def _predict(model_obj, X, fp_input=None):
     """Get prediction from either an ensemble dict or a plain model."""
     if isinstance(model_obj, dict):
+        if model_obj.get('kind') in {'ridge_blend_regressor', 'positive_ridge_blend_regressor'}:
+            base_preds = []
+            for base_name in model_obj.get('base_order', []):
+                if base_name == 'fp':
+                    if fp_input is None:
+                        base_preds.append(np.zeros(len(X), dtype=float))
+                    else:
+                        if isinstance(fp_input, pd.Series):
+                            fp_values = pd.to_numeric(fp_input, errors='coerce').to_numpy(dtype=float, copy=False)
+                        else:
+                            fp_values = pd.to_numeric(
+                                pd.Series(np.asarray(fp_input).reshape(-1)),
+                                errors='coerce',
+                            ).to_numpy(dtype=float, copy=False)
+                        fp_values = np.nan_to_num(fp_values, nan=0.0, posinf=0.0, neginf=0.0)
+                        if fp_values.size == 1 and len(X) != 1:
+                            fp_values = np.full(len(X), float(fp_values[0]), dtype=float)
+                        elif fp_values.size != len(X):
+                            raise ValueError(
+                                f"FP input length {fp_values.size} does not match feature rows {len(X)}"
+                            )
+                        base_preds.append(fp_values.astype(float, copy=False))
+                    continue
+                base_model = model_obj['base_models'][base_name]
+                base_preds.append(np.asarray(base_model.predict(X), dtype=float))
+            blend_X = np.column_stack(base_preds)
+            return np.asarray(model_obj['blender'].predict(blend_X), dtype=float)
         p = model_obj['xgb'].predict(X) * model_obj['xgb_w']
         if model_obj['lgb'] is not None:
             p = p + model_obj['lgb'].predict(X) * model_obj['lgb_w']
@@ -3008,12 +4002,16 @@ def generate_predictions(
         is_residual = False
         clf_models   = adv_classifiers   # stat -> XGBClassifier P(OVER)
         clf_selected = adv_selected       # stat -> list of selected feature names
+        probability_sidecars = _load_probability_sidecars()
+        probability_calibrators = _load_probability_calibrators()
     else:
         clf_models   = {}
         clf_selected = {}
         adv_edge_models = {}
         adv_meta_models = {}
         adv_market_sets = {'edge': {}, 'meta': {}}
+        probability_sidecars = {}
+        probability_calibrators = {}
 
     # Load prediction bias calibration (computed from OOF residuals during training)
     pred_biases = {}
@@ -3037,6 +4035,11 @@ def generate_predictions(
 
     print("\nGenerating predictions...")
     latest = _prepare_latest_prediction_frame(df, using_advanced, use_cache=use_feature_cache)
+    primitive_fp_integrated = using_advanced and any(
+        isinstance(models.get(stat), dict) and models.get(stat, {}).get('kind') == 'positive_ridge_blend_regressor'
+        for stat in ['pts', 'trb', 'ast']
+    )
+    live_fp_lookup = _load_live_fp_projection_lookup() if primitive_fp_integrated else None
 
     print(f"  {len(latest)} players with sufficient history")
 
@@ -3050,6 +4053,8 @@ def generate_predictions(
     if using_advanced:
         for target_name, model in models.items():
             target_features = clf_selected.get(target_name)
+            if not target_features and isinstance(model, dict):
+                target_features = model.get('feature_names')
             if not target_features and hasattr(model, 'get_booster'):
                 target_features = model.get_booster().feature_names
             if target_features:
@@ -3080,6 +4085,7 @@ def generate_predictions(
     for idx, row in latest.iterrows():
         player = row['player']
         team = row.get('team', row.get('TEAM_ABBREVIATION', ''))
+        player_fp_applied = False
         
         player_preds = {
             'player': player,
@@ -3114,8 +4120,14 @@ def generate_predictions(
             l10_val = row.get(l10_col) if l10_col in row.index else None
             if pd.isna(l10_val):
                 l10_val = None
+            anchor_val = _row_prop_feature(row, target_name, 'best_estimate')
+            if anchor_val is None:
+                anchor_val = _row_prop_feature(row, target_name, 'recency_anchor')
+            if anchor_val is None:
+                anchor_val = l10_val
 
             player_preds[f'{target_name}_l10'] = round(l10_val, 1) if l10_val else None
+            player_preds[f'{target_name}_anchor'] = round(anchor_val, 1) if anchor_val is not None else None
 
             # Store L5 as well (needed for L5 confirmation filter in filter_best_picks)
             l5_col = f'{target_name}_l5'
@@ -3126,6 +4138,8 @@ def generate_predictions(
             reg_features = None
             if using_advanced:
                 reg_features = clf_selected.get(target_name)
+                if not reg_features and isinstance(model, dict):
+                    reg_features = model.get('feature_names')
                 if not reg_features and hasattr(model, 'get_booster'):
                     reg_features = model.get_booster().feature_names
             else:
@@ -3133,15 +4147,19 @@ def generate_predictions(
 
             reg_features = [c for c in (reg_features or []) if c in X_player.columns]
             X_reg = X_player[reg_features].fillna(0) if reg_features else X_player
-            raw_pred = _predict(model, X_reg)[0]
+            fp_input = None
+            if primitive_fp_integrated and target_name in {'pts', 'trb', 'ast'} and isinstance(model, dict) and model.get('kind') == 'positive_ridge_blend_regressor':
+                fp_input = np.array([_row_fp_projection(row, target_name, live_fp_lookup)])
+            raw_pred = _predict(model, X_reg, fp_input=fp_input)[0]
 
             if is_residual:
-                # Model predicts deviation from L10; add the anchor back
-                base_pred = (l10_val or 0) + raw_pred
+                base_pred = (anchor_val or 0) + raw_pred
             else:
-                # Legacy: blend model output with L10 anchor
-                if l10_val is not None and l10_val > 0:
-                    base_pred = raw_pred * 0.7 + l10_val * 0.3
+                if primitive_fp_integrated and target_name in {'pts', 'trb', 'ast'} and isinstance(model, dict) and model.get('kind') == 'positive_ridge_blend_regressor':
+                    base_pred = raw_pred
+                    player_fp_applied = True
+                elif anchor_val is not None:
+                    base_pred = raw_pred * 0.7 + anchor_val * 0.3
                 else:
                     base_pred = raw_pred
 
@@ -3199,6 +4217,8 @@ def generate_predictions(
             player_preds['pra_l5'] = round(pts_l5 + trb_l5 + ast_l5, 1)
             player_preds['pr_l5'] = round(pts_l5 + trb_l5, 1)
             player_preds['pa_l5'] = round(pts_l5 + ast_l5, 1)
+
+        player_preds['fp_applied'] = player_fp_applied
         
         predictions.append(player_preds)
     
@@ -3211,6 +4231,7 @@ def generate_predictions(
     else:
         pred_df['injury_adj'] = False
         pred_df['teammates_out'] = ''
+        pred_df['injury_adj_strength'] = 0.0
 
     # Apply game total scaling: if game total is above league avg → boost predictions slightly
     if apply_game_totals:
@@ -3228,11 +4249,12 @@ def generate_predictions(
             team_totals[row['away_team']] = {'scale': scale, 'total': row.get('total'), 'spread': -row.get('spread', 0) if pd.notna(row.get('spread')) else 0}
         pred_df['game_total'] = pred_df['team'].map(lambda t: team_totals.get(t, {}).get('total'))
         pred_df['team_spread'] = pred_df['team'].map(lambda t: team_totals.get(t, {}).get('spread', 0))
+        pred_df['game_total_scale'] = pred_df['team'].map(lambda t: team_totals.get(t, {}).get('scale', 1.0)).fillna(1.0)
         # Scale pts/ast predictions by game environment (trb/stl/blk less affected by pace)
         for stat in ['pts', 'ast', 'pra', 'pa']:
             pred_col = f'{stat}_pred'
             if pred_col in pred_df.columns:
-                scale_vec = pred_df['team'].map(lambda t: team_totals.get(t, {}).get('scale', 1.0)).fillna(1.0)
+                scale_vec = pred_df['game_total_scale']
                 pred_df[pred_col] = (pred_df[pred_col] * scale_vec).round(1)
         n_games = len(totals_df)
         avg_total = totals_df['total'].mean()
@@ -3240,11 +4262,18 @@ def generate_predictions(
     else:
         pred_df['game_total'] = None
         pred_df['team_spread'] = 0
+        pred_df['game_total_scale'] = 1.0
         print("  Game totals unavailable — skipping")
 
     # Merge with Vegas lines if available
     if vegas_lines is not None and len(vegas_lines) > 0:
         pred_df = merge_vegas_lines(pred_df, vegas_lines)
+        pred_df = _attach_probability_outputs(
+            pred_df,
+            latest,
+            probability_sidecars,
+            probability_calibrators,
+        )
 
     # Line movement: compare current lines vs morning snapshot
     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -3286,10 +4315,10 @@ def generate_predictions(
     if not using_advanced:
         pred_df = predict_ou_proba(pred_df, latest)
 
-    # Blend in First-Principles projections (35% FP / 65% XGB)
-    if apply_fp_blend:
-        pred_df = apply_first_principles_adjustments(pred_df)
-    else:
+    # Blend in First-Principles projections using learned weights when available
+    if apply_fp_blend and not primitive_fp_integrated:
+        pred_df = apply_first_principles_adjustments(pred_df, latest)
+    elif 'fp_applied' not in pred_df.columns:
         pred_df['fp_applied'] = False
 
     if using_advanced:
@@ -3304,8 +4333,8 @@ def generate_predictions(
     return pred_df
 
 
-def apply_first_principles_adjustments(pred_df: pd.DataFrame) -> pd.DataFrame:
-    """Blend player_projections_today.csv (35%) into XGBoost predictions (65%)."""
+def apply_first_principles_adjustments(pred_df: pd.DataFrame, feature_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """Blend player_projections_today.csv into model predictions using adaptive per-player weights."""
     proj_path = _HERE / 'data' / 'player_projections_today.csv'
     if not proj_path.exists():
         print("  [First-Principles] player_projections_today.csv not found -- skipping blend")
@@ -3316,10 +4345,34 @@ def apply_first_principles_adjustments(pred_df: pd.DataFrame) -> pd.DataFrame:
     fp['_norm'] = fp['player'].apply(_normalize_name)
     pred_df['_norm'] = pred_df['player'].apply(_normalize_name)
     fp_lookup = fp.drop_duplicates(subset='_norm', keep='first').set_index('_norm')
+    feature_lookup = None
+    if feature_df is not None and 'player' in feature_df.columns:
+        feature_working = feature_df.copy()
+        feature_working['_norm'] = feature_working['player'].apply(_normalize_name)
+        feature_lookup = feature_working.drop_duplicates(subset='_norm', keep='first').set_index('_norm')
 
-    FP_WEIGHT  = 0.35
-    XGB_WEIGHT = 0.65
+    learned_weights = {}
+    weights_path = CONFIG['models_dir'] / 'fp_blend_weights_advanced.json'
+    if weights_path.exists():
+        try:
+            with open(weights_path) as f:
+                learned_weights = json.load(f)
+        except Exception:
+            learned_weights = {}
+
+    default_weights = {
+        'model_weight': 0.65,
+        'fp_weight': 0.35,
+        'intercept': 0.0,
+    }
+    blend_map = {
+        'pts': ('proj_pts_final', 'pts_pred'),
+        'trb': ('proj_reb', 'trb_pred'),
+        'ast': ('proj_ast', 'ast_pred'),
+    }
     applied = 0
+    learned_prior_stats = 0
+    weight_stats = {stat: [] for stat in blend_map}
 
     for idx, row in pred_df.iterrows():
         key = row['_norm']
@@ -3327,16 +4380,33 @@ def apply_first_principles_adjustments(pred_df: pd.DataFrame) -> pd.DataFrame:
             pred_df.at[idx, 'fp_applied'] = False
             continue
         fp_row = fp_lookup.loc[key]
+        feature_row = feature_lookup.loc[key] if feature_lookup is not None and key in feature_lookup.index else row
 
-        if 'proj_pts_final' in fp_row and pd.notna(fp_row['proj_pts_final']):
-            orig = pred_df.at[idx, 'pts_pred']
-            pred_df.at[idx, 'pts_pred'] = round(XGB_WEIGHT * orig + FP_WEIGHT * float(fp_row['proj_pts_final']), 1)
-        if 'proj_reb' in fp_row and pd.notna(fp_row['proj_reb']):
-            orig = pred_df.at[idx, 'trb_pred']
-            pred_df.at[idx, 'trb_pred'] = round(XGB_WEIGHT * orig + FP_WEIGHT * float(fp_row['proj_reb']), 1)
-        if 'proj_ast' in fp_row and pd.notna(fp_row['proj_ast']):
-            orig = pred_df.at[idx, 'ast_pred']
-            pred_df.at[idx, 'ast_pred'] = round(XGB_WEIGHT * orig + FP_WEIGHT * float(fp_row['proj_ast']), 1)
+        used_any = False
+        for stat, (fp_col, pred_col) in blend_map.items():
+            if fp_col not in fp_row or pd.isna(fp_row[fp_col]) or pred_col not in pred_df.columns:
+                continue
+            orig = pred_df.at[idx, pred_col]
+            if pd.isna(orig):
+                continue
+            weights = learned_weights.get(stat, default_weights)
+            model_weight, fp_weight, intercept = _adaptive_fp_blend_weights(
+                stat,
+                row,
+                fp_row,
+                feature_row,
+                weights,
+            )
+            blended = (
+                model_weight * float(orig) +
+                fp_weight * float(fp_row[fp_col]) +
+                intercept
+            )
+            pred_df.at[idx, pred_col] = round(max(0.0, blended), 1)
+            used_any = True
+            if stat in learned_weights:
+                learned_prior_stats += 1
+            weight_stats[stat].append(fp_weight)
 
         pts = pred_df.at[idx, 'pts_pred'] or 0
         trb = pred_df.at[idx, 'trb_pred'] or 0
@@ -3344,11 +4414,26 @@ def apply_first_principles_adjustments(pred_df: pd.DataFrame) -> pd.DataFrame:
         pred_df.at[idx, 'pra_pred'] = round(pts + trb + ast, 1)
         pred_df.at[idx, 'pr_pred']  = round(pts + trb, 1)
         pred_df.at[idx, 'pa_pred']  = round(pts + ast, 1)
-        pred_df.at[idx, 'fp_applied'] = True
-        applied += 1
+        pred_df.at[idx, 'fp_applied'] = used_any
+        if used_any:
+            applied += 1
 
     pred_df.drop(columns=['_norm'], inplace=True)
-    print(f"  [First-Principles] Blended {applied}/{len(pred_df)} players (35% FP / 65% XGB)")
+    summary_parts = []
+    for stat in ['pts', 'trb', 'ast']:
+        if weight_stats[stat]:
+            summary_parts.append(
+                f"{stat.upper()} fp_w {np.mean(weight_stats[stat]):.2f} [{np.min(weight_stats[stat]):.2f},{np.max(weight_stats[stat]):.2f}]"
+            )
+    if learned_weights:
+        print(
+            f"  [First-Principles] Blended {applied}/{len(pred_df)} players using adaptive FP weights "
+            f"with learned stat priors ({learned_prior_stats} stat-level learned applications)"
+        )
+    else:
+        print(f"  [First-Principles] Blended {applied}/{len(pred_df)} players using adaptive fallback weights")
+    if summary_parts:
+        print(f"    {' | '.join(summary_parts)}")
     return pred_df
 
 
@@ -3410,7 +4495,14 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
     policy = {}
     for stat, default in fallback.items():
         res = results.get(stat, {})
-        edge_res = edge_analysis.get(stat, {}) if isinstance(edge_analysis, dict) else {}
+        # Support both flat {stat: {...}} and nested {'per_target': {stat: {...}}} formats
+        if isinstance(edge_analysis, dict):
+            if 'per_target' in edge_analysis:
+                edge_res = edge_analysis['per_target'].get(stat, {})
+            else:
+                edge_res = edge_analysis.get(stat, {})
+        else:
+            edge_res = {}
         real_acc = res.get('avg_bet_accuracy')
         proxy_acc = res.get('avg_proxy_bet_accuracy')
         market_hit = res.get('market_edge_sign_accuracy')
@@ -3561,6 +4653,32 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             min_meta_prob = min(min_meta_prob, 0.56)
             min_edge_under = min(min_edge_under, max(0.60, rmse * 0.30))
 
+        priority_under_lane = False
+        priority_under_min_edge = min_edge_under
+        priority_under_support_gap = 0.0
+        priority_under_conf_bonus = 0.0
+        priority_under_rank_bonus = 0.0
+        priority_under_selection_priority = 0.0
+        priority_under_require_l10 = True
+        priority_under_require_l5 = False
+        if stat in {'ast', 'trb'} and allow_under:
+            under_hit_floor = 0.64 if stat == 'ast' else 0.61
+            under_01_floor = 0.63 if stat == 'ast' else 0.58
+            under_12_floor = 0.66 if stat == 'ast' else 0.64
+            priority_under_lane = (
+                under_n >= 800 and
+                under_hit is not None and under_hit >= under_hit_floor and
+                under_0_1_hit is not None and under_0_1_hit >= under_01_floor and
+                under_1_2_hit is not None and under_1_2_hit >= under_12_floor
+            )
+            if priority_under_lane:
+                priority_under_min_edge = max(min_edge_under, 0.85 if stat == 'ast' else 0.90)
+                priority_under_support_gap = 0.60 if stat == 'ast' else 0.75
+                priority_under_conf_bonus = 0.045 if stat == 'ast' else 0.030
+                priority_under_rank_bonus = 0.035 if stat == 'ast' else 0.025
+                priority_under_selection_priority = 1.00 if stat == 'ast' else 0.70
+                priority_under_require_l5 = True
+
         policy[stat] = {
             'allowed': allowed,
             'allow_over': allow_over,
@@ -3586,6 +4704,14 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             'market_hit': round(market_hit, 4) if market_hit is not None else None,
             'meta_auc': round(meta_auc, 4) if meta_auc is not None else None,
             'meta_top_hit': round(meta_top_hit, 4) if meta_top_hit is not None else None,
+            'priority_under_lane': priority_under_lane,
+            'priority_under_min_edge': round(priority_under_min_edge, 3),
+            'priority_under_support_gap': round(priority_under_support_gap, 3),
+            'priority_under_conf_bonus': round(priority_under_conf_bonus, 3),
+            'priority_under_rank_bonus': round(priority_under_rank_bonus, 3),
+            'priority_under_selection_priority': round(priority_under_selection_priority, 3),
+            'priority_under_require_l10': priority_under_require_l10,
+            'priority_under_require_l5': priority_under_require_l5,
         }
 
     return policy
@@ -3711,25 +4837,33 @@ def _filter_best_picks_legacy(pred_df: pd.DataFrame) -> pd.DataFrame:
             else:
                 continue  # No meaningful edge
 
-            # --- Get player std for this prop ---
+            # --- Get player σ for this prop ---
+            # Primary: model-predicted σ = (q75 - q25) / 1.35.  Context-conditioned on
+            # minutes stability, usage, pace, and matchup via the quantile sidecar.
+            # Fallback: rolling historical std from the feature pipeline.
             _composite_std_components = {
                 'pra': ['pts_std', 'trb_std', 'ast_std'],
                 'pr':  ['pts_std', 'trb_std'],
                 'pa':  ['pts_std', 'ast_std'],
             }
-            if prop in _composite_std_components:
-                comp_stds = [row.get(c) for c in _composite_std_components[prop]]
-                valid_stds = [s for s in comp_stds if s and not pd.isna(s) and s > 0]
-                std_val = sum(valid_stds) if valid_stds else None
-            else:
-                std_val = row.get(f'{prop}_std')
-                if std_val is None or pd.isna(std_val):
-                    std_val = row.get(f'{prop.split("_")[0]}_std')
+            std_val = row.get(f'{prop}_sigma')
+            if not std_val or pd.isna(std_val) or float(std_val) <= 0:
+                # No quantile sidecar σ available — fall back to rolling std
+                if prop in _composite_std_components:
+                    comp_stds = [row.get(c) for c in _composite_std_components[prop]]
+                    valid_stds = [s for s in comp_stds if s and not pd.isna(s) and s > 0]
+                    std_val = sum(valid_stds) if valid_stds else None
+                else:
+                    std_val = row.get(f'{prop}_std')
+                    if std_val is None or pd.isna(std_val):
+                        std_val = row.get(f'{prop.split("_")[0]}_std')
+            if std_val is not None:
+                std_val = float(std_val)
 
-            if std_val and not pd.isna(std_val) and std_val > 0:
+            if std_val and std_val > 0:
                 zscore = primary_gap / std_val
             else:
-                # Fallback: use prop-specific typical std
+                # Final fallback: use prop-specific typical std
                 default_stds = {'pts': 6.0, 'trb': 2.5, 'ast': 2.0,
                                 'pra': 9.0, 'pr': 7.5, 'pa': 7.5,
                                 'stl': 0.8, 'blk': 0.8, 'tov': 1.0}
@@ -3759,12 +4893,25 @@ def _filter_best_picks_legacy(pred_df: pd.DataFrame) -> pd.DataFrame:
             # clf_prob = P(OVER); invert for UNDER picks.
             # Weight: 40% classifier, 60% existing heuristic signals.
             clf_prob_raw = row.get(f'{prop}_clf_prob')
-            ou_prob_out  = None
             if clf_prob_raw is not None and not pd.isna(clf_prob_raw):
                 clf_dir_prob = (1.0 - clf_prob_raw) if direction == 'UNDER' else clf_prob_raw
                 clf_conf_pct = clf_dir_prob * 100.0
                 conf_pct     = round(conf_pct * 0.60 + clf_conf_pct * 0.40, 1)
-                ou_prob_out  = round(clf_prob_raw * 100, 1)   # store raw P(OVER) for display
+                prob_payload = _build_pick_probability_payload(
+                    direction=direction,
+                    dir_prob=clf_dir_prob,
+                    raw_p_over=clf_prob_raw,
+                    cal_p_over=None,
+                    prob_source='legacy_classifier_raw',
+                )
+            else:
+                prob_payload = _build_pick_probability_payload(
+                    direction=direction,
+                    dir_prob=conf_pct / 100.0,
+                    raw_p_over=None,
+                    cal_p_over=None,
+                    prob_source='legacy_confidence_only',
+                )
 
             conf_pct = round(max(50.0, min(99.0, conf_pct)), 1)
 
@@ -3779,7 +4926,6 @@ def _filter_best_picks_legacy(pred_df: pd.DataFrame) -> pd.DataFrame:
                 'prediction':     round(float(pred), 1) if pred is not None and not pd.isna(pred) else None,
                 'edge':           round(primary_gap, 1),
                 'confidence':     conf_pct,
-                'ou_prob':        ou_prob_out,
                 'mp_predicted':   round(float(mp_exp), 1) if mp_exp is not None and not pd.isna(mp_exp) else None,
                 'l10_avg':        round(float(l10_val), 1),
                 'l10_edge':       round(float(l10_val - line), 1),
@@ -3787,6 +4933,7 @@ def _filter_best_picks_legacy(pred_df: pd.DataFrame) -> pd.DataFrame:
                 'line_move':      round(float(line_move_val), 2) if line_move_val is not None and not pd.isna(line_move_val) else None,
                 'injury_adj':     row.get('injury_adj', False),
                 'teammates_out':  row.get('teammates_out', ''),
+                **prob_payload,
             })
 
     picks_df = pd.DataFrame(picks)
@@ -3879,19 +5026,54 @@ def compute_regression_candidates(df: pd.DataFrame, lookback: int = 20, z_thresh
     return candidates
 
 
+def _load_sigma_thresholds() -> Tuple[Dict[str, float], Dict[str, float]]:
+    """
+    Load per-target σ p25 and p75 thresholds from models/sigma_context_analysis.json.
+
+    Returns (p25_dict, p75_dict), each mapping target → float threshold.
+    - p25: low-σ boundary — below this the book is systematically mispriced
+      (AST low-σ UNDER: 68% hit, TRB low-σ UNDER: 63% hit)
+    - p75: high-σ boundary — above this real variance dominates; require more edge
+
+    Both dicts are empty when the file does not exist (e.g. before first calibration run).
+    """
+    path = CONFIG['models_dir'] / 'sigma_context_analysis.json'
+    if not path.exists():
+        return {}, {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        p25: Dict[str, float] = {}
+        p75: Dict[str, float] = {}
+        for target, info in data.items():
+            if info.get('sigma_p25') is not None:
+                p25[target] = float(info['sigma_p25'])
+            if info.get('sigma_p75') is not None:
+                p75[target] = float(info['sigma_p75'])
+        return p25, p75
+    except Exception:
+        return {}, {}
+
+
 def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, Dict]] = None,
-                      regression_candidates: Optional[dict] = None) -> pd.DataFrame:
+                      regression_candidates: Optional[dict] = None, max_picks: int = 10) -> pd.DataFrame:
     """Filter to best betting opportunities using validated model edge."""
 
     picks = []
     quality = quality_policy or _load_target_quality_policy()
     props = [prop for prop, q in quality.items() if q.get('allowed')]
+    sigma_p25, sigma_p75 = _load_sigma_thresholds()  # p25: {'ast': 1.68, 'trb': 2.10, ...}  p75: {'ast': 2.40, 'trb': 2.87, ...}
 
     for _, row in pred_df.iterrows():
         for prop in props:
             line = row.get(f'{prop}_line')
             pred = row.get(f'{prop}_pred')
             l10_val = row.get(f'{prop}_l10')
+            anchor_val = row.get(f'{prop}_anchor')
+            if anchor_val is None or pd.isna(anchor_val):
+                anchor_val = _row_prop_feature(row, prop, 'best_estimate')
+            if anchor_val is None or pd.isna(anchor_val):
+                anchor_val = _row_prop_feature(row, prop, 'recency_anchor')
             if line is None or pred is None or pd.isna(line) or pd.isna(pred):
                 continue
 
@@ -3910,10 +5092,35 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if direction == 'UNDER' and not quality[prop].get('allow_under', quality[prop].get('allowed', False)):
                 continue
 
+            # σ-tier: flag low-σ UNDER picks where the book is systematically mispriced.
+            # σ-context analysis shows that when the model predicts a tight distribution
+            # (σ < p25 threshold), the actual OVER hit rate is 31–37% for AST/TRB —
+            # a 13–19 point UNDER edge before even considering model prediction direction.
+            sigma_val = row.get(f'{prop}_sigma')
+            sigma_val = float(sigma_val) if sigma_val is not None and not pd.isna(sigma_val) and float(sigma_val) > 0 else None
+            p25_threshold = sigma_p25.get(prop)
+            low_sigma_under = (
+                direction == 'UNDER'
+                and sigma_val is not None
+                and p25_threshold is not None
+                and sigma_val < p25_threshold
+            )
+
             min_edge = float(
                 quality[prop].get('min_edge_over' if direction == 'OVER' else 'min_edge_under',
                                   quality[prop]['min_edge'])
             )
+            # σ-tiered edge gate: only applied to UNDER picks where σ signal is available.
+            # Low-σ (σ < p25) → book is systematically mispriced → lower bar by 25%.
+            # High-σ (σ > p75) → real variance dominates → raise bar by 25%.
+            # PTS has near-zero σ signal (buckets 45–49%); adjustment still applies but
+            # is conservative since the σ spread itself is tight for PTS.
+            if direction == 'UNDER' and sigma_val is not None:
+                p75_threshold = sigma_p75.get(prop)
+                if p25_threshold is not None and sigma_val < p25_threshold:
+                    min_edge = max(0.50, min_edge * 0.75)
+                elif p75_threshold is not None and sigma_val > p75_threshold:
+                    min_edge = min_edge * 1.25
             if abs(combined_edge) < min_edge:
                 continue
 
@@ -3922,6 +5129,12 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if l10_val is not None and not pd.isna(l10_val):
                 l10_edge = float(l10_val) - float(line)
                 l10_agrees = np.sign(l10_edge) == np.sign(combined_edge)
+
+            anchor_edge = None
+            anchor_agrees = None
+            if anchor_val is not None and not pd.isna(anchor_val):
+                anchor_edge = float(anchor_val) - float(line)
+                anchor_agrees = np.sign(anchor_edge) == np.sign(combined_edge)
 
             composite_l5 = {
                 'pra': ['pts_l5', 'trb_l5', 'ast_l5'],
@@ -3942,27 +5155,40 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 l5_agrees = np.sign(l5_edge) == np.sign(combined_edge)
 
             rmse = max(0.5, float(quality[prop].get('rmse', 1.0)))
+            raw_p_over = row.get(f'{prop}_p_over_raw')
+            raw_p_over = float(raw_p_over) if raw_p_over is not None and not pd.isna(raw_p_over) else None
+            cal_p_over = row.get(f'{prop}_p_over_cal')
+            cal_p_over = float(cal_p_over) if cal_p_over is not None and not pd.isna(cal_p_over) else None
+            use_calibrated_prob = cal_p_over is not None
             clf_prob_raw = row.get(f'{prop}_clf_prob')
-            if clf_prob_raw is not None and not pd.isna(clf_prob_raw):
+            prob_source = 'edge_logistic'
+            if use_calibrated_prob:
+                dir_prob = (1.0 - cal_p_over) if direction == 'UNDER' else cal_p_over
+                prob_source = 'calibrated_p_over'
+            elif clf_prob_raw is not None and not pd.isna(clf_prob_raw):
                 dir_prob = (1.0 - float(clf_prob_raw)) if direction == 'UNDER' else float(clf_prob_raw)
-                ou_prob_out = round(float(clf_prob_raw) * 100, 1)
+                raw_p_over = float(clf_prob_raw)
+                prob_source = 'classifier_raw'
             else:
                 dir_prob = 1.0 / (1.0 + math.exp(-abs(combined_edge) / rmse))
-                ou_prob_out = None
 
             meta_prob_raw = row.get(f'{prop}_meta_prob')
             meta_prob = float(meta_prob_raw) if meta_prob_raw is not None and not pd.isna(meta_prob_raw) else None
             meta_gate_mode = str(quality[prop].get('meta_gate_mode', 'hard')).lower()
             meta_blend_weight = float(quality[prop].get('meta_blend_weight', 0.35))
             meta_conf_weight = float(quality[prop].get('meta_conf_weight', 0.10))
-            if CONFIG.get('require_meta_for_live_picks', False) and meta_prob is None and meta_gate_mode == 'hard':
+            if (not use_calibrated_prob and
+                    CONFIG.get('require_meta_for_live_picks', False) and
+                    meta_prob is None and meta_gate_mode == 'hard'):
                 continue
             regime_score = row.get(f'{prop}_regime_score')
             regime_score = float(regime_score) if regime_score is not None and not pd.isna(regime_score) else 0.0
             edge_disagreement = row.get(f'{prop}_edge_disagreement')
             edge_disagreement = float(edge_disagreement) if edge_disagreement is not None and not pd.isna(edge_disagreement) else (abs(model_edge - market_edge_pred) if market_edge_pred is not None else 0.0)
             market_prob = 1.0 / (1.0 + math.exp(-abs(market_edge_pred if market_edge_pred is not None else combined_edge) / rmse))
-            if meta_prob is not None:
+            if use_calibrated_prob:
+                dir_prob = dir_prob
+            elif meta_prob is not None:
                 market_blend_weight = 0.15 if meta_gate_mode == 'hard' else 0.20
                 model_blend_weight = max(0.0, 1.0 - meta_blend_weight - market_blend_weight)
                 dir_prob = (
@@ -3970,27 +5196,33 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     meta_prob * meta_blend_weight +
                     market_prob * market_blend_weight
                 )
+                prob_source = f'{prob_source}+meta_market'
             else:
                 dir_prob = dir_prob * 0.75 + market_prob * 0.25
+                if prob_source != 'calibrated_p_over':
+                    prob_source = f'{prob_source}+market'
 
             min_prob = float(quality[prop]['min_prob'])
             if direction == 'OVER':
                 min_prob += 0.02
+            if anchor_agrees is False:
+                min_prob += 0.01
             if l10_agrees is False:
                 min_prob += 0.02
             if l5_agrees is False:
                 min_prob += 0.02
             min_meta_prob = float(quality[prop].get('min_meta_prob', 0.55))
-            if meta_prob is None:
-                if meta_gate_mode == 'medium':
-                    min_prob += 0.01
-            elif meta_prob < min_meta_prob:
-                if meta_gate_mode == 'hard':
-                    continue
-                if meta_gate_mode == 'medium':
-                    min_prob += 0.015
-                else:
-                    min_prob += 0.01
+            if not use_calibrated_prob:
+                if meta_prob is None:
+                    if meta_gate_mode == 'medium':
+                        min_prob += 0.01
+                elif meta_prob < min_meta_prob:
+                    if meta_gate_mode == 'hard':
+                        continue
+                    if meta_gate_mode == 'medium':
+                        min_prob += 0.015
+                    else:
+                        min_prob += 0.01
             if regime_score >= 0.55 and edge_disagreement >= min_edge * 0.75:
                 continue
             if dir_prob < min_prob:
@@ -3998,11 +5230,20 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
 
             if direction == 'OVER' and l10_agrees is not True and abs(combined_edge) < min_edge * 1.50:
                 continue
+            if anchor_agrees is False and abs(combined_edge) < min_edge * 1.20:
+                continue
             if l10_agrees is False and abs(combined_edge) < min_edge * 1.35:
                 continue
             if l5_agrees is False and abs(combined_edge) < min_edge * 1.25:
                 continue
             if market_edge_pred is not None and np.sign(model_edge) != np.sign(market_edge_pred) and abs(combined_edge) < min_edge * 1.50:
+                continue
+            # Extreme dampening gate: edge model sees >60% less downside than raw model AND
+            # combined_edge is barely above threshold — market context provides no independent signal.
+            if (market_edge_pred is not None
+                    and np.sign(model_edge) == np.sign(market_edge_pred)
+                    and abs(market_edge_pred) < abs(model_edge) * 0.40
+                    and abs(combined_edge) < min_edge * 1.15):
                 continue
 
             line_move = row.get(f'{prop}_line_move')
@@ -4014,16 +5255,53 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             else:
                 move_with = None
 
+            priority_under_lane = False
+            priority_lane_bonus = 0.0
+            priority_rank_bonus = 0.0
+            selection_priority = 0.0
+            priority_support_gap = None
+            if direction == 'UNDER' and quality[prop].get('priority_under_lane', False):
+                support_vals = [float(v) for v in [pred, anchor_val, l10_val, l5_val] if v is not None and not pd.isna(v)]
+                support_anchor = max(support_vals) if support_vals else float(pred)
+                priority_support_gap = float(line) - support_anchor
+                lane_edge_req = float(quality[prop].get('priority_under_min_edge', min_edge))
+                lane_gap_req = float(quality[prop].get('priority_under_support_gap', 0.0))
+                require_l10 = bool(quality[prop].get('priority_under_require_l10', True))
+                require_l5 = bool(quality[prop].get('priority_under_require_l5', False))
+                market_disagrees = (
+                    market_edge_pred is not None and
+                    np.sign(model_edge) != np.sign(market_edge_pred)
+                )
+                if (
+                    abs(combined_edge) >= lane_edge_req and
+                    priority_support_gap >= lane_gap_req and
+                    (not require_l10 or l10_agrees is not False) and
+                    (not require_l5 or l5_agrees is not False) and
+                    not market_disagrees
+                ):
+                    priority_under_lane = True
+                    priority_lane_bonus = float(quality[prop].get('priority_under_conf_bonus', 0.0))
+                    priority_rank_bonus = float(quality[prop].get('priority_under_rank_bonus', 0.0))
+                    selection_priority = float(quality[prop].get('priority_under_selection_priority', 0.0))
+
             edge_strength = min(1.0, abs(combined_edge) / (min_edge * 1.5))
             base_conf = (
                 dir_prob * 0.45 +
                 float(quality[prop]['shrunk_acc']) * 0.25 +
                 edge_strength * 0.15
             )
-            if meta_prob is not None:
+            if meta_prob is not None and not use_calibrated_prob:
                 base_conf += meta_prob * meta_conf_weight
             if market_edge_pred is not None:
-                base_conf += min(0.08, abs(market_edge_pred) / max(1.0, rmse) * 0.08)
+                if np.sign(market_edge_pred) != np.sign(combined_edge):
+                    # Edge model disagrees with bet direction — reduce confidence
+                    base_conf -= min(0.03, abs(market_edge_pred) / max(1.0, rmse) * 0.04)
+                elif abs(market_edge_pred) >= abs(model_edge) * 0.90:
+                    # Amplifying or roughly matching — add confidence bonus (original behavior)
+                    base_conf += min(0.08, abs(market_edge_pred) / max(1.0, rmse) * 0.08)
+                # else: dampening (edge model less convinced than raw model) — no contribution
+            if anchor_agrees:
+                base_conf += 0.02
             if l10_agrees:
                 base_conf += 0.03
             if l5_agrees:
@@ -4036,6 +5314,14 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 base_conf -= min(0.08, regime_score * 0.10)
             if edge_disagreement >= min_edge:
                 base_conf -= 0.04
+            if priority_under_lane:
+                base_conf += priority_lane_bonus
+            # σ-tier bonus: low-σ UNDER picks are in the highest-predictability context.
+            # +0.04 base_conf (~+4 conf_pct points) and +0.50 selection_priority boost.
+            # Stacks with priority_under_lane when both conditions hold.
+            if low_sigma_under:
+                base_conf += 0.04
+                selection_priority = max(selection_priority, 0.0) + 0.50
 
             conf_pct = round(max(50.0, min(99.0, base_conf * 100)), 1)
             mp_exp = row.get('mp_expected')
@@ -4052,6 +5338,14 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     regression_flag = True
                     conf_pct = min(99.0, conf_pct + 5.0)
 
+            prob_payload = _build_pick_probability_payload(
+                direction=direction,
+                dir_prob=dir_prob,
+                raw_p_over=raw_p_over,
+                cal_p_over=cal_p_over,
+                prob_source=prob_source,
+            )
+
             picks.append({
                 'player':         row['player'],
                 'team':           row.get('team', ''),
@@ -4061,14 +5355,14 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 'prediction':     round(float(pred), 1),
                 'edge':           round(float(combined_edge), 1),
                 'confidence':     conf_pct,
-                'ou_prob':        ou_prob_out,
-                'dir_prob':       round(dir_prob * 100, 1),
                 'meta_prob':      round(meta_prob * 100, 1) if meta_prob is not None else None,
                 'market_edge':    round(float(market_edge_pred), 2) if market_edge_pred is not None else None,
                 'regime_score':   round(regime_score, 3),
                 'edge_disagreement': round(edge_disagreement, 3),
                 'pick_source':    'market_model',
                 'mp_predicted':   round(float(mp_exp), 1) if mp_exp is not None and not pd.isna(mp_exp) else None,
+                'anchor_avg':     round(float(anchor_val), 1) if anchor_val is not None and not pd.isna(anchor_val) else None,
+                'anchor_edge':    round(float(anchor_edge), 1) if anchor_edge is not None else None,
                 'l10_avg':        round(float(l10_val), 1) if l10_val is not None and not pd.isna(l10_val) else None,
                 'l10_edge':       round(float(l10_edge), 1) if l10_edge is not None else None,
                 'l5_avg':         round(float(l5_val), 1) if l5_val is not None and not pd.isna(l5_val) else None,
@@ -4078,6 +5372,13 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 'injury_adj':     row.get('injury_adj', False),
                 'teammates_out':  row.get('teammates_out', ''),
                 'regression_flag': regression_flag,
+                'priority_under_lane': priority_under_lane,
+                'priority_support_gap': round(float(priority_support_gap), 2) if priority_support_gap is not None else None,
+                'selection_priority': selection_priority,
+                'lane_rank_bonus': priority_rank_bonus,
+                'sigma': round(sigma_val, 3) if sigma_val is not None else None,
+                'low_sigma_under': low_sigma_under,
+                **prob_payload,
             })
 
     # ── Structural STL/BLK UNDER picks ──────────────────────────────────────
@@ -4116,6 +5417,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'edge':           edge_val,
                     'confidence':     hist_wr,
                     'ou_prob':        None,
+                    'p_over_raw':     None,
+                    'p_over_cal':     None,
                     'dir_prob':       hist_wr,
                     'meta_prob':      None,
                     'market_edge':    None,
@@ -4132,7 +5435,312 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'injury_adj':     row.get('injury_adj', False),
                     'teammates_out':  row.get('teammates_out', ''),
                     'regression_flag': False,
+                    'sigma': None,
+                    'low_sigma_under': False,
                 })
+
+    # ── Volume-fill pass ─────────────────────────────────────────────────────
+    # When the primary filter + structural path produce fewer picks than needed
+    # for a full card, do a relaxed second pass. Rules: must be an allowed UNDER
+    # prop, edge must be ≥ 65% of the policy minimum, dir_prob must be ≥ 53%,
+    # and the meta model must not actively disagree (meta_prob ≥ 0.48 if present).
+    # These picks are capped at 63% confidence so they rank below primary picks.
+    _FILL_POOL_TARGET = max(10, max_picks)
+    if len(picks) < _FILL_POOL_TARGET:
+        _existing = {(p['player'], p['prop']) for p in picks}
+        _fill_limit = _FILL_POOL_TARGET - len(picks)
+        _fill_count = 0
+
+        for _, row in pred_df.iterrows():
+            if _fill_count >= _fill_limit:
+                break
+            for prop in props:
+                if _fill_count >= _fill_limit:
+                    break
+                # Volume fill is UNDER-only — OVERs have weak historical win rates
+                if not quality[prop].get('allow_under', False):
+                    continue
+
+                line = row.get(f'{prop}_line')
+                pred = row.get(f'{prop}_pred')
+                if line is None or pred is None or pd.isna(line) or pd.isna(pred):
+                    continue
+
+                model_edge = float(pred) - float(line)
+                market_edge_pred_raw = row.get(f'{prop}_market_edge_pred')
+                market_edge_pred_fill = (
+                    float(market_edge_pred_raw)
+                    if market_edge_pred_raw is not None and not pd.isna(market_edge_pred_raw)
+                    else None
+                )
+                combined_edge = (
+                    0.45 * model_edge + 0.55 * market_edge_pred_fill
+                    if market_edge_pred_fill is not None
+                    else model_edge
+                )
+
+                # Must be a genuine UNDER signal
+                if combined_edge >= 0:
+                    continue
+
+                # Skip if already captured by primary pass
+                if (row['player'], prop.upper()) in _existing:
+                    continue
+
+                # Relaxed minimum edge: 65% of the policy floor
+                min_edge_fill = float(
+                    quality[prop].get('min_edge_under', quality[prop]['min_edge'])
+                ) * 0.65
+                if abs(combined_edge) < min_edge_fill:
+                    continue
+
+                # Compute directional probability
+                rmse_fill = max(0.5, float(quality[prop].get('rmse', 1.0)))
+                cal_p_over_raw = row.get(f'{prop}_p_over_cal')
+                cal_p_over_fill = (
+                    float(cal_p_over_raw)
+                    if cal_p_over_raw is not None and not pd.isna(cal_p_over_raw)
+                    else None
+                )
+                clf_prob_fill = row.get(f'{prop}_clf_prob')
+                if cal_p_over_fill is not None:
+                    dir_prob_fill = 1.0 - cal_p_over_fill
+                    prob_source_fill = 'calibrated_p_over'
+                elif clf_prob_fill is not None and not pd.isna(clf_prob_fill):
+                    dir_prob_fill = 1.0 - float(clf_prob_fill)
+                    prob_source_fill = 'classifier_raw'
+                else:
+                    dir_prob_fill = 1.0 / (1.0 + math.exp(-abs(combined_edge) / rmse_fill))
+                    prob_source_fill = 'edge_logistic'
+
+                if dir_prob_fill < 0.53:
+                    continue
+
+                # Reject if meta model actively disagrees
+                meta_prob_fill_raw = row.get(f'{prop}_meta_prob')
+                meta_prob_fill = (
+                    float(meta_prob_fill_raw)
+                    if meta_prob_fill_raw is not None and not pd.isna(meta_prob_fill_raw)
+                    else None
+                )
+                if meta_prob_fill is not None and meta_prob_fill < 0.48:
+                    continue
+
+                # Cap confidence below primary picks so they sort last
+                conf_pct_fill = round(max(50.0, min(63.0, dir_prob_fill * 100)), 1)
+
+                l10_fill = row.get(f'{prop}_l10')
+                l5_fill = row.get(f'{prop}_l5')
+                anchor_fill = row.get(f'{prop}_anchor')
+                if anchor_fill is None or pd.isna(anchor_fill):
+                    anchor_fill = _row_prop_feature(row, prop, 'best_estimate')
+                mp_exp_fill = row.get('mp_expected')
+                lm_fill = row.get(f'{prop}_line_move')
+                raw_p_over_fill = row.get(f'{prop}_p_over_raw')
+                raw_p_over_fill = (
+                    float(raw_p_over_fill)
+                    if raw_p_over_fill is not None and not pd.isna(raw_p_over_fill)
+                    else (float(clf_prob_fill) if clf_prob_fill is not None and not pd.isna(clf_prob_fill) else None)
+                )
+                prob_payload_fill = _build_pick_probability_payload(
+                    direction='UNDER',
+                    dir_prob=dir_prob_fill,
+                    raw_p_over=raw_p_over_fill,
+                    cal_p_over=cal_p_over_fill,
+                    prob_source=prob_source_fill,
+                )
+
+                picks.append({
+                    'player':               row['player'],
+                    'team':                 row.get('team', ''),
+                    'prop':                 prop.upper(),
+                    'direction':            'UNDER',
+                    'line':                 line,
+                    'prediction':           round(float(pred), 1),
+                    'edge':                 round(float(combined_edge), 1),
+                    'confidence':           conf_pct_fill,
+                    'meta_prob':            round(meta_prob_fill * 100, 1) if meta_prob_fill is not None else None,
+                    'market_edge':          round(market_edge_pred_fill, 2) if market_edge_pred_fill is not None else None,
+                    'regime_score':         0.0,
+                    'edge_disagreement':    0.0,
+                    'pick_source':          'volume_fill',
+                    'mp_predicted':         round(float(mp_exp_fill), 1) if mp_exp_fill is not None and not pd.isna(mp_exp_fill) else None,
+                    'anchor_avg':           round(float(anchor_fill), 1) if anchor_fill is not None and not pd.isna(anchor_fill) else None,
+                    'anchor_edge':          round(float(anchor_fill) - float(line), 1) if anchor_fill is not None and not pd.isna(anchor_fill) else None,
+                    'l10_avg':              round(float(l10_fill), 1) if l10_fill is not None and not pd.isna(l10_fill) else None,
+                    'l10_edge':             round(float(l10_fill) - float(line), 1) if l10_fill is not None and not pd.isna(l10_fill) else None,
+                    'l5_avg':               round(float(l5_fill), 1) if l5_fill is not None and not pd.isna(l5_fill) else None,
+                    'line_move':            round(float(lm_fill), 2) if lm_fill is not None and not pd.isna(lm_fill) else None,
+                    'model_wr':             round(float(quality[prop]['shrunk_acc']) * 100, 1),
+                    'min_edge_req':         round(min_edge_fill, 2),
+                    'injury_adj':           row.get('injury_adj', False),
+                    'teammates_out':        row.get('teammates_out', ''),
+                    'regression_flag':      False,
+                    'priority_under_lane':  False,
+                    'priority_support_gap': None,
+                    'selection_priority':   0.0,
+                    'lane_rank_bonus':      0.0,
+                    'sigma':                None,
+                    'low_sigma_under':      False,
+                    **prob_payload_fill,
+                })
+                _existing.add((row['player'], prop.upper()))
+                _fill_count += 1
+
+        if _fill_count > 0:
+            print(
+                f"  [volume_fill] Primary pass: {len(picks) - _fill_count} picks. "
+                f"Added {_fill_count} fill picks (relaxed thresholds) to reach pool of {len(picks)}."
+            )
+
+    # ── Emergency-fill pass ──────────────────────────────────────────────────
+    # Hard floor for publication volume: if the candidate pool is still too thin,
+    # take the best remaining model-aligned props with lighter thresholds, cap
+    # confidence, and keep them out of betslips.
+    if len(picks) < max_picks:
+        _existing = {(p['player'], p['prop']) for p in picks}
+        _emergency_limit = max_picks - len(picks)
+        _emergency_count = 0
+
+        for _, row in pred_df.iterrows():
+            if _emergency_count >= _emergency_limit:
+                break
+            for prop in props:
+                if _emergency_count >= _emergency_limit:
+                    break
+                if (row['player'], prop.upper()) in _existing:
+                    continue
+
+                line = row.get(f'{prop}_line')
+                pred = row.get(f'{prop}_pred')
+                if line is None or pred is None or pd.isna(line) or pd.isna(pred):
+                    continue
+
+                model_edge = float(pred) - float(line)
+                market_edge_pred_raw = row.get(f'{prop}_market_edge_pred')
+                market_edge_pred = (
+                    float(market_edge_pred_raw)
+                    if market_edge_pred_raw is not None and not pd.isna(market_edge_pred_raw)
+                    else None
+                )
+                combined_edge = (
+                    0.45 * model_edge + 0.55 * market_edge_pred
+                    if market_edge_pred is not None
+                    else model_edge
+                )
+                if abs(combined_edge) < 1e-9:
+                    continue
+
+                direction = 'OVER' if combined_edge > 0 else 'UNDER'
+                if direction == 'OVER' and not quality[prop].get('allow_over', False):
+                    continue
+                if direction == 'UNDER' and not quality[prop].get('allow_under', False):
+                    continue
+
+                min_edge_base = float(
+                    quality[prop].get(
+                        'min_edge_over' if direction == 'OVER' else 'min_edge_under',
+                        quality[prop]['min_edge'],
+                    )
+                )
+                min_edge_emergency = max(0.35, min_edge_base * 0.35)
+                if abs(combined_edge) < min_edge_emergency:
+                    continue
+
+                rmse_emergency = max(0.5, float(quality[prop].get('rmse', 1.0)))
+                cal_p_over_raw = row.get(f'{prop}_p_over_cal')
+                cal_p_over = (
+                    float(cal_p_over_raw)
+                    if cal_p_over_raw is not None and not pd.isna(cal_p_over_raw)
+                    else None
+                )
+                clf_prob_emergency = row.get(f'{prop}_clf_prob')
+                if cal_p_over is not None:
+                    dir_prob_emergency = (1.0 - cal_p_over) if direction == 'UNDER' else cal_p_over
+                    prob_source_emergency = 'calibrated_p_over'
+                elif clf_prob_emergency is not None and not pd.isna(clf_prob_emergency):
+                    dir_prob_emergency = (1.0 - float(clf_prob_emergency)) if direction == 'UNDER' else float(clf_prob_emergency)
+                    prob_source_emergency = 'classifier_raw'
+                else:
+                    dir_prob_emergency = 1.0 / (1.0 + math.exp(-abs(combined_edge) / rmse_emergency))
+                    prob_source_emergency = 'edge_logistic'
+
+                if dir_prob_emergency < 0.50:
+                    continue
+
+                meta_prob_raw = row.get(f'{prop}_meta_prob')
+                meta_prob = (
+                    float(meta_prob_raw)
+                    if meta_prob_raw is not None and not pd.isna(meta_prob_raw)
+                    else None
+                )
+                if meta_prob is not None and meta_prob < 0.45:
+                    continue
+
+                conf_pct_emergency = round(max(50.0, min(60.0, dir_prob_emergency * 100)), 1)
+                l10_emergency = row.get(f'{prop}_l10')
+                l5_emergency = row.get(f'{prop}_l5')
+                anchor_emergency = row.get(f'{prop}_anchor')
+                if anchor_emergency is None or pd.isna(anchor_emergency):
+                    anchor_emergency = _row_prop_feature(row, prop, 'best_estimate')
+                mp_exp_emergency = row.get('mp_expected')
+                lm_emergency = row.get(f'{prop}_line_move')
+                raw_p_over_emergency = row.get(f'{prop}_p_over_raw')
+                raw_p_over_emergency = (
+                    float(raw_p_over_emergency)
+                    if raw_p_over_emergency is not None and not pd.isna(raw_p_over_emergency)
+                    else (float(clf_prob_emergency) if clf_prob_emergency is not None and not pd.isna(clf_prob_emergency) else None)
+                )
+                prob_payload_emergency = _build_pick_probability_payload(
+                    direction=direction,
+                    dir_prob=dir_prob_emergency,
+                    raw_p_over=raw_p_over_emergency,
+                    cal_p_over=cal_p_over,
+                    prob_source=prob_source_emergency,
+                )
+
+                picks.append({
+                    'player':               row['player'],
+                    'team':                 row.get('team', ''),
+                    'prop':                 prop.upper(),
+                    'direction':            direction,
+                    'line':                 line,
+                    'prediction':           round(float(pred), 1),
+                    'edge':                 round(float(combined_edge), 1),
+                    'confidence':           conf_pct_emergency,
+                    'meta_prob':            round(meta_prob * 100, 1) if meta_prob is not None else None,
+                    'market_edge':          round(market_edge_pred, 2) if market_edge_pred is not None else None,
+                    'regime_score':         0.0,
+                    'edge_disagreement':    0.0,
+                    'pick_source':          'emergency_fill',
+                    'mp_predicted':         round(float(mp_exp_emergency), 1) if mp_exp_emergency is not None and not pd.isna(mp_exp_emergency) else None,
+                    'anchor_avg':           round(float(anchor_emergency), 1) if anchor_emergency is not None and not pd.isna(anchor_emergency) else None,
+                    'anchor_edge':          round(float(anchor_emergency) - float(line), 1) if anchor_emergency is not None and not pd.isna(anchor_emergency) else None,
+                    'l10_avg':              round(float(l10_emergency), 1) if l10_emergency is not None and not pd.isna(l10_emergency) else None,
+                    'l10_edge':             round(float(l10_emergency) - float(line), 1) if l10_emergency is not None and not pd.isna(l10_emergency) else None,
+                    'l5_avg':               round(float(l5_emergency), 1) if l5_emergency is not None and not pd.isna(l5_emergency) else None,
+                    'line_move':            round(float(lm_emergency), 2) if lm_emergency is not None and not pd.isna(lm_emergency) else None,
+                    'model_wr':             round(float(quality[prop]['shrunk_acc']) * 100, 1),
+                    'min_edge_req':         round(min_edge_emergency, 2),
+                    'injury_adj':           row.get('injury_adj', False),
+                    'teammates_out':        row.get('teammates_out', ''),
+                    'regression_flag':      False,
+                    'priority_under_lane':  False,
+                    'priority_support_gap': None,
+                    'selection_priority':   -0.5,
+                    'lane_rank_bonus':      0.0,
+                    'sigma':                None,
+                    'low_sigma_under':      False,
+                    **prob_payload_emergency,
+                })
+                _existing.add((row['player'], prop.upper()))
+                _emergency_count += 1
+
+        if _emergency_count > 0:
+            print(
+                f"  [emergency_fill] Added {_emergency_count} fallback picks "
+                f"to guarantee publishable card depth ({len(picks)} total candidates)."
+            )
 
     picks_df = pd.DataFrame(picks)
     if len(picks_df) == 0:
@@ -4144,6 +5752,24 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
     picks_df['stat_wr'] = (picks_df['model_wr'] / 100.0).round(4)
     if 'meta_prob' not in picks_df.columns:
         picks_df['meta_prob'] = np.nan
+    if 'p_over_raw' not in picks_df.columns:
+        picks_df['p_over_raw'] = np.nan
+    if 'p_over_cal' not in picks_df.columns:
+        picks_df['p_over_cal'] = np.nan
+    if 'p_under_raw' not in picks_df.columns:
+        picks_df['p_under_raw'] = np.nan
+    if 'p_under_cal' not in picks_df.columns:
+        picks_df['p_under_cal'] = np.nan
+    if 'prob_source' not in picks_df.columns:
+        picks_df['prob_source'] = ''
+    if 'selection_priority' not in picks_df.columns:
+        picks_df['selection_priority'] = 0.0
+    if 'lane_rank_bonus' not in picks_df.columns:
+        picks_df['lane_rank_bonus'] = 0.0
+    if 'sigma' not in picks_df.columns:
+        picks_df['sigma'] = np.nan
+    if 'low_sigma_under' not in picks_df.columns:
+        picks_df['low_sigma_under'] = False
     edge_norm = picks_df.apply(
         lambda r: min(1.0, abs(r['edge']) / max(0.5, float(r['min_edge_req']) * 1.5)),
         axis=1,
@@ -4153,13 +5779,116 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
         picks_df['stat_wr'] * 0.30 +
         (picks_df['dir_prob'] / 100.0) * 0.25 +
         meta_norm * 0.30 +
-        edge_norm * 0.15
+        edge_norm * 0.15 +
+        picks_df['lane_rank_bonus'].fillna(0.0)
     ).round(4)
 
-    picks_df = picks_df.sort_values('rank_score', ascending=False)
-    picks_df = picks_df.drop_duplicates(subset=['player'], keep='first')
-    picks_df = picks_df.head(10).reset_index(drop=True)
+    max_picks = max(1, int(max_picks))
+    picks_df = picks_df.sort_values(['selection_priority', 'rank_score', 'confidence'], ascending=False)
+    picks_df = picks_df.head(max_picks).reset_index(drop=True)
     return picks_df
+
+
+def build_live_pick_card(picks_df: pd.DataFrame,
+                         target_picks: int = 5,
+                         min_picks: int = 5) -> pd.DataFrame:
+    """
+    Build the published live card from a sanitized candidate pool.
+
+    Prefer prop diversity first, then controlled duplicates. STL/BLK are capped
+    so the board does not collapse into one stat family unless the pool is too
+    thin to hit the requested card size.
+    """
+    if picks_df is None or len(picks_df) == 0:
+        return pd.DataFrame() if picks_df is None else picks_df
+
+    target_picks = max(1, int(target_picks))
+    min_picks = max(1, min(int(min_picks), target_picks))
+
+    working = picks_df.copy()
+    sort_cols = [c for c in ['selection_priority', 'rank_score', 'confidence', 'dir_prob', 'edge'] if c in working.columns]
+    if sort_cols:
+        working = working.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+    working = working.drop_duplicates(subset=['player', 'prop'], keep='first').reset_index(drop=True)
+
+    micro_props = {'STL', 'BLK'}
+    phases = [
+        {'prefer_new_prop': True, 'max_same_prop': 1, 'max_micro_props': 2, 'max_blk_props': 1},
+        {'prefer_new_prop': False, 'max_same_prop': 2, 'max_micro_props': 2, 'max_blk_props': 1},
+        {'prefer_new_prop': False, 'max_same_prop': 2, 'max_micro_props': 3, 'max_blk_props': 1},
+        {'prefer_new_prop': False, 'max_same_prop': 3, 'max_micro_props': target_picks, 'max_blk_props': 2},
+    ]
+
+    selected_idx = []
+    selected_players = set()
+    player_counts: Dict[str, int] = {}
+    prop_counts: Dict[str, int] = {}
+    micro_count = 0
+
+    def _prop_count(prop_name: str) -> int:
+        return int(prop_counts.get(prop_name, 0))
+
+    for phase in phases:
+        changed = True
+        while changed and len(selected_idx) < target_picks:
+            changed = False
+            for idx, row in working.iterrows():
+                if idx in selected_idx:
+                    continue
+                player = str(row.get('player', ''))
+                prop = str(row.get('prop', '')).upper()
+                if not player or player in selected_players:
+                    continue
+                if phase['prefer_new_prop'] and _prop_count(prop) > 0:
+                    continue
+                if _prop_count(prop) >= phase['max_same_prop']:
+                    continue
+                if prop == 'BLK' and _prop_count(prop) >= phase.get('max_blk_props', phase['max_same_prop']):
+                    continue
+                if prop in micro_props and micro_count >= phase['max_micro_props']:
+                    continue
+
+                selected_idx.append(idx)
+                selected_players.add(player)
+                player_counts[player] = int(player_counts.get(player, 0)) + 1
+                prop_counts[prop] = _prop_count(prop) + 1
+                if prop in micro_props:
+                    micro_count += 1
+                changed = True
+                if len(selected_idx) >= target_picks:
+                    break
+
+    if len(selected_idx) < min_picks:
+        for idx, row in working.iterrows():
+            if idx in selected_idx:
+                continue
+            player = str(row.get('player', ''))
+            if not player or player in selected_players:
+                continue
+            selected_idx.append(idx)
+            selected_players.add(player)
+            player_counts[player] = int(player_counts.get(player, 0)) + 1
+            if len(selected_idx) >= min_picks:
+                break
+
+    if len(selected_idx) < min_picks:
+        for idx, row in working.iterrows():
+            if idx in selected_idx:
+                continue
+            player = str(row.get('player', ''))
+            if not player:
+                continue
+            if int(player_counts.get(player, 0)) >= 2:
+                continue
+            selected_idx.append(idx)
+            player_counts[player] = int(player_counts.get(player, 0)) + 1
+            if len(selected_idx) >= min_picks:
+                break
+
+    final_df = working.loc[selected_idx].copy() if selected_idx else working.iloc[0:0].copy()
+    if sort_cols and len(final_df) > 0:
+        final_df = final_df.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+    return final_df.head(target_picks).reset_index(drop=True)
 
 
 # =============================================================================
@@ -4245,15 +5974,22 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
 
         # Reconstruct raw stat predictions from residual model
         l10_col = f'{target_name}_l10'
+        anchor_vals = _series_prop_feature(test_with_features, target_name, 'best_estimate')
+        anchor_vals = anchor_vals.fillna(_series_prop_feature(test_with_features, target_name, 'recency_anchor'))
+        anchor_vals = anchor_vals.fillna(
+            pd.to_numeric(test_with_features[l10_col], errors='coerce') if l10_col in test_with_features.columns
+            else pd.Series(np.nan, index=test_with_features.index)
+        )
         if is_residual and l10_col in test_with_features.columns:
-            y_pred_actual = y_pred + test_with_features[l10_col].fillna(0).values
+            y_pred_actual = y_pred + anchor_vals.fillna(0).values
         else:
             y_pred_actual = y_pred
 
         # MAE on actual scale
         mae = np.mean(np.abs(y_true - y_pred_actual))
 
-        # Determine line: use real Vegas line where available, fall back to L10
+        # Determine line: use real Vegas line where available, then fall back to the
+        # recency-weighted anchor instead of a simple L10 average.
         if l10_col in test_with_features.columns or hist_lines is not None:
             real_line_vals = np.full(len(test_with_features), np.nan)
             if hist_lines is not None:
@@ -4265,9 +6001,8 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
                           .merge(stat_hist, on=['game_date', 'player_norm'], how='left'))
                 real_line_vals = merged['real_line'].values.astype(float)
 
-            l10_vals = (test_with_features[l10_col].values
-                        if l10_col in test_with_features.columns else np.full(len(test_with_features), np.nan))
-            line = np.where(~np.isnan(real_line_vals), real_line_vals, l10_vals)
+            anchor_arr = anchor_vals.values if len(anchor_vals) == len(test_with_features) else np.full(len(test_with_features), np.nan)
+            line = np.where(~np.isnan(real_line_vals), real_line_vals, anchor_arr)
 
             real_mask = ~np.isnan(real_line_vals)
             n_real = real_mask.sum()
@@ -4502,10 +6237,16 @@ def _predict_historical_frame_v2(feature_df: pd.DataFrame) -> pd.DataFrame:
     working = feature_df.copy()
     if 'player_norm' not in working.columns:
         working['player_norm'] = working['player'].apply(_normalize_name)
+    primitive_fp_integrated = using_advanced and any(
+        isinstance(models.get(stat), dict) and models.get(stat, {}).get('kind') == 'positive_ridge_blend_regressor'
+        for stat in ['pts', 'trb', 'ast']
+    )
     required_cols = list(feature_cols or [])
     if using_advanced:
         for target_name, model in models.items():
             target_features = clf_selected.get(target_name)
+            if not target_features and isinstance(model, dict):
+                target_features = model.get('feature_names')
             if not target_features and hasattr(model, 'get_booster'):
                 target_features = model.get_booster().feature_names
             if target_features:
@@ -4538,13 +6279,19 @@ def _predict_historical_frame_v2(feature_df: pd.DataFrame) -> pd.DataFrame:
         per_min_col = f'{target_name}_per_min'
         l10_src = working[l10_col] if l10_col in working.columns else pd.Series(np.nan, index=working.index)
         l10_vals = pd.to_numeric(l10_src, errors='coerce')
+        anchor_vals = _series_prop_feature(working, target_name, 'best_estimate')
+        anchor_vals = anchor_vals.fillna(_series_prop_feature(working, target_name, 'recency_anchor'))
+        anchor_vals = anchor_vals.fillna(l10_vals)
         pred_df[l10_col] = l10_vals.round(1)
+        pred_df[f'{target_name}_anchor'] = anchor_vals.round(1)
         if l5_col in working.columns:
             pred_df[l5_col] = pd.to_numeric(working[l5_col], errors='coerce').round(1)
 
         reg_features = None
         if using_advanced:
             reg_features = clf_selected.get(target_name)
+            if not reg_features and isinstance(model, dict):
+                reg_features = model.get('feature_names')
             if not reg_features and hasattr(model, 'get_booster'):
                 reg_features = model.get_booster().feature_names
         else:
@@ -4552,12 +6299,19 @@ def _predict_historical_frame_v2(feature_df: pd.DataFrame) -> pd.DataFrame:
         reg_features = [c for c in (reg_features or []) if c in working.columns]
         X_reg = working[reg_features].fillna(0) if reg_features else working.fillna(0)
 
-        raw_pred = _predict(model, X_reg)
+        fp_series = None
+        if primitive_fp_integrated and target_name in {'pts', 'trb', 'ast'} and isinstance(model, dict) and model.get('kind') == 'positive_ridge_blend_regressor':
+            fp_series = _series_fp_projection(working, target_name)
+        raw_pred = _predict(model, X_reg, fp_input=fp_series)
         if is_residual:
-            base_pred = l10_vals.fillna(0).values + raw_pred
+            base_pred = anchor_vals.fillna(0).values + raw_pred
         else:
-            l10_arr = l10_vals.fillna(0).values
-            base_pred = np.where(l10_arr > 0, raw_pred * 0.7 + l10_arr * 0.3, raw_pred)
+            anchor_arr = anchor_vals.fillna(0).values
+            anchor_mask = ~anchor_vals.isna().values
+            if primitive_fp_integrated and target_name in {'pts', 'trb', 'ast'} and isinstance(model, dict) and model.get('kind') == 'positive_ridge_blend_regressor':
+                base_pred = raw_pred
+            else:
+                base_pred = np.where(anchor_mask, raw_pred * 0.7 + anchor_arr * 0.3, raw_pred)
 
         mp_l10_src = working['mp_l10'] if 'mp_l10' in working.columns else pd.Series(0, index=working.index)
         per_min_src = working[per_min_col] if per_min_col in working.columns else pd.Series(0, index=working.index)
@@ -4599,7 +6353,9 @@ def _predict_historical_frame_v2(feature_df: pd.DataFrame) -> pd.DataFrame:
 
     pred_df['game_total'] = None
     pred_df['team_spread'] = 0
+    pred_df['game_total_scale'] = 1.0
     pred_df['injury_adj'] = False
+    pred_df['injury_adj_strength'] = 0.0
     pred_df['teammates_out'] = ''
     return pred_df
 
@@ -4738,6 +6494,8 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
     live_edge_models = {}
     live_meta_models = {}
     live_market_sets = {'edge': {}, 'meta': {}}
+    live_prob_sidecars = {}
+    live_prob_calibrators = {}
 
     if prepared_path.exists():
         from train_advanced_models import AdvancedPropModel as CutoffAdvancedPropModel, _load_lines_lookup as _load_train_lines_lookup
@@ -4769,6 +6527,7 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
         train_errors = [k for k, v in train_results.items() if isinstance(v, dict) and v.get('error')]
         if train_errors:
             print(f"  WARNING: cutoff training errors for {', '.join(train_errors)}")
+        trainer.fit_probability_calibrators()
 
         local_edge_analysis = {
             target_name: result.get('real_line_summary', {})
@@ -4790,10 +6549,15 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
                 pred_df[f'{target_name}_clf_prob'] = np.round(trainer.predict_proba(feature_df, target_name), 4)
             l10_col = f'{target_name}_l10'
             l5_col = f'{target_name}_l5'
+            anchor_col = f'{target_name}_anchor'
             if l10_col in feature_df.columns:
                 pred_df[l10_col] = pd.to_numeric(feature_df[l10_col], errors='coerce').round(1)
             if l5_col in feature_df.columns:
                 pred_df[l5_col] = pd.to_numeric(feature_df[l5_col], errors='coerce').round(1)
+            anchor_vals = _series_prop_feature(feature_df, target_name, 'best_estimate')
+            anchor_vals = anchor_vals.fillna(_series_prop_feature(feature_df, target_name, 'recency_anchor'))
+            anchor_vals = anchor_vals.fillna(pd.to_numeric(feature_df[l10_col], errors='coerce') if l10_col in feature_df.columns else np.nan)
+            pred_df[anchor_col] = pd.to_numeric(anchor_vals, errors='coerce').round(1)
 
         if {'pts_l10', 'trb_l10', 'ast_l10'}.issubset(pred_df.columns):
             pred_df['pra_l10'] = (pred_df['pts_l10'].fillna(0) + pred_df['trb_l10'].fillna(0) + pred_df['ast_l10'].fillna(0)).round(1)
@@ -4806,16 +6570,22 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
 
         pred_df['game_total'] = None
         pred_df['team_spread'] = 0
+        pred_df['game_total_scale'] = 1.0
         pred_df['injury_adj'] = False
+        pred_df['injury_adj_strength'] = 0.0
         pred_df['teammates_out'] = ''
         live_edge_models = trainer.edge_models
         live_meta_models = trainer.meta_models
         live_market_sets = trainer.market_feature_sets
+        live_prob_sidecars = trainer.probability_sidecars
+        live_prob_calibrators = trainer.probability_calibrators
         using_advanced = True
         backtest_mode = 'cutoff_trained'
     else:
         adv_models, _, _, _, live_edge_models, live_meta_models, live_market_sets = _load_advanced_models()
         using_advanced = adv_models is not None
+        live_prob_sidecars = _load_probability_sidecars() if using_advanced else {}
+        live_prob_calibrators = _load_probability_calibrators() if using_advanced else {}
         feature_df = _build_backtest_feature_frame_v2(working, using_advanced=using_advanced)
         feature_df = feature_df[feature_df['game_date'] >= test_start].copy()
         feature_df = feature_df[feature_df['games_played'] >= CONFIG['min_games']].copy()
@@ -4831,6 +6601,12 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
     pred_df = pred_df.merge(line_wide, on=['game_date', 'player_norm'], how='left')
     if len(move_wide) > 0:
         pred_df = pred_df.merge(move_wide, on=['game_date', 'player_norm'], how='left')
+    pred_df = _attach_probability_outputs(
+        pred_df,
+        feature_df,
+        live_prob_sidecars,
+        live_prob_calibrators,
+    )
     pred_df = _attach_market_model_scores(
         pred_df,
         feature_df,
@@ -4943,10 +6719,20 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
     """
     slip_path = CONFIG['output_dir'] / 'betslips_history.csv'
 
+    # Exclude volume_fill picks from betslips — they use relaxed thresholds and are
+    # confidence-capped at 63%. Also enforce a hard confidence floor so only
+    # high-conviction picks can enter real-money parlays.
+    eligible_df = picks_df.copy()
+    if 'pick_source' in eligible_df.columns:
+        eligible_df = eligible_df[~eligible_df['pick_source'].isin(['volume_fill', 'emergency_fill'])]
+    if 'confidence' in eligible_df.columns:
+        conf = pd.to_numeric(eligible_df['confidence'], errors='coerce').fillna(0.0)
+        eligible_df = eligible_df[conf >= 70.0]
+
     # One pick per player — take the highest-confidence prop for each player
     seen_players = []
     deduped = []
-    for _, row in picks_df.sort_values('confidence', ascending=False).iterrows():
+    for _, row in eligible_df.sort_values('confidence', ascending=False).iterrows():
         if row['player'] not in seen_players:
             seen_players.append(row['player'])
             deduped.append(row)
@@ -4992,13 +6778,13 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
         rows.append(row_data)
 
     # ── UNDER-Only slip track ────────────────────────────────────────────────
-    # Build dedicated slips from UNDER picks on high-win-rate prop types:
-    # AST UNDER (65.6%), TRB UNDER (61.0%), STL UNDER (73.1%), BLK UNDER (79.5%)
-    # EV math: AST UNDER × TRB UNDER = 65.6% × 61.0% = 40.0% at 3:1 = +60% ROI
+    # Build dedicated slips from UNDER picks on the post-retrain high-signal props.
+    # A hard confidence floor is already applied above, so STL/BLK only enter this
+    # pool when they survive both the live quality policy and the >=70 betslip gate.
     _under_props = {'AST', 'TRB', 'STL', 'BLK'}
-    under_pool = picks_df[
-        (picks_df['direction'] == 'UNDER') &
-        (picks_df['prop'].str.upper().isin(_under_props))
+    under_pool = eligible_df[
+        (eligible_df['direction'] == 'UNDER') &
+        (eligible_df['prop'].str.upper().isin(_under_props))
     ].copy()
     under_pool = under_pool.sort_values('confidence', ascending=False)
     under_seen = []
@@ -5121,12 +6907,27 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
 
     # Build flat set of OUT/DOUBTFUL players from injury report
     injured_out = set()
+    doubtful_players = set()
+    questionable_players = set()
+    probable_players = set()
+    day_to_day_players = set()
+    status_map = {}
+    pending_teams = set()
     if injury_data:
-        for team_data in injury_data.values():
+        for team_abbr, team_data in injury_data.items():
+            if team_data.get('not_yet_submitted'):
+                pending_teams.add(team_abbr)
             for name in team_data.get('out', []):
                 injured_out.add(name)
             for name in team_data.get('doubtful', []):
-                injured_out.add(name)
+                doubtful_players.add(name)
+            for name in team_data.get('questionable', []):
+                questionable_players.add(name)
+            for name in team_data.get('probable', []):
+                probable_players.add(name)
+            for name in team_data.get('day_to_day', []):
+                day_to_day_players.add(name)
+            status_map.update(team_data.get('status_map', {}))
 
     df = df.copy()
     df['mp'] = pd.to_numeric(df['mp'], errors='coerce').fillna(0)
@@ -5214,10 +7015,10 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
             per_min = avg_mp and (pred / avg_mp) if avg_mp > 0 else None
             if per_min and per_min > 0:
                 implied_mp = line / per_min
-                if direction == 'UNDER' and implied_mp > mp_expected * 1.4:
+                if direction == 'UNDER' and implied_mp < mp_expected * 0.65:
                     reason = (f'MINUTES MODEL: predicted {mp_expected:.0f}min but line implies '
                               f'{implied_mp:.0f}min — Vegas pricing more playing time than model expects')
-                elif direction == 'OVER' and implied_mp < mp_expected * 0.65:
+                elif direction == 'OVER' and implied_mp > mp_expected * 1.4:
                     reason = (f'MINUTES MODEL: predicted {mp_expected:.0f}min but line implies only '
                               f'{implied_mp:.0f}min — model may be overestimating playing time')
 
@@ -5283,12 +7084,27 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
         return picks
 
     injured_out = set()
+    doubtful_players = set()
+    questionable_players = set()
+    probable_players = set()
+    day_to_day_players = set()
+    status_map = {}
+    pending_teams = set()
     if injury_data:
-        for team_data in injury_data.values():
+        for team_abbr, team_data in injury_data.items():
+            if team_data.get('not_yet_submitted'):
+                pending_teams.add(team_abbr)
             for name in team_data.get('out', []):
                 injured_out.add(name)
             for name in team_data.get('doubtful', []):
-                injured_out.add(name)
+                doubtful_players.add(name)
+            for name in team_data.get('questionable', []):
+                questionable_players.add(name)
+            for name in team_data.get('probable', []):
+                probable_players.add(name)
+            for name in team_data.get('day_to_day', []):
+                day_to_day_players.add(name)
+            status_map.update(team_data.get('status_map', {}))
 
     df = df.copy()
     for col in ['mp', 'pts', 'trb', 'ast', 'stl', 'blk', 'tov']:
@@ -5356,6 +7172,7 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
 
     for idx, row in picks.iterrows():
         player = row['player']
+        team = str(row.get('team', '') or '')
         direction = row.get('direction', '')
         line = float(row.get('line', 0))
         pred = float(row.get('prediction', 0))
@@ -5364,26 +7181,36 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
         last_mp = float(last_game.loc[player, 'mp']) if player in last_game.index else None
         avg_mp = float(l10.loc[player, 'mp']) if player in l10.index else None
 
-        mp_expected = row.get('mp_expected', None)
+        mp_expected = row.get('mp_predicted', row.get('mp_expected', None))
+        if mp_expected is not None:
+            mp_expected = pd.to_numeric(pd.Series([mp_expected]), errors='coerce').iloc[0]
         if pd.isna(mp_expected) if mp_expected is not None else True:
             mp_expected = None
 
         reason = None
 
         player_norm = _normalize_name(player)
-        if player_norm in injured_out:
-            reason = "PLAYER OUT/DOUBTFUL on today's injury report -- never bet on players who may not play"
+        status_detail = status_map.get(player_norm, {})
+        status_label = str(status_detail.get('status', '') or status_detail.get('bucket', '')).replace('_', ' ').strip().upper()
+        if team in pending_teams:
+            reason = "TEAM STATUS PENDING on official NBA injury report -- skip until that team submits"
+        elif player_norm in injured_out or player_norm in doubtful_players:
+            reason = f"PLAYER {status_label or 'OUT'} on today's injury report -- never bet on players who may not play"
+        elif player_norm in questionable_players:
+            reason = f"PLAYER {status_label or 'QUESTIONABLE'} on today's injury report -- skip uncertain pregame availability"
+        elif player_norm in day_to_day_players and player_norm not in probable_players:
+            reason = "PLAYER DAY-TO-DAY on today's injury report -- skip until status upgrades"
 
         if reason is None and mp_expected is not None and avg_mp and avg_mp > 5 and pred > 0:
             per_min = (pred / avg_mp) if avg_mp > 0 else None
             if per_min and per_min > 0:
                 implied_mp = line / per_min
-                if direction == 'UNDER' and implied_mp > mp_expected * 1.4:
+                if direction == 'UNDER' and implied_mp < mp_expected * 0.65:
                     reason = (
                         f"MINUTES MODEL: predicted {mp_expected:.0f}min but line implies "
                         f"{implied_mp:.0f}min -- Vegas pricing more playing time than model expects"
                     )
-                elif direction == 'OVER' and implied_mp < mp_expected * 0.65:
+                elif direction == 'OVER' and implied_mp > mp_expected * 1.4:
                     reason = (
                         f"MINUTES MODEL: predicted {mp_expected:.0f}min but line implies only "
                         f"{implied_mp:.0f}min -- model may be overestimating playing time"
@@ -5395,6 +7222,11 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
                 reason = f"MINUTES SPIKE: {last_mp:.0f}min last game vs {avg_mp:.0f}min L10 avg -- Vegas line may reflect new role"
             elif ratio <= 0.4 and direction == 'OVER':
                 reason = f"MINUTES CRASH: {last_mp:.0f}min last game vs {avg_mp:.0f}min L10 avg -- player may have reduced role"
+            elif last_mp <= min(12.0, avg_mp * 0.45):
+                reason = (
+                    f"ROLE INSTABILITY: only {last_mp:.0f}min last game vs {avg_mp:.0f}min L10 avg "
+                    f"-- elevated DNP/rotation risk"
+                )
 
         if reason is None and line > 0:
             vcol = vol_col.get(prop)
@@ -5481,20 +7313,32 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
     return picks.loc[clean_idx].reset_index(drop=True)
 
 
-def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame):
+def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Optional[str] = None):
     """Save picks to CSV and generate simple HTML report."""
     _migrate_legacy_output_artifacts()
 
+    for col, default in [
+        ('dir_prob', np.nan),
+        ('ou_prob', np.nan),
+        ('p_over_raw', np.nan),
+        ('p_over_cal', np.nan),
+        ('p_under_raw', np.nan),
+        ('p_under_cal', np.nan),
+        ('prob_source', ''),
+    ]:
+        if col not in picks_df.columns:
+            picks_df[col] = default
+
     run_dt = datetime.now()
     run_stamp = run_dt.strftime('%Y-%m-%d_%H%M%S')
-    today_str = run_dt.strftime('%Y-%m-%d')
+    slate_date = slate_date or run_dt.strftime('%Y-%m-%d')
 
     # Save full history-independent snapshots in a dated archive tree.
     picks_daily_path, picks_run_path = _archive_csv_snapshot(
-        picks_df, 'picks', today_str, run_stamp
+        picks_df, 'picks', slate_date, run_stamp
     )
     predictions_daily_path, predictions_run_path = _archive_csv_snapshot(
-        pred_df, 'predictions', today_str, run_stamp
+        pred_df, 'predictions', slate_date, run_stamp
     )
     print(f"\n  Picks archived to {picks_run_path}")
     print(f"  Predictions archived to {predictions_run_path}")
@@ -5502,10 +7346,10 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame):
     # Append to cumulative history file for tracking
     history_path = CONFIG['output_dir'] / 'picks_history.csv'
     daily = picks_df.copy()
-    daily.insert(0, 'game_date', today_str)
+    daily.insert(0, 'game_date', slate_date)
     if history_path.exists():
         existing = pd.read_csv(history_path, dtype=str)
-        existing = existing[existing['game_date'] != today_str]  # replace today's rows
+        existing = existing[existing['game_date'] != slate_date]  # replace current slate rows
         combined = pd.concat([existing, daily.astype(str)], ignore_index=True)
     else:
         combined = daily
@@ -5515,12 +7359,12 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame):
     # Generate HTML dashboard
     html = generate_html_report(picks_df, run_stamp)
     dashboard_daily_path, dashboard_run_path = _archive_text_snapshot(
-        html, 'dashboard', today_str, run_stamp, '.html'
+        html, 'dashboard', slate_date, run_stamp, '.html'
     )
     print(f"  Dashboard archived to {dashboard_run_path}")
 
-    # Log today's suggested betslips (pass injury data so injured players are skipped)
-    slips_df = log_betslips(picks_df, today_str)
+    # Log suggested betslips for the active slate (pass injury data so risky legs are skipped)
+    slips_df = log_betslips(picks_df, slate_date)
 
     # Save stable "latest" working files for the current day.
     _atomic_csv(picks_df, CONFIG['output_dir'] / 'picks_latest.csv')
@@ -5529,7 +7373,7 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame):
     if isinstance(slips_df, pd.DataFrame) and len(slips_df) > 0:
         _atomic_csv(slips_df, CONFIG['output_dir'] / 'betslips_latest.csv')
         slips_daily_path, slips_run_path = _archive_csv_snapshot(
-            slips_df, 'betslips', today_str, run_stamp
+            slips_df, 'betslips', slate_date, run_stamp
         )
         print(f"  Betslips archived to {slips_run_path}")
 
@@ -5554,7 +7398,8 @@ def generate_html_report(picks_df: pd.DataFrame, timestamp: str) -> str:
     rows_html = ''
     for i, (_, pick) in enumerate(picks_df.iterrows()):
         conf      = f"{pick['confidence']:.0f}" if pd.notna(pick.get('confidence')) else '-'
-        ou        = f"{pick['ou_prob']:.0f}" if pd.notna(pick.get('ou_prob')) else '-'
+        pick_prob = pick.get('dir_prob', pick.get('ou_prob'))
+        ou        = f"{pick_prob:.0f}" if pd.notna(pick_prob) else '-'
         l10       = f"{pick['l10_avg']:.1f}" if pd.notna(pick.get('l10_avg')) else '-'
         edge_val  = pick['edge']
         edge_fmt  = f"{edge_val:+.1f}"
@@ -6012,7 +7857,7 @@ tr:hover td {{ background: var(--bg4) !important; }}
           <th onclick="sortTable(6,this)">Edge</th>
           <th onclick="sortTable(7,this)">L10</th>
           <th onclick="sortTable(8,this)">Conf%</th>
-          <th onclick="sortTable(9,this)">OU%</th>
+          <th onclick="sortTable(9,this)">Pick%</th>
           <th onclick="sortTable(10,this)">Line Mv</th>
           <th onclick="sortTable(11,this)">Tot</th>
         </tr>
@@ -6154,23 +7999,49 @@ def main():
 
         df = pd.read_csv(data_path, parse_dates=['game_date'])
 
-        # Use today's lines from historical_lines.csv if already fetched (avoids rate limits)
+        # Use the active slate from historical_lines.csv if already fetched (avoids rate limits)
         today_str = datetime.now().strftime('%Y-%m-%d')
         lines_path = CONFIG['data_dir'] / 'historical_lines.csv'
         vegas = pd.DataFrame()
+        _line_source = 'unknown'
+        active_slate_date = today_str
         if lines_path.exists():
             _hist = pd.read_csv(lines_path)
-            _today = _hist[_hist['game_date'] == today_str]
-            if len(_today) > 0:
-                print(f"\nUsing {len(_today)} cached lines from historical_lines.csv ({today_str})")
-                # Convert to fetch_vegas_lines format: player, prop, line, num_books
-                vegas = _today[['player', 'prop', 'line']].copy()
-                vegas['num_books'] = _today['num_books'].values if 'num_books' in _today.columns else 1
+            active_hist, hist_slate_date = _select_active_slate_lines(_hist)
+            if len(active_hist) > 0:
+                active_slate_date = hist_slate_date or today_str
+                _line_source = _infer_line_source(active_hist)
+                print(
+                    f"\nUsing {len(active_hist)} cached lines from historical_lines.csv "
+                    f"(active slate {active_slate_date}) [source: {_line_source}]"
+                )
+                vegas = active_hist[['player', 'prop', 'line']].copy()
+                vegas['num_books'] = active_hist['num_books'].values if 'num_books' in active_hist.columns else 1
         if len(vegas) == 0:
             print("\nFetching Vegas lines...")
-            vegas = fetch_vegas_lines()
-            if len(vegas) > 0:
-                save_lines_snapshot(vegas, today_str)
+            vegas_raw, _line_source = fetch_vegas_lines()
+            if len(vegas_raw) > 0:
+                save_lines_snapshot(vegas_raw, source=_line_source)
+                active_live, live_slate_date = _select_active_slate_lines(vegas_raw)
+                active_slate_date = live_slate_date or today_str
+                vegas = active_live[['player', 'prop', 'line']].copy()
+                vegas['num_books'] = active_live['num_books'].values if 'num_books' in active_live.columns else 1
+
+        print(f"\nActive slate date: {active_slate_date}")
+
+        # Warn loudly when lines did not come from PrizePicks — picks are bet on PrizePicks,
+        # so a line source mismatch corrupts the performance-tracking record.
+        if _line_source != 'prizepicks':
+            print(
+                f"\n{'!'*60}\n"
+                f"  LINE SOURCE WARNING: lines sourced from '{_line_source}'\n"
+                f"  PrizePicks lines could not be fetched (Step 2 failed or blocked).\n"
+                f"  Picks below are generated against {_line_source} lines, which may\n"
+                f"  differ from the lines PrizePicks actually offers today.\n"
+                f"  ACTION REQUIRED: verify each pick's line on PrizePicks before betting.\n"
+                f"  picks_history.csv will record '{_line_source}' as the line source.\n"
+                f"{'!'*60}"
+            )
 
         # Generate predictions
         pred_df = generate_predictions(df, vegas, use_feature_cache=True)
@@ -6178,14 +8049,32 @@ def main():
         # Compute regression-to-mean candidates from historical data
         reg_candidates = compute_regression_candidates(df)
 
-        # Get best picks
-        picks = filter_best_picks(pred_df, regression_candidates=reg_candidates)
+        # Build a deeper candidate pool, then sanitize and diversify the published card.
+        candidate_pool_size = max(
+            int(CONFIG.get('live_pick_candidate_pool', 25)),
+            int(CONFIG.get('live_pick_min', 5)) * 10,
+        )
+        picks = filter_best_picks(
+            pred_df,
+            regression_candidates=reg_candidates,
+            max_picks=candidate_pool_size,
+        )
 
-        # Fetch fresh injury report and remove any picks for OUT/DOUBTFUL players
+        # Fetch fresh injury report and remove risky availability picks
         inj_report = fetch_injury_data()
         picks = sanity_check_picks(picks, df, inj_report)
+        picks = build_live_pick_card(
+            picks,
+            target_picks=int(CONFIG.get('live_pick_target', 5)),
+            min_picks=int(CONFIG.get('live_pick_min', 5)),
+        )
 
-        print(f"\n{len(picks)} picks found after model-quality and probability filtering")
+        print(f"\n{len(picks)} picks found after live-card filtering")
+        if len(picks) < int(CONFIG.get('live_pick_min', 5)):
+            print(
+                f"  WARNING: only {len(picks)} live picks survived today "
+                f"(minimum target {int(CONFIG.get('live_pick_min', 5))})"
+            )
         
         if len(picks) > 0:
             # Top 10 display: one pick per player (best confidence), different players only
@@ -6199,7 +8088,7 @@ def main():
                     break
             top_display_df = pd.DataFrame(top_display)
             print("\nTop 10 picks (1 per player):")
-            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'mp_predicted', 'ou_prob']
+            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'p_over_cal', 'p_over_raw', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'mp_predicted', 'prob_source']
             display_cols = [c for c in display_cols if c in top_display_df.columns]
             print(top_display_df[display_cols].to_string(index=False))
 
@@ -6212,7 +8101,11 @@ def main():
                     for _, p in inj_picks.iterrows():
                         print(f"    {p['player']} ({p['prop']}): {p.get('teammates_out', '')}")
 
-            save_picks(picks, pred_df)
+            # Stamp the line source onto every pick so picks_history.csv tracks it.
+            # This is essential for identifying runs where PrizePicks was unavailable.
+            picks['line_source'] = _line_source
+
+            save_picks(picks, pred_df, slate_date=active_slate_date)
 
     elif command == 'backfill':
         days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
@@ -6272,22 +8165,44 @@ def main():
         train_ou_classifiers(df)
 
         print("\n[4/4] Generating predictions...")
-        vegas = fetch_vegas_lines()
-        if len(vegas) > 0:
-            save_lines_snapshot(vegas, datetime.now().strftime('%Y-%m-%d'))
+        vegas_raw, _line_source_all = fetch_vegas_lines()
+        active_slate_date_all = datetime.now().strftime('%Y-%m-%d')
+        vegas = pd.DataFrame()
+        if len(vegas_raw) > 0:
+            save_lines_snapshot(vegas_raw, source=_line_source_all)
+            active_live_all, live_slate_date_all = _select_active_slate_lines(vegas_raw)
+            active_slate_date_all = live_slate_date_all or active_slate_date_all
+            vegas = active_live_all[['player', 'prop', 'line']].copy()
+            vegas['num_books'] = active_live_all['num_books'].values if 'num_books' in active_live_all.columns else 1
         pred_df = generate_predictions(df, vegas, use_feature_cache=False)
         reg_candidates = compute_regression_candidates(df)
-        picks = filter_best_picks(pred_df, regression_candidates=reg_candidates)
-        
+        candidate_pool_size = max(
+            int(CONFIG.get('live_pick_candidate_pool', 25)),
+            int(CONFIG.get('live_pick_min', 5)) * 10,
+        )
+        picks = filter_best_picks(
+            pred_df,
+            regression_candidates=reg_candidates,
+            max_picks=candidate_pool_size,
+        )
+        inj_report_all = fetch_injury_data()
+        picks = sanity_check_picks(picks, df, inj_report_all)
+        picks = build_live_pick_card(
+            picks,
+            target_picks=int(CONFIG.get('live_pick_target', 5)),
+            min_picks=int(CONFIG.get('live_pick_min', 5)),
+        )
+
         if len(picks) > 0:
+            picks['line_source'] = _line_source_all
             print(f"\n{len(picks)} picks found:")
-            
+
             print("\n=== TOP 20 PICKS (by rank score) ===")
-            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'l10_avg']
+            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'p_over_cal', 'p_over_raw', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'l10_avg', 'prob_source']
             display_cols = [c for c in display_cols if c in picks.columns]
             print(picks.head(20)[display_cols].to_string(index=False))
-            
-            save_picks(picks, pred_df)
+
+            save_picks(picks, pred_df, slate_date=active_slate_date_all)
         
     else:
         print(f"Unknown command: {command}")

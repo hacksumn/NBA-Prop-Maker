@@ -603,6 +603,26 @@ def detect_recent_absences(
     """
     player_profiles = attach_latest_local_team_context(player_profiles)
     team_roster = player_profiles[player_profiles["team_abbr"] == team_abbr].copy()
+
+    # Local game logs are the safest signal for whether a player has actually
+    # been part of this team's recent rotation. If the season profile says WAS
+    # but the latest local game was for DAL, treat that player as a stale roster
+    # artifact and exclude them from injury/absence inference for WAS.
+    if "latest_played_team" in team_roster.columns:
+        latest_team = team_roster["latest_played_team"].astype(str).str.upper()
+        ghost_mask = team_roster["latest_played_team"].notna() & latest_team.ne(team_abbr.upper())
+        if ghost_mask.any():
+            ghost_rows = team_roster.loc[ghost_mask, ["player_name", "latest_played_team", "latest_game_date"]].copy()
+            log.info(f"  Skipping {len(ghost_rows)} stale roster players for {team_abbr}:")
+            for _, ghost in ghost_rows.sort_values("player_name").iterrows():
+                latest_date = pd.to_datetime(ghost.get("latest_game_date"), errors="coerce")
+                latest_date_str = latest_date.strftime("%Y-%m-%d") if pd.notna(latest_date) else "unknown date"
+                log.info(
+                    f"    {ghost['player_name']} — latest local game for "
+                    f"{ghost['latest_played_team']} on {latest_date_str}"
+                )
+            team_roster = team_roster.loc[~ghost_mask].copy()
+
     team_players = team_roster["player_id"].tolist()
 
     log.info(f"Scanning last {last_n_games} games for {team_abbr} absences...")

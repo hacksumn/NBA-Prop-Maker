@@ -12,6 +12,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 ROOT = Path(__file__).parent.resolve()
@@ -54,6 +55,14 @@ STAT_OPTIONS = {
     "Turnovers": "tov",
     "Minutes": "mp",
 }
+
+
+def nba_season_key(date_value) -> str:
+    ts = pd.to_datetime(date_value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+    start_year = ts.year if ts.month >= 10 else ts.year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
 
 
 def configure_page() -> None:
@@ -487,13 +496,12 @@ def run_streaming_command(label: str, command: List[str]) -> None:
 
 def render_terminal_controls() -> None:
     st.markdown("### Command Console")
-    st.caption("Run the real project scripts from inside the UI. Output streams into the attached terminal below.")
-
-    button_cols = st.columns(len(COMMANDS))
-    for idx, (label, command) in enumerate(COMMANDS.items()):
-        with button_cols[idx]:
-            if st.button(label, key=f"cmd_{idx}", width="stretch"):
-                run_streaming_command(label, command)
+    st.caption("Run one project command at a time from the dashboard.")
+    labels = list(COMMANDS.keys())
+    selected_label = st.selectbox("Command", labels, index=0, key="dashboard_command_picker")
+    st.caption("Daily update ingests data and grades picks. Generate Picks refreshes the live board.")
+    if st.button(f"Run {selected_label}", key="dashboard_run_command", width="stretch"):
+        run_streaming_command(selected_label, COMMANDS[selected_label])
 
     terminal_output = st.session_state.get("terminal_output", "")
     terminal_rc = st.session_state.get("terminal_rc")
@@ -503,7 +511,8 @@ def render_terminal_controls() -> None:
     if terminal_rc is not None:
         header = f"{header} · exit {terminal_rc}"
     st.caption(header)
-    st.code(terminal_output or "# Terminal output will appear here", language="bash")
+    with st.expander("Latest command output", expanded=False):
+        st.code(terminal_output or "# Terminal output will appear here", language="bash")
 
 
 def render_sidebar(health_rows: List[Tuple[str, Path]]) -> None:
@@ -855,13 +864,45 @@ def render_data_explorer(nba_data: pd.DataFrame, profiles: pd.DataFrame) -> None
             render_player_profile_card(profile_match.iloc[0])
 
     stat_col = STAT_OPTIONS[selected_stat]
-    trend = player_df.tail(20).copy()
-    trend["rolling_5"] = trend[stat_col].rolling(5, min_periods=1).mean()
+    if player_df.empty:
+        st.info("No games available for the current player/team filter.")
+        return
+    trend_source = player_df.copy()
+    trend_source[stat_col] = pd.to_numeric(trend_source[stat_col], errors="coerce")
+    trend_source["season_key"] = trend_source["game_date"].apply(nba_season_key)
+    trend_source["rolling_5"] = trend_source[stat_col].shift(1).rolling(5, min_periods=1).mean()
+    trend_source["rolling_10"] = trend_source[stat_col].shift(1).rolling(10, min_periods=1).mean()
+    trend_source["rolling_20"] = trend_source[stat_col].shift(1).rolling(20, min_periods=1).mean()
+    trend_source["ewma_5"] = trend_source[stat_col].shift(1).ewm(span=5, min_periods=1, adjust=False).mean()
+    trend_source["season_avg"] = trend_source.groupby("season_key")[stat_col].transform(
+        lambda x: x.shift(1).expanding(min_periods=1).mean()
+    )
+    season_games = trend_source.groupby("season_key").cumcount()
+    season_reliability = (season_games / (season_games + 10.0)).fillna(0.0).clip(0.0, 1.0)
+    recent_stack = (
+        trend_source["ewma_5"] * 0.40 +
+        trend_source["rolling_5"] * 0.25 +
+        trend_source["rolling_10"] * 0.20 +
+        trend_source["rolling_20"] * 0.15
+    )
+    season_share = 0.12 + 0.23 * season_reliability
+    trend_source["recency_anchor"] = (
+        recent_stack * (1.0 - season_share) +
+        trend_source["season_avg"].fillna(trend_source["rolling_20"]).fillna(recent_stack) * season_share
+    )
+    trend = trend_source.tail(20).copy()
     trend_fig = go.Figure()
     trend_fig.add_trace(go.Bar(x=trend["game_date"], y=trend[stat_col], name=selected_stat, marker_color="#d6604d", opacity=0.75))
-    trend_fig.add_trace(go.Scatter(x=trend["game_date"], y=trend["rolling_5"], mode="lines+markers", name="Rolling 5", line=dict(color="#264653", width=3)))
+    trend_fig.add_trace(go.Scatter(x=trend["game_date"], y=trend["recency_anchor"], mode="lines", name="Recency Blend", line=dict(color="#264653", width=3)))
+    trend_fig.add_trace(go.Scatter(x=trend["game_date"], y=trend["ewma_5"], mode="lines", name="EWMA 5", line=dict(color="#2a9d8f", width=2)))
+    trend_fig.add_trace(go.Scatter(x=trend["game_date"], y=trend["rolling_5"], mode="lines", name="L5", line=dict(color="#577590", width=1.8, dash="dot")))
+    trend_fig.add_trace(go.Scatter(x=trend["game_date"], y=trend["rolling_10"], mode="lines", name="L10", line=dict(color="#d4a94b", width=1.8, dash="dash")))
+    trend_fig.add_trace(go.Scatter(x=trend["game_date"], y=trend["rolling_20"], mode="lines", name="L20", line=dict(color="#8f5d5d", width=1.8, dash="longdash")))
+    trend_fig.add_trace(go.Scatter(x=trend["game_date"], y=trend["season_avg"], mode="lines", name="Season Avg", line=dict(color="#69757d", width=1.6)))
     plot_template(trend_fig)
+    trend_fig.update_layout(title=f"{selected_player} · Last 20 Games · Recency Lens")
     trend_fig.update_layout(title=f"{selected_player} · Last 20 Games")
+    trend_fig.update_layout(title=f"{selected_player} · Last 20 Games · Recency Lens")
     st.plotly_chart(trend_fig, width="stretch")
 
     recent_cols = ["game_date", "team", "opp", "matchup", "mp", "pts", "trb", "ast", "stl", "blk", "tov", "plus_minus", "result"]
@@ -1073,9 +1114,509 @@ def render_archive_and_logs(absences: pd.DataFrame, archive_files: pd.DataFrame)
         st.dataframe(preview, width="stretch", height=520)
         st.download_button("Download CSV", data=target.read_bytes(), file_name=target.name, mime="text/csv", width="stretch")
     elif target.suffix.lower() == ".html":
-        st.html(target, unsafe_allow_javascript=True)
+        components.html(load_text(target), height=960, scrolling=True)
     else:
         st.code(target.read_text(encoding="utf-8", errors="replace"), language="text")
+
+
+@st.cache_data(show_spinner=False)
+def _read_text_cached(path_str: str, mtime_ns: int) -> str:
+    with open(path_str, "r", encoding="utf-8", errors="replace") as handle:
+        return handle.read()
+
+
+def load_text(path: Path) -> str:
+    if not safe_exists(path):
+        return ""
+    return _read_text_cached(str(path), path.stat().st_mtime_ns)
+
+
+def dashboard_embed_height(today: pd.DataFrame) -> int:
+    row_count = len(today) if not today.empty else 0
+    return max(780, min(1850, 470 + row_count * 54))
+
+
+def load_dashboard_markup() -> str:
+    markup = load_text(DASHBOARD_HTML)
+    if not markup:
+        return ""
+    markup = markup.replace(
+        "family=Share+Tech+Mono&family=Inter:wght@400;500;600;700",
+        "family=Share+Tech+Mono&family=Inter:wght@400;500;600;700&family=Press+Start+2P",
+    )
+    markup = markup.replace(
+        "'Street Bit', 'Press Start 2P', monospace",
+        "'Press Start 2P', 'Share Tech Mono', monospace",
+    )
+    return markup
+
+
+def build_artifact_health_table() -> pd.DataFrame:
+    log_files = load_log_files()
+    return pd.DataFrame(
+        [
+            {"artifact": "picks_latest.csv", "updated": human_stamp(TODAY_PICKS), "size": human_size(TODAY_PICKS)},
+            {"artifact": "predictions_latest.csv", "updated": human_stamp(TODAY_PREDICTIONS), "size": human_size(TODAY_PREDICTIONS)},
+            {"artifact": "dashboard_latest.html", "updated": human_stamp(DASHBOARD_HTML), "size": human_size(DASHBOARD_HTML)},
+            {"artifact": "picks_history.csv", "updated": human_stamp(PICKS_HISTORY), "size": human_size(PICKS_HISTORY)},
+            {"artifact": "latest log", "updated": human_stamp(log_files[0]) if log_files else "missing", "size": human_size(log_files[0]) if log_files else "missing"},
+        ]
+    )
+
+
+def configure_page() -> None:
+    st.set_page_config(page_title="NBA Prop Model", layout="wide", initial_sidebar_state="expanded")
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+
+        :root {
+            --bg: #0c111b;
+            --panel: #121927;
+            --panel-2: #182132;
+            --border: #283246;
+            --text: #eef2ff;
+            --muted: #9aa7bd;
+            --accent: #4f8cff;
+            --accent-soft: rgba(79, 140, 255, 0.14);
+            --success: #35c47c;
+            --danger: #ff6b6b;
+            --gold: #f2b84b;
+            --sans: "Inter", sans-serif;
+            --mono: "Share Tech Mono", monospace;
+        }
+
+        .stApp {
+            background:
+                radial-gradient(circle at top right, rgba(79, 140, 255, 0.10), transparent 24%),
+                linear-gradient(180deg, #101725 0%, #0c111b 100%);
+            color: var(--text);
+        }
+
+        [data-testid="stHeader"] {
+            background: rgba(12, 17, 27, 0);
+        }
+
+        .block-container {
+            max-width: 1380px;
+            padding-top: 1.25rem;
+            padding-bottom: 2.5rem;
+        }
+
+        h1, h2, h3, h4, h5, h6, p, li, label, .stMarkdown, .stCaptionContainer {
+            color: var(--text);
+            font-family: var(--sans);
+        }
+
+        a {
+            color: var(--accent);
+        }
+
+        section[data-testid="stSidebar"] {
+            background: #0f1624;
+            border-right: 1px solid var(--border);
+        }
+
+        section[data-testid="stSidebar"] * {
+            color: var(--text);
+        }
+
+        .sidebar-section {
+            background: var(--panel);
+            border-radius: 12px;
+            padding: 0.85rem 0.9rem;
+            border: 1px solid var(--border);
+            margin-bottom: 0.85rem;
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.5rem;
+            margin-bottom: 0.7rem;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 0.5rem 0.95rem;
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .stTabs [aria-selected="true"] {
+            background: var(--accent-soft);
+            border-color: rgba(79, 140, 255, 0.35);
+            color: white;
+        }
+
+        [data-testid="stMetric"] {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: none;
+        }
+
+        [data-testid="stMetricLabel"] p {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        [data-testid="stMetricValue"] {
+            color: var(--text);
+        }
+
+        [data-baseweb="select"] > div,
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stTextArea"] textarea {
+            background: var(--panel-2) !important;
+            border: 1px solid var(--border) !important;
+            color: var(--text) !important;
+            border-radius: 10px !important;
+            font-family: var(--mono) !important;
+        }
+
+        [data-baseweb="select"] svg {
+            fill: var(--muted);
+        }
+
+        [data-testid="stSelectbox"] label,
+        [data-testid="stMultiSelect"] label,
+        [data-testid="stSlider"] label,
+        [data-testid="stTextInput"] label,
+        [data-testid="stTextArea"] label {
+            font-family: var(--mono);
+            font-size: 0.70rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .stButton > button,
+        [data-testid="stDownloadButton"] > button {
+            background: var(--panel);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-family: var(--mono);
+            min-height: 2.6rem;
+        }
+
+        .stButton > button:hover,
+        [data-testid="stDownloadButton"] > button:hover {
+            border-color: rgba(79, 140, 255, 0.45);
+            background: var(--panel-2);
+            color: white;
+        }
+
+        [data-testid="stDataFrame"],
+        [data-testid="stTable"],
+        [data-testid="stCodeBlock"],
+        [data-testid="stCode"],
+        div[data-testid="stStatusWidget"],
+        details[data-testid="stExpander"] {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+
+        .hero-panel {
+            background: linear-gradient(180deg, rgba(79, 140, 255, 0.08), rgba(18, 25, 39, 0.98));
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.1rem 1.15rem;
+            margin-bottom: 1rem;
+        }
+
+        .hero-kicker {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.74rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.4rem;
+        }
+
+        .hero-title {
+            color: var(--text);
+            font-size: 1.95rem;
+            line-height: 1.05;
+            margin: 0 0 0.45rem 0;
+            font-weight: 700;
+        }
+
+        .hero-subtitle {
+            color: var(--muted);
+            font-size: 0.95rem;
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        .purpose-strip {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.8rem 0.95rem;
+            margin-bottom: 1rem;
+        }
+
+        .purpose-label {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .purpose-copy {
+            color: var(--text);
+            margin-top: 0.35rem;
+            font-size: 0.96rem;
+            line-height: 1.5;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_sidebar(health_rows: List[Tuple[str, Path]]) -> None:
+    with st.sidebar:
+        st.markdown("## NBA Prop Model")
+        st.caption("Daily picks, pipeline controls, and diagnostics.")
+
+        if st.button("Refresh Data", width="stretch"):
+            st.cache_data.clear()
+            st.rerun()
+
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.markdown("#### Latest Artifacts")
+        for label, path in health_rows:
+            st.markdown(f"`{label}`  \n{human_stamp(path)} · {human_size(path)}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        logs = load_log_files()
+        if logs:
+            latest_log = logs[0]
+            st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+            st.markdown("#### Latest Log")
+            st.markdown(f"[{latest_log.name}]({latest_log.as_posix()})")
+            st.caption(human_stamp(latest_log))
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.markdown("#### Purpose")
+        st.caption("Start on the Dashboard tab to review today's board. Use the other tabs only when you need deeper analysis.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def prepare_live_board(today: pd.DataFrame) -> pd.DataFrame:
+    if today.empty:
+        return pd.DataFrame()
+
+    board = today.copy()
+    numeric_cols = ["line", "prediction", "edge", "confidence", "ou_prob", "dir_prob", "line_move", "anchor_avg", "anchor_edge", "l10_avg"]
+    for col in numeric_cols:
+        if col in board.columns:
+            board[col] = pd.to_numeric(board[col], errors="coerce")
+
+    for col in ["player", "team", "prop", "direction", "pick_source"]:
+        if col in board.columns:
+            board[col] = board[col].fillna("").astype(str)
+
+    if "confidence" in board.columns:
+        board = board.sort_values(["confidence", "edge"], ascending=[False, False], na_position="last")
+    return board.reset_index(drop=True)
+
+
+def filter_live_board(board: pd.DataFrame) -> pd.DataFrame:
+    if board.empty:
+        return board
+
+    controls = st.columns([1.45, 1.0, 1.0, 1.05, 1.25], gap="small")
+    search = controls[0].text_input("Search Player", value="", placeholder="Player name")
+    prop_values = sorted([x for x in board.get("prop", pd.Series(dtype=str)).dropna().unique().tolist() if x])
+    team_values = sorted([x for x in board.get("team", pd.Series(dtype=str)).dropna().unique().tolist() if x])
+    prop = controls[1].selectbox("Prop", ["All", *prop_values], index=0)
+    direction = controls[2].selectbox("Direction", ["All", "OVER", "UNDER"], index=0)
+    team = controls[3].selectbox("Team", ["All", *team_values], index=0)
+    min_conf = controls[4].slider("Min Confidence", 0, 100, 60)
+
+    filtered = board.copy()
+    if search:
+        filtered = filtered[filtered["player"].str.contains(search, case=False, na=False)]
+    if prop != "All" and "prop" in filtered.columns:
+        filtered = filtered[filtered["prop"] == prop]
+    if direction != "All" and "direction" in filtered.columns:
+        filtered = filtered[filtered["direction"] == direction]
+    if team != "All" and "team" in filtered.columns:
+        filtered = filtered[filtered["team"] == team]
+    if "confidence" in filtered.columns:
+        filtered = filtered[filtered["confidence"].fillna(0) >= min_conf]
+    return filtered.reset_index(drop=True)
+
+
+def render_raw_dashboard_expander(today: pd.DataFrame) -> None:
+    with st.expander("Raw HTML Dashboard", expanded=False):
+        markup = load_dashboard_markup()
+        if markup:
+            st.caption(f"Latest HTML output · {human_stamp(DASHBOARD_HTML)}")
+            components.html(markup, height=dashboard_embed_height(today), scrolling=True)
+        else:
+            st.info("`output/dashboard_latest.html` is missing. Run `Generate Picks` to rebuild it.")
+
+
+def render_dashboard_hub(
+    today: pd.DataFrame,
+    history: pd.DataFrame,
+    predictions: pd.DataFrame,
+    backtest: pd.DataFrame,
+    betslips_history: pd.DataFrame,
+    betslips_latest: pd.DataFrame,
+) -> None:
+    board = prepare_live_board(today)
+    decisions = decisions_only(history)
+    wins = int((decisions["result"] == "WIN").sum()) if not decisions.empty else 0
+    losses = int((decisions["result"] == "LOSS").sum()) if not decisions.empty else 0
+    avg_conf = board["confidence"].mean() if "confidence" in board.columns and not board.empty else None
+    avg_edge = board["edge"].abs().mean() if "edge" in board.columns and not board.empty else None
+    unders = int((board.get("direction") == "UNDER").sum()) if not board.empty and "direction" in board.columns else 0
+    overs = int((board.get("direction") == "OVER").sum()) if not board.empty and "direction" in board.columns else 0
+
+    st.markdown(
+        f"""
+        <div class="hero-panel">
+            <div class="hero-kicker">Dashboard</div>
+            <div class="hero-title">Today's NBA Prop Board</div>
+            <p class="hero-subtitle">
+                Review today's live picks, filter them quickly, run the pipeline when needed, and open deeper performance
+                or model diagnostics only when you need them. Latest picks snapshot: <span class="inline-note">{human_stamp(TODAY_PICKS)}</span>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="purpose-strip">
+            <div class="purpose-label">Purpose</div>
+            <div class="purpose-copy">
+                This page is for the current slate only: review the live board, refresh the workflow, and sanity check the newest outputs.
+                Historical performance, player research, and model diagnostics live in the other tabs.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    metric_cols = st.columns(5)
+    metric_cols[0].metric("Live Picks", format_int(len(board)))
+    metric_cols[1].metric("Avg Confidence", format_num(avg_conf, 1))
+    metric_cols[2].metric("Avg Edge", format_num(avg_edge, 2))
+    metric_cols[3].metric("Over / Under", f"{overs} / {unders}")
+    metric_cols[4].metric("Record", f"{wins}-{losses}")
+
+    left, right = st.columns([1.55, 0.95], gap="large")
+    with left:
+        st.markdown("### Live Board")
+        filtered = filter_live_board(board)
+        st.caption(f"Showing {len(filtered)} of {len(board)} picks")
+
+        if filtered.empty:
+            st.info("No picks match the current filters.")
+        else:
+            display = filtered.copy()
+            keep = [
+                "player",
+                "team",
+                "prop",
+                "direction",
+                "line",
+                "prediction",
+                "edge",
+                "confidence",
+                "anchor_avg",
+                "anchor_edge",
+                "ou_prob",
+                "dir_prob",
+                "pick_source",
+            ]
+            keep = [col for col in keep if col in display.columns]
+            display = display[keep].rename(
+                columns={
+                    "player": "Player",
+                    "team": "Team",
+                    "prop": "Prop",
+                    "direction": "Dir",
+                    "line": "Line",
+                    "prediction": "Pred",
+                    "edge": "Edge",
+                    "confidence": "Conf %",
+                    "anchor_avg": "Anchor",
+                    "anchor_edge": "Anchor Edge",
+                    "ou_prob": "OU %",
+                    "dir_prob": "Dir %",
+                    "pick_source": "Source",
+                }
+            )
+            st.dataframe(
+                display,
+                width="stretch",
+                height=440,
+                hide_index=True,
+                column_config={
+                    "Line": st.column_config.NumberColumn(format="%.1f"),
+                    "Pred": st.column_config.NumberColumn(format="%.1f"),
+                    "Edge": st.column_config.NumberColumn(format="%.1f"),
+                    "Conf %": st.column_config.NumberColumn(format="%.0f%%"),
+                    "OU %": st.column_config.NumberColumn(format="%.0f%%"),
+                    "Dir %": st.column_config.NumberColumn(format="%.0f%%"),
+                },
+            )
+
+        with st.expander("Suggested Betslips", expanded=False):
+            if betslips_latest.empty:
+                st.info("No latest betslips file found.")
+            else:
+                st.dataframe(betslips_latest, width="stretch", height=220, hide_index=True)
+
+        render_raw_dashboard_expander(board)
+
+    with right:
+        st.markdown("### Quick Actions")
+        render_terminal_controls()
+
+        st.markdown("### Latest Outputs")
+        st.dataframe(build_artifact_health_table(), width="stretch", hide_index=True, height=220)
+
+        if not predictions.empty:
+            st.markdown("### Prediction Snapshot")
+            cols = [col for col in ["player", "team", "pts_pred", "trb_pred", "ast_pred", "stl_pred", "blk_pred", "tov_pred"] if col in predictions.columns]
+            if cols:
+                st.dataframe(predictions[cols].head(10), width="stretch", height=250, hide_index=True)
+
+        if not board.empty and len(board) > 1 and "prop" in board.columns:
+            st.markdown("### Board Mix")
+            mix_df = board.groupby(["prop", "direction"], dropna=False).size().reset_index(name="count")
+            mix = px.bar(
+                mix_df,
+                x="prop",
+                y="count",
+                color="direction",
+                barmode="group",
+                color_discrete_sequence=["#35c47c", "#ff6b6b"],
+            )
+            plot_template(mix)
+            mix.update_layout(title=None, margin=dict(l=8, r=8, t=8, b=8))
+            st.plotly_chart(mix, width="stretch")
 
 
 def main() -> None:
@@ -1105,18 +1646,16 @@ def main() -> None:
         ]
     )
 
-    tabs = st.tabs(["Mission Control", "Picks Board", "Performance Lab", "Data Explorer", "Model Room", "Archives & Logs"])
+    tabs = st.tabs(["Dashboard", "Performance", "Players", "Models", "Archives"])
     with tabs[0]:
-        render_mission_control(today, history, predictions, backtest, betslips_history)
+        render_dashboard_hub(today, history, predictions, backtest, betslips_history, betslips_latest)
     with tabs[1]:
-        render_picks_board(today, betslips_latest)
-    with tabs[2]:
         render_performance_lab(history, backtest, betslips_history)
-    with tabs[3]:
+    with tabs[2]:
         render_data_explorer(nba_data, profiles)
-    with tabs[4]:
+    with tabs[3]:
         render_model_room(training_results, results_json, feature_importance, training_edge)
-    with tabs[5]:
+    with tabs[4]:
         render_archive_and_logs(absences, archive_files)
 
 

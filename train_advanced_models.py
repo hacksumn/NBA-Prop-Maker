@@ -7,13 +7,36 @@ Uses all advanced features from the feature pipeline for improved predictions.
 import pandas as pd
 import numpy as np
 import xgboost as xgb
+import re
+import unicodedata
+from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor
+from sklearn.linear_model import BayesianRidge, Ridge
 from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import mean_absolute_error, mean_squared_error, roc_auc_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_pinball_loss, roc_auc_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 import json
 import pickle
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import warnings
+from probability_utils import (
+    COUNT_TARGETS,
+    PROBABILITY_TARGETS,
+    QUANTILE_LEVELS,
+    apply_isotonic_calibrators,
+    compute_binary_probability_metrics,
+    ensure_monotonic_quantiles,
+    ensure_monotonic_tail_probs,
+    fit_isotonic_calibrators,
+    ordinal_over_probability,
+    over_probability_from_quantiles,
+    poisson_over_probability,
+    quantile_tag,
+    quantile_tags,
+    tail_threshold_tag,
+)
 warnings.filterwarnings('ignore')
 
 # ── Per-target regression hyperparameters ─────────────────────────────────────
@@ -112,6 +135,9 @@ META_CLASSIFIER_PARAMS: Dict[str, Dict] = {
     )
     for target, params in CLASSIFIER_PARAMS.items()
 }
+
+BLEND_REGRESSION_TARGETS = {'pts', 'trb', 'ast'}
+BLEND_BASE_MODEL_ORDER = ['xgb', 'etr', 'bayes', 'fp']
 
 # ── Season recency weights ─────────────────────────────────────────────────────
 SEASON_WEIGHTS = {
@@ -244,8 +270,7 @@ PROP_TO_TARGET = {
     'player_turnovers':                 'tov',
 }
 
-# Proxy line column: best available L-window rolling average per stat
-# Used as line estimate for rows without a real scraped line
+# Fallback proxy line column when richer recency anchors are missing.
 PROXY_LINE_COL = {
     'pts': 'pts_l10', 'trb': 'trb_l10', 'ast': 'ast_l10',
     'pra': None,       'pr':  None,       'pa':  None,
@@ -403,6 +428,8 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
     l10 = _sum_target_feature(df, target, 'l10')
     l5 = _sum_target_feature(df, target, 'l5')
     best = _sum_target_feature(df, target, 'best_estimate')
+    anchor = _sum_target_feature(df, target, 'recency_anchor')
+    season_avg = _sum_target_feature(df, target, 'season_avg')
     std = _sum_target_feature(df, target, 'std_l10')
     std = std.fillna(_sum_target_feature(df, target, 'std'))
     std = std.clip(lower=0.5)
@@ -442,6 +469,7 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
     total_luck = _numeric_series(df, 'total_luck_score', default=0.0).fillna(0.0)
     comp_share = _numeric_series(df, 'competitive_share_l10_ctx', default=1.0).fillna(1.0)
     garbage_rate = _numeric_series(df, 'garbage_rate_l10_ctx', default=0.0).fillna(0.0)
+    season_reliability = _numeric_series(df, 'season_sample_reliability', default=0.0).fillna(0.0)
 
     minutes_shock = _safe_ratio((mp_l5 - mp_l20).abs(), mp_l20.abs().clip(lower=8))
     usage_shock = _safe_ratio((usage_l5 - usage_l10).abs(), usage_l10.abs().clip(lower=0.05))
@@ -460,11 +488,15 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
     block['market_line_vs_l10'] = line - l10
     block['market_line_vs_l5'] = line - l5
     block['market_line_vs_best'] = line - best
+    block['market_line_vs_anchor'] = line - anchor
     block['market_line_vs_clean'] = line - clean
     block['market_l5_vs_l10'] = l5 - l10
     block['market_best_vs_l10'] = best - l10
+    block['market_anchor_vs_l10'] = anchor - l10
+    block['market_anchor_vs_season'] = anchor - season_avg
     block['market_std'] = std
     block['market_line_z_l10'] = _safe_ratio(line - l10, std)
+    block['market_line_z_anchor'] = _safe_ratio(line - anchor, std)
     block['market_best_z_line'] = _safe_ratio(best - line, std)
     block['market_confidence_mean'] = conf
     block['market_risk_factor'] = risk_factor
@@ -483,6 +515,7 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
     block['market_total_luck'] = total_luck
     block['market_competitive_share'] = comp_share.clip(lower=0, upper=1)
     block['market_garbage_rate'] = garbage_rate.clip(lower=0, upper=1)
+    block['market_season_reliability'] = season_reliability.clip(lower=0, upper=1)
     block['market_blowout_risk'] = (_safe_ratio(team_spread.abs(), pd.Series(12.0, index=df.index)) + garbage_rate.fillna(0.0)).fillna(0.0)
 
     if raw_pred is not None:
@@ -490,6 +523,7 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
         block['signal_raw_edge'] = raw_pred - line
         block['signal_abs_raw_edge'] = (raw_pred - line).abs()
         block['signal_raw_vs_best'] = raw_pred - best
+        block['signal_raw_vs_anchor'] = raw_pred - anchor
         block['signal_raw_vs_l10'] = raw_pred - l10
     return block.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
@@ -507,6 +541,329 @@ def _build_meta_feature_block(market_block: pd.DataFrame, raw_edge: pd.Series,
     meta['signal_direction_match'] = (np.sign(market_edge_pred) == np.sign(raw_edge)).astype(float)
     meta['signal_shock_penalty'] = meta['market_role_shock'] * meta['signal_abs_market_edge_pred']
     return meta.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+
+def _normalize_player_name(name: object) -> str:
+    text = unicodedata.normalize('NFKD', str(name)).encode('ascii', 'ignore').decode('ascii')
+    return re.sub(r'[^a-z0-9 ]', '', text.lower()).strip()
+
+
+def _build_fp_projection_proxy(df: pd.DataFrame, target: str) -> pd.Series:
+    """Return the closest historical first-principles proxy available in the frame."""
+    if target == 'pts':
+        if 'proj_pts_final' in df.columns:
+            return pd.to_numeric(df['proj_pts_final'], errors='coerce')
+        pts_base = _numeric_series(df, 'pts_luck_adj')
+        if pts_base.isna().all():
+            pts_base = _numeric_series(df, 'clean_pts')
+        if pts_base.isna().all():
+            pts_base = _sum_target_feature(df, 'pts', 'best_estimate')
+        if 'adj_ppp' in df.columns:
+            scale = (_numeric_series(df, 'adj_ppp') / 1.15).clip(lower=0.7, upper=1.3)
+            return pts_base.fillna(_sum_target_feature(df, 'pts', 'best_estimate')).fillna(_sum_target_feature(df, 'pts', 'recency_anchor')) * scale.fillna(1.0)
+        return pts_base.fillna(_sum_target_feature(df, 'pts', 'best_estimate')).fillna(_sum_target_feature(df, 'pts', 'recency_anchor'))
+    if target == 'trb':
+        series = _numeric_series(df, 'proj_reb')
+        if series.isna().all():
+            series = _numeric_series(df, 'clean_reb')
+        return series.fillna(_sum_target_feature(df, 'trb', 'best_estimate')).fillna(_sum_target_feature(df, 'trb', 'recency_anchor'))
+    if target == 'ast':
+        series = _numeric_series(df, 'proj_ast')
+        if series.isna().all():
+            series = _numeric_series(df, 'clean_ast')
+        return series.fillna(_sum_target_feature(df, 'ast', 'best_estimate')).fillna(_sum_target_feature(df, 'ast', 'recency_anchor'))
+    return pd.Series(np.nan, index=df.index, dtype=float)
+
+
+def _predict_regression_model(model, X: pd.DataFrame, fp_input: Optional[pd.Series] = None) -> np.ndarray:
+    """Predict from either a plain regressor or a saved blended-regression bundle."""
+    if isinstance(model, dict) and model.get('kind') in {'ridge_blend_regressor', 'positive_ridge_blend_regressor'}:
+        base_preds = []
+        for base_name in model.get('base_order', []):
+            if base_name == 'fp':
+                if fp_input is None:
+                    base_preds.append(np.zeros(len(X), dtype=float))
+                else:
+                    base_preds.append(np.asarray(pd.to_numeric(fp_input, errors='coerce').fillna(0.0), dtype=float))
+                continue
+            base_model = model['base_models'][base_name]
+            base_preds.append(np.asarray(base_model.predict(X), dtype=float))
+        blend_X = np.column_stack(base_preds)
+        return np.asarray(model['blender'].predict(blend_X), dtype=float)
+    return np.asarray(model.predict(X), dtype=float)
+
+
+def _make_blend_base_models(target: str, reg_params: Dict) -> Dict[str, object]:
+    depth = int(reg_params.get('max_depth', 6))
+    n_estimators = int(reg_params.get('n_estimators', 300))
+    min_child_weight = int(reg_params.get('min_child_weight', 3))
+    reg_alpha = float(reg_params.get('reg_alpha', 0.1))
+    xgb_params = dict(reg_params)
+    xgb_params.update({'random_state': 42, 'n_jobs': -1})
+    xgb_model = xgb.XGBRegressor(**xgb_params)
+    etr_model = ExtraTreesRegressor(
+        n_estimators=max(320, int(n_estimators * 1.1)),
+        max_depth=max(depth + 1, 6),
+        min_samples_leaf=max(2, min_child_weight - 1),
+        max_features=0.8,
+        random_state=42,
+        n_jobs=-1,
+    )
+    bayes_model = Pipeline([
+        ('scaler', StandardScaler()),
+        ('bayes', BayesianRidge(alpha_1=1e-6, alpha_2=1e-6, lambda_1=1e-6, lambda_2=1e-6)),
+    ])
+    return {
+        'xgb': xgb_model,
+        'etr': etr_model,
+        'bayes': bayes_model,
+    }
+
+
+def _fit_regression_model(model_name: str, model, X: pd.DataFrame, y: pd.Series,
+                          sample_weight: np.ndarray) -> object:
+    if model_name == 'xgb':
+        model.fit(X, y, sample_weight=sample_weight, verbose=False)
+    elif model_name == 'bayes':
+        model.fit(X, y, bayes__sample_weight=sample_weight)
+    else:
+        model.fit(X, y, sample_weight=sample_weight)
+    return model
+
+
+def _make_quantile_sidecar_model(target: str, alpha: float, reg_params: Dict) -> HistGradientBoostingRegressor:
+    depth = int(reg_params.get('max_depth', 5))
+    n_estimators = int(reg_params.get('n_estimators', 300))
+    min_child_weight = int(reg_params.get('min_child_weight', 3))
+    return HistGradientBoostingRegressor(
+        loss='quantile',
+        quantile=alpha,
+        max_iter=max(140, int(n_estimators * 0.50)),
+        learning_rate=min(0.05, float(reg_params.get('learning_rate', 0.05))),
+        max_depth=max(3, min(6, depth)),
+        max_features=float(reg_params.get('colsample_bytree', 0.8)),
+        min_samples_leaf=max(12, min_child_weight * 3),
+        l2_regularization=max(0.0, float(reg_params.get('reg_lambda', 1.0)) * 0.05),
+        early_stopping=False,
+        random_state=42,
+    )
+
+
+def _make_ordinal_probability_model(target: str, threshold: int, clf_params: Dict) -> xgb.XGBClassifier:
+    params = {
+        'objective': 'binary:logistic',
+        'eval_metric': 'logloss',
+        'random_state': 42,
+        'n_jobs': -1,
+        'max_depth': min(4, int(clf_params.get('max_depth', 4))),
+        'learning_rate': float(clf_params.get('learning_rate', 0.05)),
+        'n_estimators': max(160, int(clf_params.get('n_estimators', 200) * 0.8)),
+        'subsample': float(clf_params.get('subsample', 0.8)),
+        'colsample_bytree': float(clf_params.get('colsample_bytree', 0.8)),
+        'min_child_weight': max(3, int(clf_params.get('min_child_weight', 3))),
+        'reg_alpha': max(0.15, float(clf_params.get('reg_alpha', 0.1))),
+        'reg_lambda': max(1.0, float(clf_params.get('reg_lambda', 1.0))),
+    }
+    if target in {'stl', 'blk'} and threshold >= 2:
+        params['max_depth'] = max(2, params['max_depth'] - 1)
+        params['n_estimators'] = max(120, int(params['n_estimators'] * 0.85))
+    return xgb.XGBClassifier(**params)
+
+
+def _make_poisson_probability_model(target: str, reg_params: Dict) -> xgb.XGBRegressor:
+    params = {
+        'objective': 'count:poisson',
+        'random_state': 42,
+        'n_jobs': -1,
+        'max_depth': min(5, int(reg_params.get('max_depth', 5))),
+        'learning_rate': float(reg_params.get('learning_rate', 0.05)),
+        'n_estimators': max(200, int(reg_params.get('n_estimators', 250) * 0.85)),
+        'subsample': float(reg_params.get('subsample', 0.8)),
+        'colsample_bytree': float(reg_params.get('colsample_bytree', 0.8)),
+        'min_child_weight': max(3, int(reg_params.get('min_child_weight', 3))),
+        'reg_alpha': max(0.10, float(reg_params.get('reg_alpha', 0.1))),
+        'reg_lambda': max(1.0, float(reg_params.get('reg_lambda', 1.0))),
+    }
+    return xgb.XGBRegressor(**params)
+
+
+def _predict_probability_sidecar(sidecar: Dict[str, object],
+                                 X: pd.DataFrame,
+                                 lines: Optional[pd.Series] = None) -> Dict[str, np.ndarray]:
+    lines_series = pd.Series(np.nan, index=X.index, dtype=float)
+    if lines is not None:
+        lines_series = pd.to_numeric(pd.Series(lines, index=X.index), errors='coerce')
+    result: Dict[str, np.ndarray] = {}
+    kind = sidecar.get('kind')
+
+    if kind == 'quantile_probability_sidecar':
+        tags = sidecar.get('quantile_tags', quantile_tags(sidecar.get('quantiles', QUANTILE_LEVELS)))
+        q_preds = []
+        for tag in tags:
+            q_preds.append(np.asarray(sidecar['models'][tag].predict(X), dtype=float))
+        q_matrix = ensure_monotonic_quantiles(np.column_stack(q_preds))
+        for idx, tag in enumerate(tags):
+            result[tag] = q_matrix[:, idx]
+        raw = np.full(len(X), np.nan, dtype=float)
+        valid_line_mask = lines_series.notna().values
+        if valid_line_mask.any():
+            raw[valid_line_mask] = over_probability_from_quantiles(
+                lines_series.loc[valid_line_mask].values,
+                q_matrix[valid_line_mask],
+                sidecar.get('quantiles', QUANTILE_LEVELS),
+            )
+        result['p_over_raw'] = raw
+        return result
+
+    if kind == 'ordinal_tail_probability_sidecar':
+        thresholds = sidecar.get('thresholds', [])
+        prob_tags = [tail_threshold_tag(threshold) for threshold in thresholds]
+        prob_matrix = []
+        for threshold in thresholds:
+            tag = tail_threshold_tag(threshold)
+            model = sidecar['models'].get(tag)
+            if model is None:
+                prob_matrix.append(np.full(len(X), 0.5, dtype=float))
+            else:
+                prob_matrix.append(np.asarray(model.predict_proba(X)[:, 1], dtype=float))
+        if prob_matrix:
+            prob_matrix = ensure_monotonic_tail_probs(np.column_stack(prob_matrix))
+            for idx, tag in enumerate(prob_tags):
+                result[tag] = prob_matrix[:, idx]
+            raw = np.full(len(X), np.nan, dtype=float)
+            valid_line_mask = lines_series.notna().values
+            if valid_line_mask.any():
+                raw[valid_line_mask] = ordinal_over_probability(
+                    lines_series.loc[valid_line_mask].values,
+                    prob_matrix[valid_line_mask],
+                    thresholds,
+                )
+            result['p_over_raw'] = raw
+        else:
+            result['p_over_raw'] = np.full(len(X), np.nan, dtype=float)
+        return result
+
+    if kind == 'poisson_probability_sidecar':
+        rate = np.clip(np.asarray(sidecar['model'].predict(X), dtype=float), 1e-6, None)
+        result['rate'] = rate
+        raw = np.full(len(X), np.nan, dtype=float)
+        valid_line_mask = lines_series.notna().values
+        if valid_line_mask.any():
+            raw[valid_line_mask] = poisson_over_probability(
+                lines_series.loc[valid_line_mask].values,
+                rate[valid_line_mask],
+            )
+        result['p_over_raw'] = raw
+        return result
+
+    raise ValueError(f"Unsupported probability sidecar kind: {kind}")
+
+
+def _score_predictions(pred_df: pd.DataFrame) -> Tuple[List[Dict], List[Dict], float, float, float, float, float, float]:
+    """Compute fold-level regression and line-direction metrics from OOF predictions."""
+    cv_results = []
+    cal_records = []
+
+    for fold in sorted(pred_df['fold'].dropna().unique()):
+        fold_df = pred_df[pred_df['fold'] == fold].copy()
+        if len(fold_df) == 0:
+            continue
+
+        mae = mean_absolute_error(fold_df['actual'], fold_df['pred'])
+        rmse = np.sqrt(mean_squared_error(fold_df['actual'], fold_df['pred']))
+
+        def _score_mask(mask: pd.Series, collect_calibration: bool = False) -> Tuple[float, int]:
+            sub = fold_df[mask].copy()
+            n_scored = int(len(sub))
+            if n_scored < 10:
+                return np.nan, n_scored
+
+            edge_arr = sub['pred'].values - sub['line'].values
+            beat_line = (sub['actual'].values > sub['line'].values).astype(int)
+            if collect_calibration:
+                for e, b, a, l, p in zip(edge_arr, beat_line, sub['actual'].values, sub['line'].values, sub['pred'].values):
+                    cal_records.append({
+                        'edge': float(e),
+                        'actual_beat_line': int(b),
+                        'actual': float(a),
+                        'line': float(l),
+                        'pred': float(p),
+                    })
+            hit_arr = ((edge_arr > 0) == beat_line.astype(bool)).astype(float)
+            return float(hit_arr.mean()), n_scored
+
+        all_mask = fold_df['line'].notna()
+        real_mask = fold_df['line_source'].eq('real') & all_mask
+        proxy_mask = fold_df['line_source'].eq('proxy') & all_mask
+
+        real_bet_acc, n_real_scored = _score_mask(real_mask, collect_calibration=True)
+        proxy_bet_acc, n_proxy_scored = _score_mask(proxy_mask)
+        all_bet_acc, n_scored = _score_mask(all_mask)
+
+        cv_results.append({
+            'fold': int(fold),
+            'mae': float(mae),
+            'rmse': float(rmse),
+            'bet_accuracy': real_bet_acc,
+            'proxy_bet_accuracy': proxy_bet_acc,
+            'all_line_bet_accuracy': all_bet_acc,
+            'n_scored': int(n_scored),
+            'n_real_scored': int(n_real_scored),
+            'n_proxy_scored': int(n_proxy_scored),
+        })
+
+    avg_mae = float(np.mean([r['mae'] for r in cv_results])) if cv_results else np.nan
+    avg_rmse = float(np.mean([r['rmse'] for r in cv_results])) if cv_results else np.nan
+    valid_real_acc = [r['bet_accuracy'] for r in cv_results if not np.isnan(r['bet_accuracy'])]
+    valid_proxy_acc = [r['proxy_bet_accuracy'] for r in cv_results if not np.isnan(r['proxy_bet_accuracy'])]
+    valid_all_acc = [r['all_line_bet_accuracy'] for r in cv_results if not np.isnan(r['all_line_bet_accuracy'])]
+    avg_bet_acc = float(np.mean(valid_real_acc)) if valid_real_acc else np.nan
+    avg_proxy_bet_acc = float(np.mean(valid_proxy_acc)) if valid_proxy_acc else np.nan
+    avg_all_bet_acc = float(np.mean(valid_all_acc)) if valid_all_acc else np.nan
+    mean_bias = float((pred_df['pred'] - pred_df['actual']).mean()) if len(pred_df) else 0.0
+    return cv_results, cal_records, avg_mae, avg_rmse, avg_bet_acc, avg_proxy_bet_acc, avg_all_bet_acc, mean_bias
+
+
+def _load_projection_archive_predictions(projection_dir: Path) -> pd.DataFrame:
+    """Load latest archived first-principles projections per game date."""
+    if not projection_dir.exists():
+        return pd.DataFrame()
+
+    date_to_file: Dict[str, Path] = {}
+    for path in projection_dir.glob('player_projections_*.csv'):
+        match = re.match(r'^player_projections_(\d{4}-\d{2}-\d{2})(?:_\d{6})?$', path.stem)
+        if not match:
+            continue
+        game_date = match.group(1)
+        keep = date_to_file.get(game_date)
+        if keep is None or path.stat().st_mtime_ns > keep.stat().st_mtime_ns:
+            date_to_file[game_date] = path
+
+    frames = []
+    for game_date, path in sorted(date_to_file.items()):
+        try:
+            frame = pd.read_csv(path)
+        except Exception:
+            continue
+        if 'player' not in frame.columns:
+            continue
+        frame = frame.copy()
+        frame['game_date'] = pd.to_datetime(game_date)
+        frame['player_norm'] = frame['player'].apply(_normalize_player_name)
+        keep_cols = ['game_date', 'player_norm']
+        for col in ['proj_pts_final', 'proj_reb', 'proj_ast', 'proj_pra']:
+            if col in frame.columns:
+                keep_cols.append(col)
+        frame = frame[keep_cols]
+        if 'proj_pra' not in frame.columns and {'proj_pts_final', 'proj_reb', 'proj_ast'}.issubset(frame.columns):
+            frame['proj_pra'] = frame['proj_pts_final'] + frame['proj_reb'] + frame['proj_ast']
+        if {'proj_pts_final', 'proj_reb'}.issubset(frame.columns):
+            frame['proj_pr'] = frame['proj_pts_final'] + frame['proj_reb']
+        if {'proj_pts_final', 'proj_ast'}.issubset(frame.columns):
+            frame['proj_pa'] = frame['proj_pts_final'] + frame['proj_ast']
+        frames.append(frame)
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 class AdvancedPropModel:
@@ -568,6 +925,16 @@ class AdvancedPropModel:
             'pts_ewma5', 'trb_ewma5', 'ast_ewma5', 'mp_ewma5',
             'fga_ewma5', 'fta_ewma5', '3pa_ewma5',
             'stl_ewma5', 'blk_ewma5', 'tov_ewma5',
+        ],
+        'recency_strategy': [
+            'season_games_played', 'season_sample_reliability',
+            'pts_season_avg', 'trb_season_avg', 'ast_season_avg', 'mp_season_avg',
+            'fga_season_avg', 'fta_season_avg', '3pa_season_avg',
+            'stl_season_avg', 'blk_season_avg', 'tov_season_avg',
+            'pts_recency_anchor', 'trb_recency_anchor', 'ast_recency_anchor', 'mp_recency_anchor',
+            'fga_recency_anchor', 'fta_recency_anchor', '3pa_recency_anchor',
+            'stl_recency_anchor', 'blk_recency_anchor', 'tov_recency_anchor',
+            'pts_form_vs_season', 'trb_form_vs_season', 'ast_form_vs_season', 'mp_form_vs_season',
         ],
         'consistency': [
             'pts_consistency', 'trb_consistency', 'ast_consistency', 'mp_consistency',
@@ -633,6 +1000,12 @@ class AdvancedPropModel:
         self.selected_features = {}
         self.market_feature_sets = {'edge': {}, 'meta': {}}
         self.biases = {}
+        self.regression_oof = {}
+        self.probability_sidecars = {}
+        self.probability_oof_rows = []
+        self.probability_calibrators = {}
+        self.probability_diagnostics = {}
+        self.fp_blend_weights = {}
         self.include_season_context_training = include_season_context_training
         
     def get_feature_columns(self, df: pd.DataFrame, 
@@ -710,17 +1083,501 @@ class AdvancedPropModel:
                     line_col.at[i] = lines_lookup[key]
                     line_source.at[i] = 'real'
 
-        # 2. Rolling L10 proxy for rows without a real line
+        # 2. Recency-weighted proxies for rows without a real line
+        proxy_candidates = [
+            _sum_target_feature(df, target, 'best_estimate'),
+            _sum_target_feature(df, target, 'recency_anchor'),
+            _sum_target_feature(df, target, 'season_avg'),
+        ]
         proxy_col = PROXY_LINE_COL.get(target)
         if proxy_col and proxy_col in df.columns:
+            proxy_candidates.append(pd.to_numeric(df[proxy_col], errors='coerce'))
+
+        for proxy_series in proxy_candidates:
+            if proxy_series is None:
+                continue
             missing_mask = line_col.isna()
-            proxy_vals = pd.to_numeric(df.loc[missing_mask, proxy_col], errors='coerce')
+            if not missing_mask.any():
+                break
+            proxy_vals = pd.to_numeric(proxy_series.loc[missing_mask], errors='coerce')
             line_col.loc[missing_mask] = proxy_vals
             proxy_filled = missing_mask.copy()
             proxy_filled.loc[missing_mask] = proxy_vals.notna().values
             line_source.loc[proxy_filled] = 'proxy'
 
         return X, y, line_col, line_source
+
+    def _train_blended_regression(self, df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
+                                  target: str, line_col: pd.Series, line_source: pd.Series,
+                                  sample_weights: np.ndarray, reg_params: Dict,
+                                  n_splits: int, fp_series: pd.Series) -> Dict[str, object]:
+        """Train complementary base regressors, then blend them with a positive Ridge meta-model."""
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        oof_rows = []
+        base_cols = [f'pred_{name}' for name in BLEND_BASE_MODEL_ORDER]
+
+        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+            X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
+            w_tr = sample_weights[train_idx]
+
+            row = {
+                'fold': fold,
+                'actual': y_val.values,
+                'line': pd.to_numeric(line_col.iloc[val_idx], errors='coerce').values,
+                'line_source': line_source.iloc[val_idx].values,
+                'game_date': pd.to_datetime(df.iloc[val_idx]['game_date']).values,
+                'sample_weight': sample_weights[val_idx],
+                'pred_fp': pd.to_numeric(fp_series.iloc[val_idx], errors='coerce').fillna(0.0).values,
+            }
+            if 'player' in df.columns:
+                row['player_norm'] = df.iloc[val_idx]['player'].apply(_normalize_player_name).values
+
+            for model_name in [m for m in BLEND_BASE_MODEL_ORDER if m != 'fp']:
+                model = _make_blend_base_models(target, reg_params)[model_name]
+                model = _fit_regression_model(model_name, model, X_tr, y_tr, w_tr)
+                row[f'pred_{model_name}'] = _predict_regression_model(model, X_val)
+
+            oof_rows.append(pd.DataFrame(row))
+
+        oof_df = pd.concat(oof_rows, ignore_index=True).sort_values('game_date').reset_index(drop=True)
+        meta_cv_splits = max(3, min(5, len(oof_df) // 300))
+        blend_oof = np.full(len(oof_df), np.nan)
+
+        if meta_cv_splits >= 3:
+            meta_cv = TimeSeriesSplit(n_splits=meta_cv_splits)
+            for meta_train_idx, meta_val_idx in meta_cv.split(oof_df):
+                blender = Ridge(alpha=1.0, positive=True)
+                blender.fit(
+                    oof_df.iloc[meta_train_idx][base_cols],
+                    oof_df.iloc[meta_train_idx]['actual'],
+                    sample_weight=oof_df.iloc[meta_train_idx]['sample_weight'].values,
+                )
+                blend_oof[meta_val_idx] = blender.predict(oof_df.iloc[meta_val_idx][base_cols])
+
+        valid_mask = ~np.isnan(blend_oof)
+        if valid_mask.sum() < 200:
+            oof_df['pred'] = oof_df['pred_xgb']
+        else:
+            oof_df = oof_df.loc[valid_mask].copy()
+            oof_df['pred'] = blend_oof[valid_mask]
+
+        cv_results, cal_records, avg_mae, avg_rmse, avg_bet_acc, avg_proxy_bet_acc, avg_all_bet_acc, mean_bias = _score_predictions(oof_df)
+
+        final_base_models = _make_blend_base_models(target, reg_params)
+        for model_name, model in final_base_models.items():
+            final_base_models[model_name] = _fit_regression_model(
+                model_name, model, X, y, sample_weights
+            )
+
+        final_blender = Ridge(alpha=1.0, positive=True)
+        final_blender.fit(
+            oof_df[base_cols],
+            oof_df['actual'],
+            sample_weight=oof_df['sample_weight'].values,
+        )
+        final_model = {
+            'kind': 'positive_ridge_blend_regressor',
+            'base_models': final_base_models,
+            'base_order': BLEND_BASE_MODEL_ORDER,
+            'blender': final_blender,
+            'feature_names': list(X.columns),
+            'target': target,
+        }
+
+        return {
+            'model': final_model,
+            'oof_frame': oof_df,
+            'cv_results': cv_results,
+            'cal_records': cal_records,
+            'avg_mae': avg_mae,
+            'avg_rmse': avg_rmse,
+            'avg_bet_accuracy': avg_bet_acc,
+            'avg_proxy_bet_accuracy': avg_proxy_bet_acc,
+            'avg_all_line_bet_accuracy': avg_all_bet_acc,
+            'oof_bias': mean_bias,
+            'blend_summary': {
+                'base_models': BLEND_BASE_MODEL_ORDER,
+                'coefficients': {
+                    name: float(weight)
+                    for name, weight in zip(BLEND_BASE_MODEL_ORDER, final_blender.coef_)
+                },
+                'intercept': float(final_blender.intercept_),
+                'n_oof_rows': int(len(oof_df)),
+            },
+        }
+
+    def _store_probability_oof(self, oof_df: Optional[pd.DataFrame]) -> None:
+        if oof_df is None or len(oof_df) == 0:
+            return
+        self.probability_oof_rows.append(oof_df.copy())
+
+    def _train_quantile_probability_sidecar(self, df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
+                                            target: str, line_col: pd.Series, line_source: pd.Series,
+                                            sample_weights: np.ndarray, reg_params: Dict,
+                                            n_splits: int) -> Optional[Dict[str, object]]:
+        oof_preds = {tag: np.full(len(X), np.nan, dtype=float) for tag in quantile_tags()}
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        print(f"  Training probability sidecar for {target.upper()} ({len(QUANTILE_LEVELS)} quantiles x {n_splits} folds)...")
+
+        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+            fold_start = time.perf_counter()
+            X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_tr = y.iloc[train_idx]
+            w_tr = sample_weights[train_idx]
+            for alpha, tag in zip(QUANTILE_LEVELS, quantile_tags()):
+                model = _make_quantile_sidecar_model(target, alpha, reg_params)
+                model.fit(X_tr, y_tr, sample_weight=w_tr)
+                oof_preds[tag][val_idx] = np.asarray(model.predict(X_val), dtype=float)
+            print(f"    Quantile fold {fold}/{n_splits} complete in {time.perf_counter() - fold_start:.1f}s")
+
+        valid_mask = np.ones(len(X), dtype=bool)
+        for tag in quantile_tags():
+            valid_mask &= ~np.isnan(oof_preds[tag])
+        if valid_mask.sum() < 200:
+            print(f"  Probability sidecar skipped for {target.upper()} - only {int(valid_mask.sum())} OOF rows")
+            return None
+
+        q_matrix = ensure_monotonic_quantiles(
+            np.column_stack([oof_preds[tag][valid_mask] for tag in quantile_tags()])
+        )
+        oof_df = pd.DataFrame({
+            'target': target,
+            'game_date': pd.to_datetime(df.loc[valid_mask, 'game_date']).values,
+            'actual': pd.to_numeric(y.loc[valid_mask], errors='coerce').values,
+            'line': pd.to_numeric(line_col.loc[valid_mask], errors='coerce').values,
+            'line_source': line_source.loc[valid_mask].values,
+            'sample_weight': sample_weights[valid_mask],
+        })
+        if 'player' in df.columns:
+            oof_df['player_norm'] = df.loc[valid_mask, 'player'].apply(_normalize_player_name).values
+        for idx, tag in enumerate(quantile_tags()):
+            oof_df[tag] = q_matrix[:, idx]
+        with_line_mask = oof_df['line'].notna()
+        oof_df['p_over_raw'] = np.nan
+        oof_df['actual_over'] = np.nan
+        if with_line_mask.any():
+            oof_df.loc[with_line_mask, 'p_over_raw'] = over_probability_from_quantiles(
+                oof_df.loc[with_line_mask, 'line'].values,
+                q_matrix[with_line_mask.values],
+                QUANTILE_LEVELS,
+            )
+            oof_df.loc[with_line_mask, 'actual_over'] = (
+                oof_df.loc[with_line_mask, 'actual'].values > oof_df.loc[with_line_mask, 'line'].values
+            ).astype(int)
+
+        real_mask = oof_df['line_source'].eq('real') & oof_df['line'].notna() & oof_df['actual_over'].notna()
+        raw_metrics = compute_binary_probability_metrics(
+            oof_df.loc[real_mask, 'actual_over'].astype(int).values,
+            oof_df.loc[real_mask, 'p_over_raw'].astype(float).values,
+        )
+        pinball = {}
+        for alpha, tag in zip(QUANTILE_LEVELS, quantile_tags()):
+            pinball[tag] = float(mean_pinball_loss(
+                oof_df['actual'].values,
+                oof_df[tag].values,
+                alpha=alpha,
+                sample_weight=oof_df['sample_weight'].values,
+            ))
+
+        final_models = {}
+        print(f"  Training final quantile models for {target.upper()}...")
+        for alpha, tag in zip(QUANTILE_LEVELS, quantile_tags()):
+            tag_start = time.perf_counter()
+            model = _make_quantile_sidecar_model(target, alpha, reg_params)
+            model.fit(X, y, sample_weight=sample_weights)
+            final_models[tag] = model
+            print(f"    Final quantile {tag} complete in {time.perf_counter() - tag_start:.1f}s")
+
+        sidecar = {
+            'kind': 'quantile_probability_sidecar',
+            'target': target,
+            'feature_names': list(X.columns),
+            'quantiles': list(QUANTILE_LEVELS),
+            'quantile_tags': quantile_tags(),
+            'models': final_models,
+        }
+        summary = {
+            'kind': 'quantile_probability_sidecar',
+            'n_oof_rows': int(len(oof_df)),
+            'n_real_line_rows': int(real_mask.sum()),
+            'pinball_loss': pinball,
+            'raw_probability_metrics': raw_metrics,
+        }
+        brier = raw_metrics.get('brier')
+        log_loss_val = raw_metrics.get('log_loss')
+        ece = raw_metrics.get('ece')
+        brier_txt = f"{brier:.4f}" if brier is not None else "n/a"
+        log_loss_txt = f"{log_loss_val:.4f}" if log_loss_val is not None else "n/a"
+        ece_txt = f"{ece:.4f}" if ece is not None else "n/a"
+        print(f"  Probability sidecar ({target.upper()}): Brier={brier_txt} LogLoss={log_loss_txt} ECE={ece_txt}")
+        return {'sidecar': sidecar, 'oof_frame': oof_df, 'summary': summary}
+
+    def _train_ordinal_probability_sidecar(self, df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
+                                           target: str, line_col: pd.Series, line_source: pd.Series,
+                                           sample_weights: np.ndarray, clf_params: Dict,
+                                           n_splits: int) -> Optional[Dict[str, object]]:
+        max_threshold = int(min(4, max(2, np.nanpercentile(y.values, 97))))
+        thresholds = []
+        for threshold in range(1, max_threshold + 1):
+            positives = int((y >= threshold).sum())
+            negatives = int((y < threshold).sum())
+            if positives >= 75 and negatives >= 75:
+                thresholds.append(threshold)
+        if not thresholds:
+            print(f"  Probability sidecar skipped for {target.upper()} - no stable ordinal thresholds")
+            return None
+
+        oof_preds = {tail_threshold_tag(threshold): np.full(len(X), np.nan, dtype=float) for threshold in thresholds}
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+            X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            w_tr = sample_weights[train_idx]
+            for threshold in thresholds:
+                tag = tail_threshold_tag(threshold)
+                y_tr = (y.iloc[train_idx] >= threshold).astype(int)
+                if y_tr.nunique() < 2:
+                    continue
+                model = _make_ordinal_probability_model(target, threshold, clf_params)
+                model.fit(X_tr, y_tr, sample_weight=w_tr, verbose=False)
+                oof_preds[tag][val_idx] = np.asarray(model.predict_proba(X_val)[:, 1], dtype=float)
+
+        valid_mask = np.ones(len(X), dtype=bool)
+        for threshold in thresholds:
+            valid_mask &= ~np.isnan(oof_preds[tail_threshold_tag(threshold)])
+        if valid_mask.sum() < 150:
+            print(f"  Probability sidecar skipped for {target.upper()} - only {int(valid_mask.sum())} OOF rows")
+            return None
+
+        prob_matrix = ensure_monotonic_tail_probs(
+            np.column_stack([oof_preds[tail_threshold_tag(threshold)][valid_mask] for threshold in thresholds])
+        )
+        oof_df = pd.DataFrame({
+            'target': target,
+            'game_date': pd.to_datetime(df.loc[valid_mask, 'game_date']).values,
+            'actual': pd.to_numeric(y.loc[valid_mask], errors='coerce').values,
+            'line': pd.to_numeric(line_col.loc[valid_mask], errors='coerce').values,
+            'line_source': line_source.loc[valid_mask].values,
+            'sample_weight': sample_weights[valid_mask],
+        })
+        if 'player' in df.columns:
+            oof_df['player_norm'] = df.loc[valid_mask, 'player'].apply(_normalize_player_name).values
+        for idx, threshold in enumerate(thresholds):
+            oof_df[tail_threshold_tag(threshold)] = prob_matrix[:, idx]
+        with_line_mask = oof_df['line'].notna()
+        oof_df['p_over_raw'] = np.nan
+        oof_df['actual_over'] = np.nan
+        if with_line_mask.any():
+            oof_df.loc[with_line_mask, 'p_over_raw'] = ordinal_over_probability(
+                oof_df.loc[with_line_mask, 'line'].values,
+                prob_matrix[with_line_mask.values],
+                thresholds,
+            )
+            oof_df.loc[with_line_mask, 'actual_over'] = (
+                oof_df.loc[with_line_mask, 'actual'].values > oof_df.loc[with_line_mask, 'line'].values
+            ).astype(int)
+
+        real_mask = oof_df['line_source'].eq('real') & oof_df['line'].notna() & oof_df['actual_over'].notna()
+        raw_metrics = compute_binary_probability_metrics(
+            oof_df.loc[real_mask, 'actual_over'].astype(int).values,
+            oof_df.loc[real_mask, 'p_over_raw'].astype(float).values,
+        )
+
+        final_models = {}
+        for threshold in thresholds:
+            tag = tail_threshold_tag(threshold)
+            y_full = (y >= threshold).astype(int)
+            if y_full.nunique() < 2:
+                continue
+            model = _make_ordinal_probability_model(target, threshold, clf_params)
+            model.fit(X, y_full, sample_weight=sample_weights, verbose=False)
+            final_models[tag] = model
+        if not final_models:
+            return None
+
+        sidecar = {
+            'kind': 'ordinal_tail_probability_sidecar',
+            'target': target,
+            'feature_names': list(X.columns),
+            'thresholds': thresholds,
+            'models': final_models,
+        }
+        summary = {
+            'kind': 'ordinal_tail_probability_sidecar',
+            'n_oof_rows': int(len(oof_df)),
+            'n_real_line_rows': int(real_mask.sum()),
+            'thresholds': thresholds,
+            'raw_probability_metrics': raw_metrics,
+        }
+        brier = raw_metrics.get('brier')
+        log_loss_val = raw_metrics.get('log_loss')
+        ece = raw_metrics.get('ece')
+        brier_txt = f"{brier:.4f}" if brier is not None else "n/a"
+        log_loss_txt = f"{log_loss_val:.4f}" if log_loss_val is not None else "n/a"
+        ece_txt = f"{ece:.4f}" if ece is not None else "n/a"
+        print(f"  Probability sidecar ({target.upper()}): Brier={brier_txt} LogLoss={log_loss_txt} ECE={ece_txt}")
+        return {'sidecar': sidecar, 'oof_frame': oof_df, 'summary': summary}
+
+    def _train_poisson_probability_sidecar(self, df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
+                                           target: str, line_col: pd.Series, line_source: pd.Series,
+                                           sample_weights: np.ndarray, reg_params: Dict,
+                                           n_splits: int) -> Optional[Dict[str, object]]:
+        rate_oof = np.full(len(X), np.nan, dtype=float)
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+            X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_tr = y.iloc[train_idx]
+            w_tr = sample_weights[train_idx]
+            model = _make_poisson_probability_model(target, reg_params)
+            model.fit(X_tr, y_tr, sample_weight=w_tr, verbose=False)
+            rate_oof[val_idx] = np.clip(np.asarray(model.predict(X_val), dtype=float), 1e-6, None)
+
+        valid_mask = ~np.isnan(rate_oof)
+        if valid_mask.sum() < 150:
+            print(f"  Probability sidecar skipped for {target.upper()} - only {int(valid_mask.sum())} OOF rows")
+            return None
+
+        oof_df = pd.DataFrame({
+            'target': target,
+            'game_date': pd.to_datetime(df.loc[valid_mask, 'game_date']).values,
+            'actual': pd.to_numeric(y.loc[valid_mask], errors='coerce').values,
+            'line': pd.to_numeric(line_col.loc[valid_mask], errors='coerce').values,
+            'line_source': line_source.loc[valid_mask].values,
+            'sample_weight': sample_weights[valid_mask],
+            'rate': rate_oof[valid_mask],
+        })
+        if 'player' in df.columns:
+            oof_df['player_norm'] = df.loc[valid_mask, 'player'].apply(_normalize_player_name).values
+        with_line_mask = oof_df['line'].notna()
+        oof_df['p_over_raw'] = np.nan
+        oof_df['actual_over'] = np.nan
+        if with_line_mask.any():
+            oof_df.loc[with_line_mask, 'p_over_raw'] = poisson_over_probability(
+                oof_df.loc[with_line_mask, 'line'].values,
+                oof_df.loc[with_line_mask, 'rate'].values,
+            )
+            oof_df.loc[with_line_mask, 'actual_over'] = (
+                oof_df.loc[with_line_mask, 'actual'].values > oof_df.loc[with_line_mask, 'line'].values
+            ).astype(int)
+
+        real_mask = oof_df['line_source'].eq('real') & oof_df['line'].notna() & oof_df['actual_over'].notna()
+        raw_metrics = compute_binary_probability_metrics(
+            oof_df.loc[real_mask, 'actual_over'].astype(int).values,
+            oof_df.loc[real_mask, 'p_over_raw'].astype(float).values,
+        )
+
+        final_model = _make_poisson_probability_model(target, reg_params)
+        final_model.fit(X, y, sample_weight=sample_weights, verbose=False)
+        sidecar = {
+            'kind': 'poisson_probability_sidecar',
+            'target': target,
+            'feature_names': list(X.columns),
+            'model': final_model,
+        }
+        summary = {
+            'kind': 'poisson_probability_sidecar',
+            'n_oof_rows': int(len(oof_df)),
+            'n_real_line_rows': int(real_mask.sum()),
+            'raw_probability_metrics': raw_metrics,
+        }
+        brier = raw_metrics.get('brier')
+        log_loss_val = raw_metrics.get('log_loss')
+        ece = raw_metrics.get('ece')
+        brier_txt = f"{brier:.4f}" if brier is not None else "n/a"
+        log_loss_txt = f"{log_loss_val:.4f}" if log_loss_val is not None else "n/a"
+        ece_txt = f"{ece:.4f}" if ece is not None else "n/a"
+        print(f"  Probability sidecar ({target.upper()}): Brier={brier_txt} LogLoss={log_loss_txt} ECE={ece_txt}")
+        return {'sidecar': sidecar, 'oof_frame': oof_df, 'summary': summary}
+
+    def get_probability_oof_frame(self) -> pd.DataFrame:
+        if not self.probability_oof_rows:
+            return pd.DataFrame()
+        return pd.concat(self.probability_oof_rows, ignore_index=True).sort_values(
+            ['game_date', 'target']
+        ).reset_index(drop=True)
+
+    def fit_probability_calibrators(self) -> Dict[str, object]:
+        prob_oof = self.get_probability_oof_frame()
+        if len(prob_oof) == 0:
+            self.probability_calibrators = {}
+            self.probability_diagnostics = {}
+            return {'calibrators': {}, 'diagnostics': {}}
+        real_only = prob_oof[prob_oof['line_source'].eq('real')].copy()
+        calibrators, diagnostics = fit_isotonic_calibrators(real_only)
+        self.probability_calibrators = calibrators
+        self.probability_diagnostics = diagnostics
+        return {'calibrators': calibrators, 'diagnostics': diagnostics}
+
+    def train_first_principles_blend(self, projection_dir: Optional[Path] = None) -> Dict[str, dict]:
+        """Fit learned live blend weights between model OOF predictions and first-principles projections."""
+        projection_dir = projection_dir or (DATA_DIR / 'projection_archive')
+        archive = _load_projection_archive_predictions(Path(projection_dir))
+        if archive.empty:
+            print("  No projection archive found; skipping learned first-principles blend.")
+            self.fp_blend_weights = {}
+            return {}
+
+        fp_col_map = {
+            'pts': 'proj_pts_final',
+            'trb': 'proj_reb',
+            'ast': 'proj_ast',
+            'pra': 'proj_pra',
+            'pr': 'proj_pr',
+            'pa': 'proj_pa',
+        }
+
+        results = {}
+        for target, fp_col in fp_col_map.items():
+            oof_df = self.regression_oof.get(target)
+            if oof_df is None or len(oof_df) == 0 or fp_col not in archive.columns or 'player_norm' not in oof_df.columns:
+                continue
+
+            merged = oof_df.merge(
+                archive[['game_date', 'player_norm', fp_col]],
+                on=['game_date', 'player_norm'],
+                how='inner',
+            ).dropna(subset=['pred', 'actual', fp_col])
+            if len(merged) < 100:
+                continue
+
+            merged = merged.sort_values('game_date').reset_index(drop=True)
+            cv_splits = max(3, min(5, len(merged) // 60))
+            blend_preds = np.full(len(merged), np.nan)
+            if cv_splits >= 3:
+                tscv = TimeSeriesSplit(n_splits=cv_splits)
+                for train_idx, val_idx in tscv.split(merged):
+                    ridge = Ridge(alpha=1.0)
+                    ridge.fit(
+                        merged.iloc[train_idx][['pred', fp_col]],
+                        merged.iloc[train_idx]['actual'],
+                        sample_weight=merged.iloc[train_idx]['sample_weight'].values,
+                    )
+                    blend_preds[val_idx] = ridge.predict(merged.iloc[val_idx][['pred', fp_col]])
+
+            valid_mask = ~np.isnan(blend_preds)
+            ridge = Ridge(alpha=1.0)
+            ridge.fit(
+                merged[['pred', fp_col]],
+                merged['actual'],
+                sample_weight=merged['sample_weight'].values,
+            )
+
+            payload = {
+                'model_weight': float(ridge.coef_[0]),
+                'fp_weight': float(ridge.coef_[1]),
+                'intercept': float(ridge.intercept_),
+                'n_rows': int(len(merged)),
+                'fp_column': fp_col,
+            }
+            if valid_mask.sum() >= 50:
+                payload['cv_mae_model_only'] = float(mean_absolute_error(merged.loc[valid_mask, 'actual'], merged.loc[valid_mask, 'pred']))
+                payload['cv_mae_fp_only'] = float(mean_absolute_error(merged.loc[valid_mask, 'actual'], merged.loc[valid_mask, fp_col]))
+                payload['cv_mae_blend'] = float(mean_absolute_error(merged.loc[valid_mask, 'actual'], blend_preds[valid_mask]))
+
+            results[target] = payload
+
+        self.fp_blend_weights = results
+        return results
     
     def train_model(self, df: pd.DataFrame, target: str,
                     n_splits: int = 5,
@@ -935,12 +1792,93 @@ class AdvancedPropModel:
         X_sel = X[selected]
 
         # ── Final regression model ────────────────────────────────────────────
-        print("  Training final regression model...")
-        final_reg = xgb.XGBRegressor(**reg_params)
-        final_reg.fit(X_sel, y, sample_weight=sample_weights, verbose=False)
+        blend_summary = None
+        if target in BLEND_REGRESSION_TARGETS:
+            fp_series = _build_fp_projection_proxy(df, target).fillna(_sum_target_feature(df, target, 'best_estimate')).fillna(0.0)
+            print("  Training blended regression bundle...")
+            blend_result = self._train_blended_regression(
+                df=df,
+                X=X_sel,
+                y=y,
+                target=target,
+                line_col=line_col,
+                line_source=line_source,
+                sample_weights=sample_weights,
+                reg_params=reg_params,
+                n_splits=n_splits,
+                fp_series=fp_series,
+            )
+            final_reg = blend_result['model']
+            oof_cols = [c for c in ['game_date', 'player_norm', 'pred', 'actual', 'sample_weight'] if c in blend_result['oof_frame'].columns]
+            self.regression_oof[target] = blend_result['oof_frame'][oof_cols].copy()
+            cv_results = blend_result['cv_results']
+            cal_records = blend_result['cal_records']
+            avg_mae = blend_result['avg_mae']
+            avg_rmse = blend_result['avg_rmse']
+            avg_bet_acc = blend_result['avg_bet_accuracy']
+            avg_proxy_bet_acc = blend_result['avg_proxy_bet_accuracy']
+            avg_all_bet_acc = blend_result['avg_all_line_bet_accuracy']
+            mean_bias = blend_result['oof_bias']
+            self.biases[target] = round(mean_bias, 4)
+            blend_summary = blend_result.get('blend_summary')
+            real_str = f"{avg_bet_acc:.1%}" if not np.isnan(avg_bet_acc) else "n/a"
+            proxy_str = f"{avg_proxy_bet_acc:.1%}" if not np.isnan(avg_proxy_bet_acc) else "n/a"
+            all_str = f"{avg_all_bet_acc:.1%}" if not np.isnan(avg_all_bet_acc) else "n/a"
+            print(f"  Blended OOF: MAE={avg_mae:.2f}, RMSE={avg_rmse:.2f}, "
+                  f"RealBetAcc={real_str}, ProxyBetAcc={proxy_str}, AllLines={all_str}")
+            print(f"  Blended OOF bias: {mean_bias:+.3f}")
+            real_line_summary = _summarize_calibration(cal_records)
+            _print_calibration(cal_records, target, label='real lines (ridge blend)')
+        else:
+            print("  Training final regression model...")
+            final_reg = xgb.XGBRegressor(**reg_params)
+            final_reg.fit(X_sel, y, sample_weight=sample_weights, verbose=False)
+
         self.models[target] = final_reg
         self.selected_features[target] = selected
         self.feature_importance[target] = all_imp.sort_values(ascending=False)
+        probability_summary = None
+        probability_sidecar_result = None
+        if target in PROBABILITY_TARGETS:
+            probability_sidecar_result = self._train_quantile_probability_sidecar(
+                df=df,
+                X=X_sel,
+                y=y,
+                target=target,
+                line_col=line_col,
+                line_source=line_source,
+                sample_weights=sample_weights,
+                reg_params=reg_params,
+                n_splits=n_splits,
+            )
+        elif target in {'stl', 'blk'}:
+            probability_sidecar_result = self._train_ordinal_probability_sidecar(
+                df=df,
+                X=X_sel,
+                y=y,
+                target=target,
+                line_col=line_col,
+                line_source=line_source,
+                sample_weights=sample_weights,
+                clf_params=clf_params,
+                n_splits=n_splits,
+            )
+        elif target == 'tov':
+            probability_sidecar_result = self._train_poisson_probability_sidecar(
+                df=df,
+                X=X_sel,
+                y=y,
+                target=target,
+                line_col=line_col,
+                line_source=line_source,
+                sample_weights=sample_weights,
+                reg_params=reg_params,
+                n_splits=n_splits,
+            )
+        if probability_sidecar_result:
+            self.probability_sidecars[target] = probability_sidecar_result['sidecar']
+            self._store_probability_oof(probability_sidecar_result['oof_frame'])
+            probability_summary = probability_sidecar_result.get('summary')
         edge_feature_names = []
         meta_feature_names = []
         meta_summary = None
@@ -1047,7 +1985,11 @@ class AdvancedPropModel:
                 print(f"  Dedicated real-line OOF rows: {len(meta_df):,}")
 
         if len(meta_df) == 0 and n_clf >= 500 and final_edge is not None:
-            fallback_raw_pred = pd.Series(final_reg.predict(X_sel.loc[clf_mask]), index=df.loc[clf_mask].index)
+            fallback_fp = _build_fp_projection_proxy(df.loc[clf_mask], target).fillna(_sum_target_feature(df.loc[clf_mask], target, 'best_estimate')).fillna(0.0)
+            fallback_raw_pred = pd.Series(
+                _predict_regression_model(final_reg, X_sel.loc[clf_mask], fp_input=fallback_fp),
+                index=df.loc[clf_mask].index,
+            )
             fallback_market = _build_market_feature_block(
                 df.loc[clf_mask],
                 target,
@@ -1138,6 +2080,8 @@ class AdvancedPropModel:
             'market_edge_summary': market_edge_summary,
             'market_edge_sign_accuracy': market_edge_summary.get('hit_rate') if market_edge_summary else None,
             'meta_summary':        meta_summary,
+            'blend_summary':       blend_summary,
+            'probability_summary': probability_summary,
         }
     
     def train_all_models(self, df: pd.DataFrame) -> Dict:
@@ -1165,16 +2109,47 @@ class AdvancedPropModel:
         """Predict raw stat value (regression model)."""
         if target not in self.models:
             raise ValueError(f"No regression model for {target}")
-        return self.models[target].predict(self._get_X(df, target))
+        fp_input = _build_fp_projection_proxy(df, target) if target in BLEND_REGRESSION_TARGETS else None
+        return _predict_regression_model(self.models[target], self._get_X(df, target), fp_input=fp_input)
 
     def predict_proba(self, df: pd.DataFrame, target: str) -> np.ndarray:
         """Predict P(OVER) from the classifier model. Returns array of float in [0,1]."""
         if target not in self.classifiers:
             raise ValueError(f"No classifier for {target}")
         return self.classifiers[target].predict_proba(self._get_X(df, target))[:, 1]
+
+    def predict_probability_details(self, df: pd.DataFrame, target: str,
+                                    lines: Optional[pd.Series] = None,
+                                    calibrators: Optional[Dict[str, object]] = None) -> Dict[str, np.ndarray]:
+        if target not in self.probability_sidecars:
+            raise ValueError(f"No probability sidecar for {target}")
+        sidecar = self.probability_sidecars[target]
+        X_prob = self._get_X(df, target)
+        details = _predict_probability_sidecar(sidecar, X_prob, lines=lines)
+        cal_map = calibrators if calibrators is not None else self.probability_calibrators
+        raw = details.get('p_over_raw')
+        if raw is not None:
+            details['p_over_cal'] = apply_isotonic_calibrators(raw, target, cal_map)
+        return details
+
+    def predict_quantiles(self, df: pd.DataFrame, target: str) -> pd.DataFrame:
+        if target not in self.probability_sidecars:
+            raise ValueError(f"No probability sidecar for {target}")
+        details = self.predict_probability_details(df, target, lines=None)
+        qtags = [tag for tag in quantile_tags() if tag in details]
+        return pd.DataFrame({tag: details[tag] for tag in qtags}, index=df.index)
     
     def save_models(self, suffix: str = ''):
         """Save regression models, classifiers, feature lists, importances, and bias calibration."""
+        def _load_json_dict(path: Path, default):
+            if not path.exists():
+                return default
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except Exception:
+                return default
+
         # Regression models
         for target, model in self.models.items():
             path = self.model_dir / f"xgb_{target}{suffix}.pkl"
@@ -1199,26 +2174,61 @@ class AdvancedPropModel:
             with open(path, 'wb') as f:
                 pickle.dump(clf, f)
 
+        for target, sidecar in self.probability_sidecars.items():
+            path = self.model_dir / f"prob_sidecar_{target}{suffix}.pkl"
+            with open(path, 'wb') as f:
+                pickle.dump(sidecar, f)
+
         # Feature importance
         imp_path = self.model_dir / f"feature_importance{suffix}.json"
+        merged_importance = _load_json_dict(imp_path, {})
+        merged_importance.update({k: v.to_dict() for k, v in self.feature_importance.items()})
         with open(imp_path, 'w') as f:
-            json.dump({k: v.to_dict() for k, v in self.feature_importance.items()}, f, indent=2)
+            json.dump(merged_importance, f, indent=2)
 
         # Selected feature lists (required so inference uses same columns as training)
         if self.selected_features:
             sel_path = self.model_dir / f"selected_features{suffix}.json"
+            merged_selected = _load_json_dict(sel_path, {})
+            merged_selected.update(self.selected_features)
             with open(sel_path, 'w') as f:
-                json.dump(self.selected_features, f, indent=2)
+                json.dump(merged_selected, f, indent=2)
 
         if any(self.market_feature_sets.values()):
             market_path = self.model_dir / f"market_feature_sets{suffix}.json"
+            merged_market = _load_json_dict(market_path, {'edge': {}, 'meta': {}})
+            for layer_name, target_map in self.market_feature_sets.items():
+                merged_market.setdefault(layer_name, {})
+                merged_market[layer_name].update(target_map)
             with open(market_path, 'w') as f:
-                json.dump(self.market_feature_sets, f, indent=2)
+                json.dump(merged_market, f, indent=2)
 
         if self.biases:
             bias_path = self.model_dir / f"bias{suffix}.json"
+            merged_bias = _load_json_dict(bias_path, {})
+            merged_bias.update(self.biases)
             with open(bias_path, 'w') as f:
-                json.dump(self.biases, f, indent=2)
+                json.dump(merged_bias, f, indent=2)
+
+        if self.fp_blend_weights:
+            fp_blend_path = self.model_dir / f"fp_blend_weights{suffix}.json"
+            merged_fp_weights = _load_json_dict(fp_blend_path, {})
+            merged_fp_weights.update(self.fp_blend_weights)
+            with open(fp_blend_path, 'w') as f:
+                json.dump(merged_fp_weights, f, indent=2)
+
+        probability_oof = self.get_probability_oof_frame()
+        if len(probability_oof) > 0:
+            probability_oof_path = self.model_dir / f"probability_oof{suffix}.csv"
+            if probability_oof_path.exists():
+                try:
+                    existing_oof = pd.read_csv(probability_oof_path)
+                    if 'target' in existing_oof.columns:
+                        existing_oof = existing_oof[~existing_oof['target'].isin(probability_oof['target'].unique())]
+                        probability_oof = pd.concat([existing_oof, probability_oof], ignore_index=True)
+                except Exception:
+                    pass
+            probability_oof.sort_values(['target', 'game_date']).to_csv(probability_oof_path, index=False)
 
         print(f"\nModels saved to: {self.model_dir}")
     
@@ -1241,6 +2251,10 @@ class AdvancedPropModel:
             if meta_path.exists():
                 with open(meta_path, 'rb') as f:
                     self.meta_models[target] = pickle.load(f)
+            prob_path = self.model_dir / f"prob_sidecar_{target}{suffix}.pkl"
+            if prob_path.exists():
+                with open(prob_path, 'rb') as f:
+                    self.probability_sidecars[target] = pickle.load(f)
 
         sel_path = self.model_dir / f"selected_features{suffix}.json"
         if sel_path.exists():
@@ -1257,7 +2271,20 @@ class AdvancedPropModel:
             with open(market_path) as f:
                 self.market_feature_sets = json.load(f)
 
-        print(f"Loaded {len(self.models)} regression + {len(self.classifiers)} classifier + {len(self.edge_models)} edge + {len(self.meta_models)} meta models")
+        fp_blend_path = self.model_dir / f"fp_blend_weights{suffix}.json"
+        if fp_blend_path.exists():
+            with open(fp_blend_path) as f:
+                self.fp_blend_weights = json.load(f)
+
+        probability_oof_path = self.model_dir / f"probability_oof{suffix}.csv"
+        if probability_oof_path.exists():
+            self.probability_oof_rows = [pd.read_csv(probability_oof_path)]
+
+        print(
+            f"Loaded {len(self.models)} regression + {len(self.classifiers)} classifier + "
+            f"{len(self.edge_models)} edge + {len(self.meta_models)} meta + "
+            f"{len(self.probability_sidecars)} probability sidecars"
+        )
     
     def print_feature_importance(self, target: str, top_n: int = 20):
         """Print top feature importances for a target."""
@@ -1462,7 +2489,7 @@ def main():
                 results[target] = trainer.train_model(df, target, lines_lookup=lines_lookup)
             except Exception as e:
                 print(f"Error training {target}: {e}")
-    
+
     # Save models
     trainer.save_models(suffix='_advanced')
     
@@ -1491,18 +2518,36 @@ def main():
     
     # Save results
     results_path = Path(args.model_dir) / 'training_results.json'
+    payload = {
+        k: _json_safe({kk: vv for kk, vv in v.items() if kk != 'cv_results'})
+        for k, v in results.items()
+    }
+    if results_path.exists():
+        try:
+            with open(results_path) as f:
+                existing_payload = json.load(f)
+            existing_payload.update(payload)
+            payload = existing_payload
+        except Exception:
+            pass
     with open(results_path, 'w') as f:
-        payload = {
-            k: _json_safe({kk: vv for kk, vv in v.items() if kk != 'cv_results'})
-            for k, v in results.items()
-        }
         json.dump(payload, f, indent=2)
     print(f"\nResults saved to: {results_path}")
 
     edge_analysis_path = Path(args.model_dir) / 'training_edge_analysis.json'
     with open(edge_analysis_path, 'w') as f:
-        json.dump(_json_safe(_build_edge_analysis(results)), f, indent=2)
+        json.dump(_json_safe(_build_edge_analysis(payload)), f, indent=2)
     print(f"Edge analysis saved to: {edge_analysis_path}")
+
+    probability_analysis_path = Path(args.model_dir) / 'training_probability_analysis.json'
+    probability_payload = {
+        target: result.get('probability_summary')
+        for target, result in payload.items()
+        if isinstance(result, dict) and result.get('probability_summary')
+    }
+    with open(probability_analysis_path, 'w') as f:
+        json.dump(_json_safe(probability_payload), f, indent=2)
+    print(f"Probability analysis saved to: {probability_analysis_path}")
 
 
 if __name__ == "__main__":

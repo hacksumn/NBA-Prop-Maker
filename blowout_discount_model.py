@@ -82,9 +82,14 @@ DATA_DIR = BASE_DIR / "data"
 GAME_INDEX_OUT    = DATA_DIR / "game_blowout_index.csv"
 PLAYER_LOG_OUT    = DATA_DIR / "player_blowout_log.csv"
 CLEAN_BASELINE_OUT = DATA_DIR / "player_clean_baselines.csv"
+LOCAL_NBA_DATA    = DATA_DIR / "nba_data.csv"
 
 SEASON    = "2025-26"
 API_DELAY = 0.65
+DEFAULT_PLAYER_LOG_DELAY = float(os.getenv("NBA_PLAYER_LOG_DELAY", "1.5"))
+DEFAULT_PLAYER_LOG_RETRIES = int(os.getenv("NBA_PLAYER_LOG_RETRIES", "3"))
+DEFAULT_PLAYER_LOG_RETRY_BACKOFF = float(os.getenv("NBA_PLAYER_LOG_RETRY_BACKOFF", "4.0"))
+DEFAULT_PLAYER_LOG_FAILURE_COOLDOWN = float(os.getenv("NBA_PLAYER_LOG_FAILURE_COOLDOWN", "6.0"))
 
 # Blowout tier thresholds (absolute final margin)
 TIER_FULL_MAX     = 15   # ≤15 = full credit
@@ -207,8 +212,13 @@ def parse_minutes(min_str) -> float:
     """Convert 'MM:SS' string to float minutes."""
     if pd.isna(min_str) or min_str == "" or min_str is None:
         return 0.0
+    if isinstance(min_str, (int, float, np.integer, np.floating)):
+        return float(min_str)
     try:
-        parts = str(min_str).split(":")
+        min_str = str(min_str).strip()
+        if ":" not in min_str:
+            return float(min_str)
+        parts = min_str.split(":")
         return float(parts[0]) + float(parts[1]) / 60.0
     except Exception:
         return 0.0
@@ -234,54 +244,120 @@ def apply_player_pm_discount(base_weight: float, player_pm: float, game_tier: st
         return base_weight
 
 
-def build_player_blowout_log(
+def _normalize_game_id(game_id) -> str:
+    """Normalize game IDs so local CSVs and API payloads key the same way."""
+    if pd.isna(game_id):
+        return ""
+    if isinstance(game_id, (int, np.integer)):
+        return str(int(game_id))
+    if isinstance(game_id, (float, np.floating)):
+        return str(int(game_id))
+
+    game_id = str(game_id).strip()
+    if not game_id:
+        return ""
+    if game_id.endswith(".0"):
+        game_id = game_id[:-2]
+    if game_id.isdigit():
+        return str(int(game_id))
+    return game_id
+
+
+def _build_blowout_lookup(blowout_index: pd.DataFrame) -> dict:
+    """Map game_id -> (tier, weight) for fast per-row lookup."""
+    if blowout_index is None or len(blowout_index) == 0:
+        return {}
+
+    lookup = {}
+    for game_id, tier, weight in blowout_index[
+        ["game_id", "blowout_tier", "blowout_weight"]
+    ].dropna(subset=["game_id"]).itertuples(index=False, name=None):
+        lookup[_normalize_game_id(game_id)] = (tier, float(weight))
+    return lookup
+
+
+def _load_local_player_log_cache(season: str = SEASON) -> dict:
+    """
+    Load local player game logs from nba_data.csv.
+
+    Step 1 already refreshes this file daily, so using it here avoids hundreds
+    of per-player API requests when Step 3 rebuilds clean baselines.
+    """
+    if not LOCAL_NBA_DATA.exists():
+        return {}
+
+    usecols = [
+        "season", "PLAYER_ID", "GAME_ID", "game_date", "matchup", "result",
+        "mp", "pts", "trb", "ast", "3p", "stl", "blk", "tov", "fg", "fga",
+        "ft", "fta", "plus_minus",
+    ]
+    try:
+        local_df = pd.read_csv(LOCAL_NBA_DATA, usecols=usecols)
+    except Exception as exc:
+        log.warning(f"Could not load local player log cache from {LOCAL_NBA_DATA}: {exc}")
+        return {}
+
+    local_df = local_df[local_df["season"].astype(str) == str(season)].copy()
+    if local_df.empty:
+        return {}
+
+    local_df["PLAYER_ID"] = pd.to_numeric(local_df["PLAYER_ID"], errors="coerce")
+    local_df["GAME_DATE"] = pd.to_datetime(local_df["game_date"], errors="coerce")
+    local_df = local_df.dropna(subset=["PLAYER_ID", "GAME_ID", "GAME_DATE"]).copy()
+    if local_df.empty:
+        return {}
+
+    local_df["PLAYER_ID"] = local_df["PLAYER_ID"].astype(int)
+    local_df = local_df.rename(columns={
+        "GAME_ID": "Game_ID",
+        "matchup": "MATCHUP",
+        "result": "WL",
+        "mp": "MIN",
+        "pts": "PTS",
+        "trb": "REB",
+        "ast": "AST",
+        "3p": "FG3M",
+        "stl": "STL",
+        "blk": "BLK",
+        "tov": "TOV",
+        "fg": "FGM",
+        "fga": "FGA",
+        "ft": "FTM",
+        "fta": "FTA",
+        "plus_minus": "PLUS_MINUS",
+    })
+    local_df = local_df.sort_values(["PLAYER_ID", "GAME_DATE"], ascending=[True, False])
+
+    cache = {}
+    keep_cols = [
+        "PLAYER_ID", "Game_ID", "GAME_DATE", "MATCHUP", "WL", "MIN", "PTS",
+        "REB", "AST", "FG3M", "STL", "BLK", "TOV", "FGM", "FGA", "FTM",
+        "FTA", "PLUS_MINUS",
+    ]
+    for pid, grp in local_df.groupby("PLAYER_ID", sort=False):
+        cache[int(pid)] = grp[keep_cols].reset_index(drop=True)
+    return cache
+
+
+def _build_weighted_player_log_rows(
+    gl: pd.DataFrame,
     player_id: str,
     player_name: str,
     team_abbr: str,
-    blowout_index: pd.DataFrame,
-    season: str = SEASON,
-    last_n: int = 30
+    blowout_lookup: dict,
+    last_n: int,
 ) -> pd.DataFrame:
-    """
-    Fetch a player's game log and apply blowout discounts to each game.
-
-    Returns DataFrame with one row per game:
-        game_id, game_date, opponent, raw_pts, raw_reb, raw_ast, raw_min,
-        blowout_tier, blowout_weight, player_pm_discount,
-        weighted_pts, weighted_reb, weighted_ast, weighted_min
-    """
-    try:
-        time.sleep(API_DELAY)
-        gl = playergamelog.PlayerGameLog(
-            player_id=player_id,
-            season=season
-        ).get_data_frames()[0]
-    except Exception as e:
-        log.warning(f"Failed to fetch game log for {player_name}: {e}")
+    """Apply blowout weights to an API-like player game log frame."""
+    if gl is None or gl.empty:
         return pd.DataFrame()
 
-    if gl.empty:
-        return pd.DataFrame()
-
-    # Limit to last N games
     gl = gl.head(last_n).copy()
-
     rows = []
     for _, game in gl.iterrows():
         game_id = game["Game_ID"]
         raw_min = parse_minutes(game.get("MIN", 0))
 
-        # Look up blowout tier for this game
-        game_info = blowout_index[blowout_index["game_id"] == game_id]
-        if game_info.empty:
-            tier   = "FULL"
-            weight = 1.0
-        else:
-            tier   = game_info.iloc[0]["blowout_tier"]
-            weight = game_info.iloc[0]["blowout_weight"]
-
-        # Get player's individual on-court plus/minus from box score
-        # (Use PLUS_MINUS from game log as proxy — same concept)
+        tier, weight = blowout_lookup.get(_normalize_game_id(game_id), ("FULL", 1.0))
         player_pm = game.get("PLUS_MINUS", 0) or 0
         final_weight = apply_player_pm_discount(weight, player_pm, tier)
 
@@ -302,7 +378,7 @@ def build_player_blowout_log(
             "player_name":     player_name,
             "team_abbr":       team_abbr,
             "game_id":         game_id,
-            "game_date":       game["GAME_DATE"],
+            "game_date":       game.get("GAME_DATE"),
             "matchup":         game.get("MATCHUP", ""),
             "wl":              game.get("WL", ""),
             "raw_min":         round(raw_min, 1),
@@ -321,7 +397,6 @@ def build_player_blowout_log(
             "blowout_tier":    tier,
             "blowout_weight":  weight,
             "final_weight":    round(final_weight, 3),
-            # Weighted stats — what we use for projections
             "w_pts":           round(raw_pts * final_weight, 2),
             "w_reb":           round(raw_reb * final_weight, 2),
             "w_ast":           round(raw_ast * final_weight, 2),
@@ -339,6 +414,81 @@ def build_player_blowout_log(
     return pd.DataFrame(rows)
 
 
+def build_player_blowout_log(
+    player_id: str,
+    player_name: str,
+    team_abbr: str,
+    blowout_index: pd.DataFrame,
+    season: str = SEASON,
+    last_n: int = 30,
+    request_delay: float = DEFAULT_PLAYER_LOG_DELAY,
+    request_retries: int = DEFAULT_PLAYER_LOG_RETRIES,
+    retry_backoff: float = DEFAULT_PLAYER_LOG_RETRY_BACKOFF,
+    failure_cooldown: float = DEFAULT_PLAYER_LOG_FAILURE_COOLDOWN,
+    local_games: pd.DataFrame = None,
+    blowout_lookup: dict = None,
+) -> pd.DataFrame:
+    """
+    Fetch a player's game log and apply blowout discounts to each game.
+
+    Prefers local `nba_data.csv` rows when available and falls back to the NBA
+    API only for players missing from the local cache.
+    """
+    request_retries = max(1, int(request_retries))
+    request_delay = max(0.0, float(request_delay))
+    retry_backoff = max(0.0, float(retry_backoff))
+    failure_cooldown = max(0.0, float(failure_cooldown))
+    if blowout_lookup is None:
+        blowout_lookup = _build_blowout_lookup(blowout_index)
+
+    if local_games is not None and not local_games.empty:
+        return _build_weighted_player_log_rows(
+            local_games,
+            player_id=player_id,
+            player_name=player_name,
+            team_abbr=team_abbr,
+            blowout_lookup=blowout_lookup,
+            last_n=last_n,
+        )
+
+    gl = None
+    time.sleep(request_delay)
+    for attempt in range(1, request_retries + 1):
+        try:
+            gl = playergamelog.PlayerGameLog(
+                player_id=player_id,
+                season=season
+            ).get_data_frames()[0]
+            break
+        except Exception as e:
+            if attempt == request_retries:
+                log.warning(f"Failed to fetch game log for {player_name}: {e}")
+                if failure_cooldown > 0:
+                    log.info(
+                        f"    Cooling down for {failure_cooldown:.1f}s after repeated failures..."
+                    )
+                    time.sleep(failure_cooldown)
+                return pd.DataFrame()
+
+            cooldown = retry_backoff * attempt
+            log.warning(
+                f"Failed to fetch game log for {player_name} "
+                f"(attempt {attempt}/{request_retries}): {e}"
+            )
+            if cooldown > 0:
+                log.info(f"    Retrying in {cooldown:.1f}s...")
+                time.sleep(cooldown)
+
+    return _build_weighted_player_log_rows(
+        gl,
+        player_id=player_id,
+        player_name=player_name,
+        team_abbr=team_abbr,
+        blowout_lookup=blowout_lookup,
+        last_n=last_n,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Step 3: Build Clean Baselines for All Players
 # ---------------------------------------------------------------------------
@@ -347,7 +497,11 @@ def build_clean_baselines(
     player_ids: list,
     blowout_index: pd.DataFrame,
     season: str = SEASON,
-    last_n: int = 20
+    last_n: int = 20,
+    request_delay: float = DEFAULT_PLAYER_LOG_DELAY,
+    request_retries: int = DEFAULT_PLAYER_LOG_RETRIES,
+    retry_backoff: float = DEFAULT_PLAYER_LOG_RETRY_BACKOFF,
+    failure_cooldown: float = DEFAULT_PLAYER_LOG_FAILURE_COOLDOWN,
 ) -> pd.DataFrame:
     """
     Build clean (blowout-discounted) rolling averages for a list of players.
@@ -357,19 +511,56 @@ def build_clean_baselines(
         - Clean rolling average (blowout-discounted weighted average)
         - Delta (clean - raw) — shows how much blowouts inflated/deflated stats
     """
+    log.info(
+        "Player log throttle: %.2fs between requests | %s retries | %.2fs retry backoff | %.2fs failure cooldown",
+        request_delay,
+        request_retries,
+        retry_backoff,
+        failure_cooldown,
+    )
+    blowout_lookup = _build_blowout_lookup(blowout_index)
+    local_log_cache = _load_local_player_log_cache(season)
+    local_hit_count = 0
+    api_fallback_count = 0
+    if local_log_cache:
+        log.info(
+            "Local player-log cache ready from %s: %s players available for zero-API baseline builds",
+            LOCAL_NBA_DATA.name,
+            len(local_log_cache),
+        )
+    else:
+        log.info("Local player-log cache unavailable; falling back to per-player API requests")
+
     all_logs = []
     for pid, pname, team in player_ids:
         log.info(f"  Processing {pname} ({team})...")
+        local_games = local_log_cache.get(int(pid)) if local_log_cache else None
+        if local_games is not None and not local_games.empty:
+            local_hit_count += 1
+        else:
+            api_fallback_count += 1
         player_log = build_player_blowout_log(
             player_id=pid,
             player_name=pname,
             team_abbr=team,
             blowout_index=blowout_index,
             season=season,
-            last_n=last_n
+            last_n=last_n,
+            request_delay=request_delay,
+            request_retries=request_retries,
+            retry_backoff=retry_backoff,
+            failure_cooldown=failure_cooldown,
+            local_games=local_games,
+            blowout_lookup=blowout_lookup,
         )
         if not player_log.empty:
             all_logs.append(player_log)
+
+    log.info(
+        "Clean baseline log sources: %s local cache hits | %s API fallbacks",
+        local_hit_count,
+        api_fallback_count,
+    )
 
     if not all_logs:
         return pd.DataFrame()
@@ -580,8 +771,10 @@ def main():
             per_mode_detailed="PerGame",
             measure_type_detailed_defense="Base"
         ).get_data_frames()[0]
-        # Filter to players with meaningful minutes
-        active = player_list_df[player_list_df["GP"] >= 15].copy()
+        # Minimum games played to qualify for blowout-corrected baseline.
+        # Must match the threshold used in run_daily.py step3_blowout_index().
+        MIN_GP_FOR_BASELINE = 5
+        active = player_list_df[player_list_df["GP"] >= MIN_GP_FOR_BASELINE].copy()
         player_ids = list(zip(
             active["PLAYER_ID"].astype(str),
             active["PLAYER_NAME"],

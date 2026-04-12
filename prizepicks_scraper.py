@@ -39,6 +39,8 @@ from datetime import date
 from unicodedata import normalize as uniNorm
 from pathlib import Path
 
+from player_pool_guard import sanitize_player_names
+
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -100,9 +102,28 @@ def _extract_player_map(included: list) -> dict:
     return player_map
 
 
+def _extract_game_attr_map(included: list) -> dict:
+    game_map = {}
+    for item in included:
+        if item.get("type") == "game":
+            game_map[item.get("id", "")] = item.get("attributes", {})
+    return game_map
+
+
+def _coerce_slate_date(*values) -> str | None:
+    for value in values:
+        if not value:
+            continue
+        ts = pd.to_datetime(value, errors="coerce")
+        if pd.isna(ts):
+            continue
+        return ts.strftime("%Y-%m-%d")
+    return None
+
+
 def _parse_projections(data: dict) -> pd.DataFrame:
-    today_str = date.today().strftime("%Y-%m-%d")
     player_map = _extract_player_map(data.get("included", []))
+    game_map = _extract_game_attr_map(data.get("included", []))
     projections = data.get("data", [])
 
     rows = []
@@ -119,8 +140,19 @@ def _parse_projections(data: dict) -> pd.DataFrame:
         line = attrs.get("line_score")
         if line is None:
             continue
+        game_rel = rels.get("game", {}).get("data", {})
+        game_attrs = game_map.get(game_rel.get("id", ""), {})
+        slate_date = _coerce_slate_date(
+            attrs.get("start_time"),
+            attrs.get("board_time"),
+            attrs.get("end_time"),
+            game_attrs.get("start_time"),
+            game_attrs.get("end_time"),
+        )
+        if slate_date is None:
+            continue
         rows.append({
-            "game_date":   today_str,
+            "game_date":   slate_date,
             "player":      player_name,
             "player_norm": _normalize_name(player_name),
             "prop":        prop_key,
@@ -130,14 +162,14 @@ def _parse_projections(data: dict) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        # Keep lowest line per player/prop (most conservative — avoids duplicates from multiple game modes)
-        df = df.groupby(["player", "prop"], as_index=False).agg(
-            game_date=("game_date", "first"),
+        # Keep one line per slate/player/prop to avoid collapsing tomorrow's board
+        # into today's run date when PrizePicks posts the next slate early.
+        df = df.groupby(["game_date", "player", "prop"], as_index=False).agg(
             player_norm=("player_norm", "first"),
             line=("line", "median"),
             num_books=("num_books", "sum"),
         )
-        df.sort_values(["player", "prop"], inplace=True)
+        df.sort_values(["game_date", "player", "prop"], inplace=True)
         df.reset_index(drop=True, inplace=True)
     return df
 
@@ -300,29 +332,52 @@ def fetch_todays_lines(chrome_profile: str | None = None,
     logger.info("Fetching today's PrizePicks NBA prop lines ...")
 
     cookie = cf_cookie or CF_CLEARANCE_COOKIE
+    profile = chrome_profile or CHROME_PROFILE
 
     # Strategy 0: direct API (fastest, no browser needed) — works most days
     logger.info("  Trying direct API ...")
     data = _fetch_direct()
 
-    # Strategy B: cookie fallback
+    # Strategy B: cookie fallback (needs a recently-exported __cf_clearance cookie)
     if data is None and cookie:
         logger.info("  Trying cookie fallback ...")
         data = _fetch_via_cookie(cookie)
 
+    # Strategy A: Playwright with real Chrome profile (slowest, most reliable vs Cloudflare)
+    # Requires: pip install playwright && playwright install chromium
+    # Requires the machine to be in an interactive Windows session (not a locked screen).
+    if data is None:
+        logger.info("  Trying Playwright with Chrome profile (may open a browser window, ~30s) ...")
+        data = _fetch_via_playwright_profile(profile)
+
     if data is None:
         logger.error(
-            "Could not fetch PrizePicks data.\n"
-            "  To fix this, do ONE of the following:\n"
-            "  1. Set PRIZEPICKS_CHROME_PROFILE=/path/to/your/chrome/profile\n"
-            "     (Visit app.prizepicks.com in that browser first to get valid cookies)\n"
-            "  2. Export __cf_clearance cookie from your browser and set:\n"
-            "     PRIZEPICKS_CF_COOKIE=<your_cookie_value>"
+            "Could not fetch PrizePicks data — all three strategies failed (direct, cookie, Playwright).\n"
+            "  To fix this:\n"
+            "  1. Make sure Chrome is open and you are logged into app.prizepicks.com\n"
+            "  2. Set PRIZEPICKS_CHROME_PROFILE to your Chrome User Data directory\n"
+            "  3. Or export __cf_clearance cookie and set PRIZEPICKS_CF_COOKIE=<value>"
         )
         return pd.DataFrame()
 
     df = _parse_projections(data)
-    logger.info(f"Parsed {len(df)} NBA prop lines for {date.today().strftime('%Y-%m-%d')}")
+    df, summary = sanitize_player_names(
+        df,
+        player_col="player",
+        date_col="game_date",
+        player_norm_col="player_norm",
+        drop_unknown=True,
+        require_roster=True,
+    )
+    logger.info(
+        "Parsed %s validated NBA prop lines across %s slate date(s) (%s canonicalized, %s dropped)",
+        len(df),
+        df["game_date"].nunique(),
+        summary["canonicalized_rows"],
+        summary["dropped_rows"],
+    )
+    if summary["unknown_players"]:
+        logger.warning("Dropped non-roster player names from PrizePicks feed: %s", ", ".join(summary["unknown_players"][:10]))
     return df
 
 
@@ -332,13 +387,12 @@ def save_lines(output_path: str = "data/historical_lines.csv",
                chrome_profile: str | None = None,
                cf_cookie: str | None = None) -> str:
     """
-    Fetch today's lines and append to the historical CSV.
-    Idempotent: re-running on the same day replaces that day's rows.
+    Fetch current PrizePicks lines and append them to the historical CSV.
+    Idempotent per slate date: re-running replaces rows for the same game_date.
     Returns the absolute path of the saved file.
     """
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
 
-    today_str = date.today().strftime("%Y-%m-%d")
     fresh = fetch_todays_lines(chrome_profile=chrome_profile, cf_cookie=cf_cookie)
 
     if fresh.empty:
@@ -370,6 +424,14 @@ def save_lines(output_path: str = "data/historical_lines.csv",
     combined["source"] = combined["source"].fillna("unknown").astype(str)
     combined["snapshot_ts"] = combined["snapshot_ts"].replace("", pd.NA).fillna(pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")).astype(str)
     combined = combined.dropna(subset=["game_date", "player", "player_norm", "prop", "line"])
+    combined, summary = sanitize_player_names(
+        combined,
+        player_col="player",
+        date_col="game_date",
+        player_norm_col="player_norm",
+        drop_unknown=True,
+        require_roster=False,
+    )
     combined["_snapshot_sort"] = pd.to_datetime(combined["snapshot_ts"], errors="coerce")
     combined = combined.sort_values(
         ["game_date", "player_norm", "prop", "num_books", "_snapshot_sort", "line"],
@@ -379,18 +441,26 @@ def save_lines(output_path: str = "data/historical_lines.csv",
     combined = combined.drop(columns=["_snapshot_sort"], errors="ignore")
     combined.to_csv(output_path, index=False)
     logger.info(f"Prop lines saved -> {output_path}  ({len(combined):,} total rows)")
+    if summary["canonicalized_rows"] or summary["dropped_rows"]:
+        logger.info(
+            "Historical line cleanup: %s canonicalized, %s dropped",
+            summary["canonicalized_rows"],
+            summary["dropped_rows"],
+        )
 
     data_dir = Path(output_path).resolve().parent
-    morning_path = data_dir / f"lines_morning_{today_str}.csv"
-    if not morning_path.exists():
-        fresh[["player", "prop", "line", "player_norm"]].to_csv(morning_path, index=False)
-        logger.info(f"Morning snapshot saved -> {morning_path.name}")
-
-    archive_dir = data_dir / "line_archive" / today_str
-    archive_dir.mkdir(parents=True, exist_ok=True)
     stamp = pd.Timestamp.now().strftime("%Y-%m-%d_%H%M%S")
-    fresh.to_csv(archive_dir / f"lines_{today_str}.csv", index=False)
-    fresh.to_csv(archive_dir / f"lines_{stamp}.csv", index=False)
+    for slate_date in sorted(fresh["game_date"].dropna().unique()):
+        slate_fresh = fresh[fresh["game_date"] == slate_date].copy()
+        morning_path = data_dir / f"lines_morning_{slate_date}.csv"
+        if not morning_path.exists():
+            slate_fresh[["player", "prop", "line", "player_norm"]].to_csv(morning_path, index=False)
+            logger.info(f"Morning snapshot saved -> {morning_path.name}")
+
+        archive_dir = data_dir / "line_archive" / slate_date
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        slate_fresh.to_csv(archive_dir / f"lines_{slate_date}.csv", index=False)
+        slate_fresh.to_csv(archive_dir / f"lines_{stamp}.csv", index=False)
     return os.path.abspath(output_path)
 
 
