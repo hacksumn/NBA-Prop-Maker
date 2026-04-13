@@ -41,6 +41,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from injury_feed import fetch_injury_data
 
 # Force UTF-8 output on Windows so Unicode chars in log messages don't crash
 if hasattr(sys.stdout, "reconfigure"):
@@ -169,6 +170,27 @@ def _flatten_live_injury_status(injury_data: dict, fetched_at: Optional[str] = N
             "fetched_at",
         ],
     )
+
+
+def _apply_pending_team_status_fallback(proj_df):
+    """Mark unresolved rows on pending-report teams with an explicit live status."""
+    import pandas as pd
+
+    proj = proj_df.copy()
+    pending_mask = proj.get("live_team_status_pending", pd.Series(False, index=proj.index)).fillna(False).astype(bool)
+    live_bucket = proj.get("live_injury_bucket", pd.Series(pd.NA, index=proj.index))
+    live_bucket = live_bucket.fillna("").astype(str).str.strip()
+    unresolved_mask = pending_mask & live_bucket.eq("")
+    if not unresolved_mask.any():
+        return proj, 0
+
+    proj.loc[unresolved_mask, "live_injury_bucket"] = "team_pending"
+    proj.loc[unresolved_mask, "live_injury_status"] = "Team Status Pending"
+    proj.loc[unresolved_mask, "live_injury_comment"] = (
+        "Official NBA injury report pending and no player-level ESPN status found"
+    )
+    proj.loc[unresolved_mask, "live_injury_source"] = "team_pending"
+    return proj, int(unresolved_mask.sum())
 
 
 def _banner():
@@ -915,7 +937,6 @@ def step6_usage_injury(errors):
         logger.info("  Fetching live injury report (NBA official + ESPN fallback)...")
         live_injuries = {}
         try:
-            from nba_props import fetch_injury_data
             live_injuries = fetch_injury_data() or {}
         except Exception as exc:
             logger.warning(f"  Live injury feed unavailable: {exc}")
@@ -1171,6 +1192,12 @@ def step8_merge_projections(errors):
         for col in ["live_injury_bucket", "live_injury_status", "live_injury_comment", "live_injury_source"]:
             if col not in proj.columns:
                 proj[col] = pd.NA
+        proj, pending_fallback_count = _apply_pending_team_status_fallback(proj)
+        if pending_fallback_count > 0:
+            _warn(
+                f"Marked {pending_fallback_count} players as TEAM STATUS PENDING "
+                f"(pending official report with no player-level live entry)"
+            )
 
         # Suppress luck-driven signals for players flagged by the recent-absence scan.
         # These historical luck metrics remain valid in the standalone Layer 4 artifact,
@@ -1179,7 +1206,9 @@ def step8_merge_projections(errors):
         absence_risk_mask = absence_recent_gp.notna() & absence_recent_gp.le(2)
         live_injury_bucket = proj.get("live_injury_bucket", pd.Series(pd.NA, index=proj.index))
         live_injury_bucket = live_injury_bucket.fillna("").astype(str).str.lower()
-        live_report_risk_mask = live_injury_bucket.isin(["out", "doubtful", "questionable", "day_to_day"])
+        live_report_risk_mask = live_injury_bucket.isin(
+            ["out", "doubtful", "questionable", "day_to_day", "team_pending"]
+        )
         suppress_luck_mask = absence_risk_mask | live_report_risk_mask
         if suppress_luck_mask.any():
             numeric_luck_cols = [
@@ -1255,10 +1284,14 @@ def step8_merge_projections(errors):
         display_rows = []
         skipped_absent = []
         skipped_live_out = []
+        skipped_team_pending = []
         for _, row in proj.iterrows():
             live_bucket = str(row.get("live_injury_bucket") or "").strip().lower()
             if live_bucket in {"out", "doubtful"}:
                 skipped_live_out.append(f"{row['player']} ({live_bucket.upper()})")
+                continue
+            if live_bucket == "team_pending":
+                skipped_team_pending.append(row["player"])
                 continue
             recent_gp = row.get("absence_recent_gp")
             if pd.notna(recent_gp) and int(recent_gp) == 0:
@@ -1299,6 +1332,11 @@ def step8_merge_projections(errors):
             logger.info(
                 f"  [Suppressed from top-10 (official OUT/DOUBTFUL): "
                 f"{', '.join(skipped_live_out[:8])}{'...' if len(skipped_live_out) > 8 else ''}]"
+            )
+        if skipped_team_pending:
+            logger.info(
+                f"  [Suppressed from top-10 (team status pending): "
+                f"{', '.join(skipped_team_pending[:8])}{'...' if len(skipped_team_pending) > 8 else ''}]"
             )
 
     except Exception as exc:

@@ -18,6 +18,9 @@ class SlateDateHandlingTests(unittest.TestCase):
                         "stat_type": "Points",
                         "line_score": 20.5,
                         "start_time": "2026-04-12T18:10:00.000-04:00",
+                        "projection_type": "Single Stat",
+                        "odds_type": "goblin",
+                        "is_promo": True,
                     },
                     "relationships": {
                         "new_player": {"data": {"id": "player-1"}},
@@ -31,6 +34,9 @@ class SlateDateHandlingTests(unittest.TestCase):
                         "stat_type": "Points",
                         "line_score": 21.5,
                         "start_time": "2026-04-13T18:10:00.000-04:00",
+                        "projection_type": "Single Stat",
+                        "odds_type": "standard",
+                        "is_promo": False,
                     },
                     "relationships": {
                         "new_player": {"data": {"id": "player-1"}},
@@ -62,6 +68,8 @@ class SlateDateHandlingTests(unittest.TestCase):
         self.assertEqual(parsed["game_date"].tolist(), ["2026-04-12", "2026-04-13"])
         self.assertEqual(parsed["player"].tolist(), ["Scottie Barnes", "Scottie Barnes"])
         self.assertEqual(parsed["prop"].tolist(), ["player_points", "player_points"])
+        self.assertEqual(parsed["projection_type"].tolist(), ["goblin", "standard"])
+        self.assertEqual(parsed["is_promo"].tolist(), [True, False])
 
     def test_select_active_slate_lines_prefers_nearest_upcoming_date(self):
         lines = pd.DataFrame(

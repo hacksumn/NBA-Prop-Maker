@@ -94,24 +94,24 @@ def calibrate_probability_outputs() -> Tuple[Dict, Dict]:
     print(f"Probability calibrators saved -> {PROB_OUT_PATH}")
     print(f"Probability diagnostics saved -> {PROB_DIAG_PATH}")
 
-    # σ-context analysis: how does calibration quality vary with predicted spread?
+    # sigma-context analysis: how does calibration quality vary with predicted spread?
     sigma_context = compute_sigma_context_analysis(prob_oof)
     if sigma_context:
         with open(SIGMA_CONTEXT_PATH, 'w') as f:
             json.dump(_json_safe(sigma_context), f, indent=2)
-        print(f"\nσ-context analysis (σ = IQR/1.35 from quantile spread):")
+        print("\nsigma-context analysis (sigma = IQR/1.35 from quantile spread):")
         for target in sorted(sigma_context.keys()):
             info = sigma_context[target]
             print(f"  {target.upper():3s} | n={info['n_rows']:,} | "
-                  f"σ p25={info['sigma_p25']:.2f} p50={info['sigma_p50']:.2f} "
+                  f"sigma p25={info['sigma_p25']:.2f} p50={info['sigma_p50']:.2f} "
                   f"p75={info['sigma_p75']:.2f} p90={info['sigma_p90']:.2f}")
             for bucket in info.get('sigma_buckets', []):
                 brier_str = f"{bucket['brier']:.4f}" if bucket.get('brier') is not None else "n/a"
                 ece_str = f"{bucket['ece']:.4f}" if bucket.get('ece') is not None else "n/a"
-                print(f"    σ [{bucket['sigma_lo']:.2f}, {bucket['sigma_hi']:.2f}) "
+                print(f"    sigma [{bucket['sigma_lo']:.2f}, {bucket['sigma_hi']:.2f}) "
                       f"n={bucket['n']:>5}  hit={bucket['hit_rate']:.1%}  "
                       f"Brier={brier_str}  ECE={ece_str}")
-        print(f"σ-context analysis saved -> {SIGMA_CONTEXT_PATH}")
+        print(f"sigma-context analysis saved -> {SIGMA_CONTEXT_PATH}")
 
     return calibrators, diagnostics
 
@@ -156,9 +156,129 @@ def calibrate_legacy_confidence() -> Dict:
     return calibrator
 
 
+def compute_sigma_forward_validation() -> Dict:
+    """
+    Report forward hit rates for real picks stratified by sigma tier.
+
+    Reads picks_history.csv, finds graded rows (WIN/LOSS) that have a sigma
+    value populated, then buckets by prop + direction + sigma tier (low/mid/high
+    relative to p25/p75 thresholds from sigma_context_analysis.json).  Reports
+    n, win_rate, mean confidence, mean edge, and mean sigma per bucket.
+
+    This is the live forward-validation counterpart to the OOF-based
+    compute_sigma_context_analysis() which runs on training data.  After enough
+    graded picks accumulate with sigma populated, this reveals whether the
+    low-sigma mispricing edge (68% UNDER hit for AST, 63% for TRB) persists
+    in production data.
+
+    Output: models/sigma_forward_validation.json
+    """
+    if not HIST_PATH.exists():
+        print("picks_history.csv not found - sigma forward validation skipped")
+        return {}
+
+    hist = pd.read_csv(HIST_PATH)
+    if 'sigma' not in hist.columns:
+        print("picks_history.csv has no sigma column yet - sigma forward validation skipped")
+        print("  (sigma will appear after the next daily run; re-run calibrate_confidence.py then)")
+        return {}
+
+    graded = hist[hist['result'].isin(['WIN', 'LOSS'])].copy()
+    graded['win'] = (graded['result'] == 'WIN').astype(int)
+    graded['sigma'] = pd.to_numeric(graded['sigma'], errors='coerce')
+    # confidence and edge are optional; older history rows may not have them
+    if 'confidence' in graded.columns:
+        graded['confidence'] = pd.to_numeric(graded['confidence'], errors='coerce')
+    else:
+        graded['confidence'] = np.nan
+    if 'edge' in graded.columns:
+        graded['edge'] = pd.to_numeric(graded['edge'], errors='coerce')
+    else:
+        graded['edge'] = np.nan
+
+    has_sigma = graded['sigma'].notna()
+    if not has_sigma.any():
+        print("No graded picks with sigma values yet - sigma forward validation skipped")
+        print("  (sigma will appear in history after the next daily run)")
+        return {}
+
+    sigma_graded = graded[has_sigma].copy()
+    print(f"\nsigma forward validation: {len(sigma_graded):,} graded picks with sigma "
+          f"({has_sigma.sum()}/{len(graded)} graded rows)")
+
+    # Load p25/p75 thresholds from sigma_context_analysis.json
+    thresholds: Dict[str, Dict[str, float]] = {}
+    if SIGMA_CONTEXT_PATH.exists():
+        try:
+            with open(SIGMA_CONTEXT_PATH) as f:
+                ctx = json.load(f)
+            for target, info in ctx.items():
+                entry: Dict[str, float] = {}
+                if info.get('sigma_p25') is not None:
+                    entry['p25'] = float(info['sigma_p25'])
+                if info.get('sigma_p75') is not None:
+                    entry['p75'] = float(info['sigma_p75'])
+                if entry:
+                    thresholds[target] = entry
+        except Exception:
+            pass
+
+    result: Dict = {}
+    for (prop, direction), group in sigma_graded.groupby(['prop', 'direction']):
+        tgt = str(prop).lower()
+        p25 = thresholds.get(tgt, {}).get('p25')
+        p75 = thresholds.get(tgt, {}).get('p75')
+
+        def _bucket(label: str, rows: pd.DataFrame) -> Dict:
+            if len(rows) == 0:
+                return {}
+            return {
+                'tier': label,
+                'n': int(len(rows)),
+                'win_rate': round(float(rows['win'].mean()), 4),
+                'mean_confidence': round(float(rows['confidence'].dropna().mean()), 2) if rows['confidence'].notna().any() else None,
+                'mean_edge': round(float(rows['edge'].dropna().mean()), 3) if rows['edge'].notna().any() else None,
+                'mean_sigma': round(float(rows['sigma'].mean()), 3),
+            }
+
+        tiers = [_bucket('all', group)]
+        if p25 is not None:
+            low = group[group['sigma'] < p25]
+            mid = group[(group['sigma'] >= p25) & (group['sigma'] <= (p75 if p75 else 1e9))]
+            tiers.append(_bucket('low_sigma', low))
+            tiers.append(_bucket('mid_sigma', mid))
+        if p75 is not None:
+            high = group[group['sigma'] > p75]
+            tiers.append(_bucket('high_sigma', high))
+
+        buckets = [b for b in tiers if b and b.get('n', 0) >= 5]
+        if buckets:
+            key = f"{str(prop).upper()}_{str(direction).upper()}"
+            result[key] = {
+                'prop': str(prop).upper(),
+                'direction': str(direction).upper(),
+                'p25_threshold': p25,
+                'p75_threshold': p75,
+                'buckets': buckets,
+            }
+            print(f"  {key}")
+            for b in buckets:
+                wr = b['win_rate']
+                edge_str = f"{b['mean_edge']:+.3f}" if b['mean_edge'] is not None else " n/a "
+                print(f"    {b['tier']:12s}  n={b['n']:>4}  win={wr:.1%}  "
+                      f"edge={edge_str}  sigma={b['mean_sigma']:.2f}")
+
+    out_path = MODEL_DIR / 'sigma_forward_validation.json'
+    with open(out_path, 'w') as f:
+        json.dump(_json_safe(result), f, indent=2)
+    print(f"sigma forward validation saved -> {out_path}")
+    return result
+
+
 def main():
     calibrate_probability_outputs()
     calibrate_legacy_confidence()
+    compute_sigma_forward_validation()
 
 
 if __name__ == "__main__":

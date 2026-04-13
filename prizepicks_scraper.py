@@ -26,7 +26,7 @@ HOW TO SET UP (one-time):
 
 Output CSV: data/historical_lines.csv
 Columns:
-    game_date, player, player_norm, prop, line, num_books
+    game_date, player, player_norm, prop, line, num_books, projection_type, is_promo
 """
 
 import os
@@ -126,6 +126,26 @@ def _parse_projections(data: dict) -> pd.DataFrame:
     game_map = _extract_game_attr_map(data.get("included", []))
     projections = data.get("data", [])
 
+    # Diagnostic: dump attribute keys from the first projection so we can verify
+    # field names in the live API response (odds_type, projection_type, is_promo, etc.).
+    if projections:
+        first_keys = sorted(projections[0].get("attributes", {}).keys())
+        logger.info("  [DIAG] PrizePicks projection attribute keys: %s", first_keys)
+        seen_projection_types = set()
+        seen_odds_types = set()
+        for _p in projections[:50]:
+            _attrs = _p.get("attributes", {})
+            _pt = _attrs.get("projection_type")
+            _ot = _attrs.get("odds_type")
+            if _pt is not None:
+                seen_projection_types.add(str(_pt))
+            if _ot is not None:
+                seen_odds_types.add(str(_ot))
+        if seen_projection_types:
+            logger.info("  [DIAG] projection_type values seen (first 50): %s", sorted(seen_projection_types))
+        if seen_odds_types:
+            logger.info("  [DIAG] odds_type values seen (first 50): %s", sorted(seen_odds_types))
+
     rows = []
     for proj in projections:
         attrs = proj.get("attributes", {})
@@ -151,13 +171,25 @@ def _parse_projections(data: dict) -> pd.DataFrame:
         )
         if slate_date is None:
             continue
+
+        # The live PrizePicks API exposes the placeable market side in `odds_type`.
+        # `projection_type` is a content category such as "Single Stat", not the
+        # standard/goblin/demon market contract we need for gating.
+        raw_market_type = attrs.get("odds_type") or attrs.get("projection_type") or "standard"
+        projection_type = str(raw_market_type).strip().lower()
+        if projection_type not in {"standard", "goblin", "demon"}:
+            projection_type = "standard"
+        is_promo = bool(attrs.get("is_promo", False))
+
         rows.append({
-            "game_date":   slate_date,
-            "player":      player_name,
-            "player_norm": _normalize_name(player_name),
-            "prop":        prop_key,
-            "line":        float(line),
-            "num_books":   1,
+            "game_date":       slate_date,
+            "player":          player_name,
+            "player_norm":     _normalize_name(player_name),
+            "prop":            prop_key,
+            "line":            float(line),
+            "num_books":       1,
+            "projection_type": projection_type,
+            "is_promo":        is_promo,
         })
 
     df = pd.DataFrame(rows)
@@ -168,6 +200,8 @@ def _parse_projections(data: dict) -> pd.DataFrame:
             player_norm=("player_norm", "first"),
             line=("line", "median"),
             num_books=("num_books", "sum"),
+            projection_type=("projection_type", "first"),
+            is_promo=("is_promo", "max"),
         )
         df.sort_values(["game_date", "player", "prop"], inplace=True)
         df.reset_index(drop=True, inplace=True)
@@ -228,24 +262,32 @@ def _fetch_via_playwright_profile(profile_path: str, timeout_ms: int = 35_000) -
         logger.info(f"  Using real Chrome: {chrome_exe}")
 
     logger.info(f"  Launching browser with profile: {profile_path}")
-    with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(**launch_kwargs)
-        page = context.new_page()
-        page.on("response", _handle_response)
-        try:
-            page.goto(
-                f"https://app.prizepicks.com/board?leagueId={NBA_LEAGUE_ID}",
-                wait_until="domcontentloaded",
-                timeout=timeout_ms,
-            )
-            # Wait up to 15s for the API response to be intercepted
-            for _ in range(30):
-                if captured:
-                    break
-                page.wait_for_timeout(500)
-        except Exception as exc:
-            logger.warning(f"  Navigation warning: {exc}")
-        context.close()
+    try:
+        with sync_playwright() as p:
+            context = p.chromium.launch_persistent_context(**launch_kwargs)
+            page = context.new_page()
+            page.on("response", _handle_response)
+            try:
+                page.goto(
+                    f"https://app.prizepicks.com/board?leagueId={NBA_LEAGUE_ID}",
+                    wait_until="domcontentloaded",
+                    timeout=timeout_ms,
+                )
+                # Wait up to 15s for the API response to be intercepted
+                for _ in range(30):
+                    if captured:
+                        break
+                    page.wait_for_timeout(500)
+            except Exception as exc:
+                logger.warning(f"  Navigation warning: {exc}")
+            finally:
+                try:
+                    context.close()
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.warning(f"  Playwright profile strategy failed: {exc}")
+        return None
 
     return captured.get("data")
 
@@ -293,30 +335,77 @@ def _fetch_direct() -> dict | None:
     """Try the PrizePicks API directly with multiple header variations."""
     import requests as req
 
-    header_variants = [
-        # Minimal headers — least detectable
-        {"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-        # Standard browser UA
-        {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-         "Accept": "application/json"},
-        # With referer
-        {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-         "Accept": "application/json", "Referer": "https://app.prizepicks.com/"},
+    request_variants = [
+        (
+            "minimal-league-only",
+            {"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            {"league_id": NBA_LEAGUE_ID},
+        ),
+        (
+            "browser-league-only",
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Referer": "https://app.prizepicks.com/",
+                "Origin": "https://app.prizepicks.com",
+            },
+            {"league_id": NBA_LEAGUE_ID},
+        ),
+        (
+            "browser-single-stat",
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Referer": "https://app.prizepicks.com/",
+                "Origin": "https://app.prizepicks.com",
+            },
+            {"league_id": NBA_LEAGUE_ID, "single_stat": "true", "per_page": 250},
+        ),
+        (
+            "browser-pickem",
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Referer": "https://app.prizepicks.com/",
+                "Origin": "https://app.prizepicks.com",
+            },
+            {"league_id": NBA_LEAGUE_ID, "per_page": 500, "single_stat": "true", "game_mode": "pickem"},
+        ),
     ]
-    params = {"league_id": NBA_LEAGUE_ID, "per_page": 500, "single_stat": "true", "game_mode": "pickem"}
 
-    for i, headers in enumerate(header_variants):
-        try:
-            resp = req.get(PP_API_URL, headers=headers, params=params, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                if "data" in data and len(data["data"]) > 0:
-                    logger.info(f"  Direct API succeeded (variant {i}): {len(data['data'])} projections")
-                    return data
-            else:
-                logger.info(f"  Direct API variant {i}: HTTP {resp.status_code}")
-        except Exception as exc:
-            logger.warning(f"  Direct API variant {i} failed: {exc}")
+    with req.Session() as session:
+        for i, (label, headers, params) in enumerate(request_variants):
+            try:
+                resp = session.get(PP_API_URL, headers=headers, params=params, timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if "data" in data and len(data["data"]) > 0:
+                        logger.info(
+                            "  Direct API succeeded (%s / variant %s): %s projections",
+                            label,
+                            i,
+                            len(data["data"]),
+                        )
+                        return data
+                    logger.info("  Direct API %s / variant %s: empty payload", label, i)
+                else:
+                    logger.info(f"  Direct API {label} / variant {i}: HTTP {resp.status_code}")
+                    if resp.status_code in {403, 429}:
+                        time.sleep(1.0)
+            except Exception as exc:
+                logger.warning(f"  Direct API {label} / variant {i} failed: {exc}")
 
     return None
 
@@ -414,6 +503,10 @@ def save_lines(output_path: str = "data/historical_lines.csv",
             existing["source"] = "legacy"
         if "snapshot_ts" not in existing.columns:
             existing["snapshot_ts"] = ""
+        if "projection_type" not in existing.columns:
+            existing["projection_type"] = "standard"
+        if "is_promo" not in existing.columns:
+            existing["is_promo"] = False
         combined = pd.concat([existing, fresh], ignore_index=True)
     else:
         combined = fresh
@@ -423,6 +516,8 @@ def save_lines(output_path: str = "data/historical_lines.csv",
     combined["num_books"] = pd.to_numeric(combined["num_books"], errors="coerce").fillna(1).clip(lower=1)
     combined["source"] = combined["source"].fillna("unknown").astype(str)
     combined["snapshot_ts"] = combined["snapshot_ts"].replace("", pd.NA).fillna(pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")).astype(str)
+    combined["projection_type"] = combined.get("projection_type", pd.Series("standard", index=combined.index)).fillna("standard").astype(str)
+    combined["is_promo"] = combined.get("is_promo", pd.Series(False, index=combined.index)).fillna(False).astype(bool)
     combined = combined.dropna(subset=["game_date", "player", "player_norm", "prop", "line"])
     combined, summary = sanitize_player_names(
         combined,

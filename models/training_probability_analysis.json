@@ -20,86 +20,143 @@
   },
   "trb": {
     "kind": "quantile_probability_sidecar",
-    "n_oof_rows": 59355,
-    "n_real_line_rows": 3722,
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 3849,
     "pinball_loss": {
-      "q10": 0.3988986370039211,
-      "q25": 0.6853964675660931,
-      "q50": 0.9448115177749424,
-      "q75": 0.8250390462115852,
-      "q90": 0.4922277952086802
+      "q10": 0.33924840382968935,
+      "q25": 0.6826205561378459,
+      "q50": 0.9458472112366231,
+      "q75": 0.8278059858176735,
+      "q90": 0.49555149911857616
     },
     "raw_probability_metrics": {
-      "n_records": 3722,
-      "positive_rate": 0.4118753358409457,
-      "brier": 0.2401502886968105,
-      "log_loss": 0.6763259166315677,
-      "ece": 0.03507576221998861
+      "n_records": 3849,
+      "positive_rate": 0.40659911665367626,
+      "brier": 0.23899521097059387,
+      "log_loss": 0.6767647238281647,
+      "ece": 0.03620837243876421
     }
   },
   "ast": {
     "kind": "quantile_probability_sidecar",
-    "n_oof_rows": 59355,
-    "n_real_line_rows": 3193,
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 3310,
     "pinball_loss": {
-      "q10": 0.2566833732505087,
-      "q25": 0.46463248016277736,
-      "q50": 0.6627204861518607,
-      "q75": 0.5885356162953208,
-      "q90": 0.3572547434462677
+      "q10": 0.25208543646927567,
+      "q25": 0.4627079362867774,
+      "q50": 0.6633234618743531,
+      "q75": 0.5892270187879032,
+      "q90": 0.3580072639707352
     },
     "raw_probability_metrics": {
-      "n_records": 3193,
-      "positive_rate": 0.3855308487316004,
-      "brier": 0.2346563773515926,
-      "log_loss": 0.6746946469136824,
-      "ece": 0.03411080668222161
+      "n_records": 3310,
+      "positive_rate": 0.38157099697885194,
+      "brier": 0.2341176741766225,
+      "log_loss": 0.6688919892125105,
+      "ece": 0.035883265134404284
+    }
+  },
+  "pra": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 3574,
+    "pinball_loss": {
+      "q10": 1.1714892242619053,
+      "q25": 2.258009437506774,
+      "q50": 3.0096426127387943,
+      "q75": 2.5551262185856927,
+      "q90": 1.4931936849790926
+    },
+    "raw_probability_metrics": {
+      "n_records": 3574,
+      "positive_rate": 0.46698377168438726,
+      "brier": 0.25838214687716704,
+      "log_loss": 0.7234678193943921,
+      "ece": 0.08304166141013491
+    }
+  },
+  "pr": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 3685,
+    "pinball_loss": {
+      "q10": 1.0570446142083167,
+      "q25": 2.057931821245421,
+      "q50": 2.7665985682779293,
+      "q75": 2.3573856162968405,
+      "q90": 1.3857393020852924
+    },
+    "raw_probability_metrics": {
+      "n_records": 3685,
+      "positive_rate": 0.4670284938941655,
+      "brier": 0.25669717224363203,
+      "log_loss": 0.7158082882914539,
+      "ece": 0.07087201363128989
+    }
+  },
+  "pa": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 3123,
+    "pinball_loss": {
+      "q10": 0.9581437142868279,
+      "q25": 1.8718952437795235,
+      "q50": 2.521678650451985,
+      "q75": 2.1473255804487787,
+      "q90": 1.2657801613226538
+    },
+    "raw_probability_metrics": {
+      "n_records": 3123,
+      "positive_rate": 0.4642971501761127,
+      "brier": 0.25654435151395655,
+      "log_loss": 0.7178733236962997,
+      "ece": 0.07838238128267633
     }
   },
   "stl": {
     "kind": "ordinal_tail_probability_sidecar",
-    "n_oof_rows": 59355,
-    "n_real_line_rows": 2178,
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 2280,
     "thresholds": [
       1,
       2,
       3
     ],
     "raw_probability_metrics": {
-      "n_records": 2178,
-      "positive_rate": 0.27915518824609736,
-      "brier": 0.18389598118432485,
-      "log_loss": 0.550586882777934,
-      "ece": 0.022506350810452262
+      "n_records": 2280,
+      "positive_rate": 0.27850877192982454,
+      "brier": 0.18440593040561568,
+      "log_loss": 0.5521485651989437,
+      "ece": 0.0212580363560272
     }
   },
   "blk": {
     "kind": "ordinal_tail_probability_sidecar",
-    "n_oof_rows": 59355,
-    "n_real_line_rows": 1946,
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 2049,
     "thresholds": [
       1,
       2,
       3
     ],
     "raw_probability_metrics": {
-      "n_records": 1946,
-      "positive_rate": 0.22456320657759507,
-      "brier": 0.1677092168320207,
-      "log_loss": 0.5131947050339549,
-      "ece": 0.026899917047367435
+      "n_records": 2049,
+      "positive_rate": 0.2225475841874085,
+      "brier": 0.16702238842620518,
+      "log_loss": 0.5114991768516579,
+      "ece": 0.03188191327003224
     }
   },
   "tov": {
     "kind": "poisson_probability_sidecar",
-    "n_oof_rows": 59355,
-    "n_real_line_rows": 1451,
+    "n_oof_rows": 59610,
+    "n_real_line_rows": 1510,
     "raw_probability_metrics": {
-      "n_records": 1451,
-      "positive_rate": 0.4755341144038594,
-      "brier": 0.24935333121107106,
-      "log_loss": 0.6937729847500854,
-      "ece": 0.04853417455772776
+      "n_records": 1510,
+      "positive_rate": 0.47483443708609274,
+      "brier": 0.24918268471121874,
+      "log_loss": 0.6938053629003783,
+      "ece": 0.04744843717393222
     }
   }
 }

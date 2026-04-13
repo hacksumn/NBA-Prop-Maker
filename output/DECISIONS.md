@@ -718,6 +718,195 @@ Thresholds are read from disk at runtime, so they automatically update when `cal
 
 ---
 
+## [DEC-023] σ-tiered dynamic `min_edge_under` gate in `filter_best_picks()`
+
+- Date: 2026-04-12
+- Status: Accepted — implemented 2026-04-12
+- Decision owner: Jake
+
+### Context
+DEC-022 added a confidence/priority bonus for low-σ UNDER picks but left the `min_edge_under` gate static (loaded from the quality policy, same value regardless of distributional width). This meant a low-σ pick with a modest edge (e.g. combined_edge=0.75 vs AST policy floor of 0.90) was still rejected even though the σ-context data shows it is in the highest-predictability tier with a 68% UNDER hit rate.
+
+Conversely, high-σ UNDER picks (σ > p75) were admitted at the same bar as low-σ picks despite having materially more real variance (UNDER edge shrinks to ~5–8 pp).
+
+### Decision
+In `filter_best_picks()`, after loading `min_edge` from the quality policy, apply a σ-tiered multiplier to UNDER picks when σ is available:
+
+- **Low-σ UNDER** (σ < p25): `min_edge = max(0.50, min_edge * 0.75)` — lowers bar 25%, floors at 0.50
+- **Mid-σ UNDER** (p25 ≤ σ ≤ p75): no change — policy value stands
+- **High-σ UNDER** (σ > p75): `min_edge = min_edge * 1.25` — raises bar 25%
+
+`_load_sigma_p25_thresholds()` was renamed to `_load_sigma_thresholds()` and expanded to return both `(p25_dict, p75_dict)`. Both dicts are loaded once at the top of `filter_best_picks()`.
+
+Effective bars at current policy values:
+
+| Target | Policy | Low-σ bar | High-σ bar |
+|--------|--------|-----------|------------|
+| AST    | 0.90   | 0.675     | 1.125      |
+| TRB    | 1.20   | 0.900     | 1.500      |
+| PTS    | 2.00   | 1.500     | 2.500      |
+
+### Why
+The 0.75/1.25 multipliers are symmetric and conservative — roughly matching the effect sizes in the σ-context data (low-σ UNDER has ~2× the edge of high-σ). The 0.50 floor prevents the low-σ bar from collapsing to noise for targets with very low policy floors. The adjustment is UNDER-only because OVER mispricing evidence is absent from the σ-context analysis.
+
+PTS has near-zero σ signal (all buckets 45–49% hit rate) but the multiplier still applies — it is just less meaningful at PTS policy bars (2.0 → 1.5 / 2.5). No PTS harm risk since PTS OVER is already the primary allowed direction and PTS UNDER is rarely the target.
+
+Adjustment is silently skipped when `{prop}_sigma` is absent (no quantile sidecar run yet) — same graceful fallback as DEC-022.
+
+### Consequences
+
+- Low-σ UNDER picks now pass the edge gate with ~25% less edge required. This will increase pick volume in tight, high-predictability game contexts.
+- High-σ UNDER picks now require more edge. This will reduce pick volume in noisy game contexts — a desirable filter.
+- Combined with DEC-022 (+conf, +priority), low-σ UNDER picks now rank higher AND are easier to qualify. Monitor `picks_latest.csv` after the next run for σ-tier distribution.
+- If the book narrows the low-σ mispricing gap over time, a calibration re-run automatically updates both thresholds and the multiplier breakpoints without a code change.
+
+### Alternatives Considered
+
+- Continuous interpolation (linear ramp from p25 to p75): more principled but harder to audit; discrete tiers are transparent and debuggable
+- Separate per-target multipliers (e.g. AST=0.70, TRB=0.80): deferred — insufficient forward data to justify per-target tuning yet; uniform 0.75 is a reasonable prior
+- Apply σ-tiered adjustment to volume_fill path too: rejected — volume_fill already applies a blanket 0.65× reduction; double-adjusting would over-permissive for a confidence-capped fallback path
+
+---
+
+## [DEC-024] σ forward validation tracking in picks_history.csv and calibrate_confidence.py
+
+- Date: 2026-04-12
+- Status: Accepted — implemented 2026-04-12
+- Decision owner: Jake
+
+### Context
+DEC-022 and DEC-023 added σ-tiered logic to pick selection (confidence bonus, priority bump, dynamic edge gate), but the σ value and the `low_sigma_under` flag were not guaranteed to persist into `picks_history.csv`. Without σ in history, there was no way to validate — after weeks of real picks — whether the low-σ mispricing edge (68% UNDER hit for AST, 63% for TRB in OOF data) holds up in production data. The OOF analysis uses training data; we need a forward-data counterpart.
+
+### Decision
+Two changes:
+
+1. **`save_picks()` column guards** (`nba_props.py`): `sigma` (float, default `np.nan`) and `low_sigma_under` (bool, default `False`) added to the safety-net guard list in `save_picks()`. The primary guards are already in `filter_best_picks()`, but adding them in `save_picks()` ensures the columns survive even if picks arrive via a code path that doesn't pass through `filter_best_picks()`.
+
+2. **`compute_sigma_forward_validation()` in `calibrate_confidence.py`**: Reads `picks_history.csv`, finds graded rows (`WIN`/`LOSS`) with `sigma` populated, buckets by `(prop, direction, σ tier)` using p25/p75 thresholds from `models/sigma_context_analysis.json`, and reports win rate, mean confidence, mean edge, and mean sigma per bucket. Output saved to `models/sigma_forward_validation.json`. Called from `main()` so it runs every time `calibrate_confidence.py` is executed after retraining.
+
+Graceful degradation: if `picks_history.csv` has no `sigma` column yet (pre-DEC-022 runs), or has no graded rows with sigma, the function prints an informative message and returns `{}` without crashing.
+
+### Why
+The OOF σ-context analysis is a training-data signal — it measures whether the model's distributional predictions correlate with calibration quality on held-out folds. The forward validation function measures whether the actual real-money pick outcomes stratify by σ tier. These are different questions. The OOF result justifies turning on the σ logic; the forward result is how we know whether to keep it or adjust the multipliers.
+
+Thresholds for tier boundaries come from `sigma_context_analysis.json`, so they auto-update on retrain without code changes.
+
+### Consequences
+
+- `picks_history.csv` will carry `sigma` and `low_sigma_under` for all picks generated after this session.
+- After ~50+ graded σ-tagged picks accumulate, `calibrate_confidence.py` will print a stratified forward hit-rate table alongside the OOF calibration diagnostics.
+- `models/sigma_forward_validation.json` gives a machine-readable forward performance record that can inform future threshold tuning.
+- **Bug fix (2026-04-12, found during testing):** `compute_sigma_forward_validation()` originally used direct column access (`graded['edge']`, `graded['confidence']`) which crashed with `KeyError` when those columns were absent from older history schemas. Fixed with `.columns` guards that fall back to `np.nan`. All 8 test cases pass including the missing-column scenario (Test 8d).
+
+### Alternatives Considered
+
+- Standalone analysis script: rejected — `calibrate_confidence.py` is already the post-retrain diagnostics hub; adding it there keeps all calibration evidence in one place
+- Backfill old history rows with σ from archived prediction CSVs: deferred — the prediction archives exist but the join is non-trivial and old data is pre-σ anyway; forward accumulation is sufficient
+
+---
+
+## [DEC-026] PrizePicks promo-line discovery: scraper blindness and UNDER strategy misalignment
+
+- Date: 2026-04-12
+- Status: Accepted — field semantics confirmed live; implementation shipped in DEC-028
+- Decision owner: Jake
+
+### Context
+
+Operational investigation revealed two linked critical problems:
+
+**Scraper blindness**: `_parse_projections()` in `prizepicks_scraper.py` reads only `line_score` and `stat_type` from each API projection record. The PrizePicks API also returns market-side metadata (later confirmed as `odds_type` plus `is_promo`), but these fields were silently discarded. Every line was stored in `historical_lines.csv` as if it were a 2-way market (both More and Less available).
+
+**UNDER strategy misalignment**: PrizePicks rarely offers UNDER (Less) on promo/Goblin lines — these are artificially low lines designed to attract "More" bets. The system's highest-confidence picks are almost entirely UNDER on AST, TRB, STL, and BLK. If those lines are Goblin/promo, the picks cannot be placed. This was confirmed operationally: top picks (Max Christie, Julian Champagnie, Luguentz Dort, Davion Mitchell) are present in the PrizePicks scrape but the user cannot find UNDER available on those props.
+
+The 65–79% UNDER hit rates in training data are computed on ALL scraped lines, including promo lines. The true UNDER hit rate on standard (2-way) lines only is unknown and may be significantly different.
+
+### Decision Direction
+
+**Fix A — Scraper**: Capture market metadata from the PrizePicks API, persist it through line history, and use it to block structurally unplaceable pick directions.
+
+**Fix B — Pick filter**: In `filter_best_picks()` and `log_betslips()`, block `UNDER` on `goblin` or promo lines and block `OVER` on `demon` lines.
+
+**Fix C — Strategy audit**: After Fix A is live, re-run hit rate analysis restricted to `is_promo=False` lines only. Re-evaluate whether UNDER or OVER edge dominates on true 2-way markets. The model may need to shift focus toward OVER on standard lines if UNDER hit rates collapse when promo lines are excluded.
+
+### Why This Matters
+
+Every UNDER pick placed on a promo line is either unplaceable (user can't find it) or is being placed at a disadvantageous synthetic line (the artificially low Goblin line means the "true" UNDER edge is much smaller or nonexistent). This is a direct money leak.
+
+### Resolved API Check
+
+Direct API smoke on 2026-04-12 resolved the uncertainty:
+
+- `projection_type` was a content label such as `"Single Stat"`
+- `odds_type` carried the actual market contract such as `"standard"`, `"goblin"`, or `"demon"`
+- `is_promo` was present as a boolean
+
+That means the original field-name assumption was wrong. The implementation record is in DEC-028.
+
+### Consequences (anticipated)
+
+- `historical_lines.csv` schema gains `is_promo` (bool) and `projection_type` (string) columns
+- Large fraction of existing training data may be re-labeled as promo — historical UNDER hit rates will need to be recomputed on non-promo subset
+- Pick volume may drop significantly once promo lines are excluded from UNDER candidates
+- Strategy likely needs to pivot toward OVER picks or identify which prop/player combinations have standard lines consistently
+
+---
+
+## [DEC-025] Betslip vig accounting, true EV, and correlation-aware slip selection
+
+- Date: 2026-04-12
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+Three structural weaknesses identified in the current `log_betslips()` pipeline:
+
+1. **No vig accounting** — `_PP_MULTIPLIERS = {2: 3.0, 3: 5.0, 4: 10.0}` encodes the payout structure but no code computes the per-leg break-even probability or compares it to `dir_prob`. The implied break-even per leg is √(1/3) ≈ 57.7% for a 2-pick power play — close to but not equal to the system's `min_prob` gates, and never surfaced explicitly.
+
+2. **No true EV** — `potential_payout` is a raw dollar amount. Slip selection uses confidence-sum ranking, not EV. True 2-pick power play EV = `3 × P1 × P2 − 1` per unit wagered. A slip ranked 2nd by confidence could have higher EV than the top-confidence pair if its legs have higher `dir_prob` or favorable correlation.
+
+3. **No correlation handling** — slip construction takes `top.head(size)` by confidence with no awareness of pairwise correlation. For Power Play (no insurance), same-team or same-game UNDER-UNDER pairs are positively correlated, which *increases* P(both win) and therefore increases EV. This is currently ignored.
+
+### Decision
+
+Assume the current live contract is **Power Play only** and implement three linked changes in `nba_props.py`:
+
+**Change 1 — Per-pick vig signal** (`filter_best_picks()` post-processing):
+
+- `break_even_prob` = `math.sqrt(1 / _PP_MULTIPLIERS[2])` ≈ 0.577 (2-pick reference)
+- `exceeds_ev_threshold` = `dir_prob >= break_even_prob`
+- Added to `picks_latest.csv` and `picks_history.csv`
+
+**Change 2 — Slip-level true EV** (`log_betslips()`):
+
+- New columns per slip: `joint_prob_raw`, `estimated_correlation`, `joint_prob_adj`, `break_even_joint_prob`, `ev_per_unit`, `ev_dollar`
+- Correlation tiers: same player ρ=0.70, same team ρ=0.35, same game (opponent match) ρ=0.15, independent ρ=0.00
+- Joint prob adjustment: `P1×P2 + ρ×√(P1(1−P1)×P2(1−P2))` (Pearson copula approximation)
+- EV formula (Power Play): `joint_prob_adj × gross_mult − 1`
+- Keep this implementation scoped to Power Play payout logic; do not add Flex math in this change
+
+**Change 3 — EV-ranked slip selection** (`log_betslips()`):
+
+- For 2-pick slips: enumerate all C(n,2) pairs from top-6 eligible picks, select highest EV pair
+- For 3-pick slips: enumerate C(n,3) from top-8 picks, select highest EV triple
+- For 4-pick slips: enumerate candidates from the prepared pool and select the highest-EV subset under the same one-prop-per-player rule
+- Replaces current `top.head(size)` confidence-ranked selection
+
+### Why
+
+The old confidence-sum ranking was leaving money on the table. Power Play slips are pure joint-probability products, so the right control variable is EV, not rank by confidence alone. Waiting for Flex clarification would have blocked an immediately usable improvement in the already-active Power Play path.
+
+### Consequences
+
+- Betslip selection now shifts toward higher-EV pairs and triples, which can differ from the highest-confidence combinations
+- Same-team and same-game pairs can be preferred when the heuristic positive correlation raises joint EV
+- `picks_latest.csv` / `picks_history.csv` gain `break_even_prob` and `exceeds_ev_threshold`
+- `betslips_history.csv` gains `joint_prob_raw`, `estimated_correlation`, `joint_prob_adj`, `break_even_joint_prob`, `ev_per_unit`, and `ev_dollar`
+- `backtest_under_only_slips()` now reuses the same EV-aware slip engine for under-only historical replay
+
+---
+
 ## [DEC-016] Fix training_edge_analysis.json format mismatch in quality policy reader
 - Date: 2026-04-11
 - Status: Accepted
@@ -761,3 +950,202 @@ The fix is in the reader, not the writer — it makes `nba_props.py` tolerant of
 - Fix the training writer to emit a flat layout (rejected — more invasive, breaks other potential consumers)
 - Add an assertion/error when format is unexpected (rejected — not deployed in a crash-safe context; a fallback is safer)
 - Add a warning log when falling back to `{}` (partially adopted — would be valuable future addition)
+
+---
+
+## [DEC-027] Mark unresolved pending-team rows explicitly in Step 8
+- Date: 2026-04-12
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+DEC-020 brought the live injury feed into Step 8, but there was still a remaining gap when:
+
+- the official NBA report for a team was marked `NOT YET SUBMITTED`
+- ESPN had no player-level entry for a specific player on that team
+- the recent-games absence proxy also did not flag the player
+
+In that case, `data/player_projections_today.csv` carried only `live_team_status_pending=True` with blank live status fields. The row still looked effectively active in the projection artifact and could survive into the Step 8 top-10 display. Kawhi was the representative example in project memory.
+
+### Decision
+Keep the existing Step 8 schema and make the unresolved state explicit inside the existing live status columns:
+
+1. Add a local Step 8 fallback in `run_daily.py` that detects rows where:
+   - `live_team_status_pending == True`
+   - `live_injury_bucket` is blank
+2. Stamp those rows as:
+   - `live_injury_bucket = 'team_pending'`
+   - `live_injury_status = 'Team Status Pending'`
+   - `live_injury_comment = 'Official NBA injury report pending and no player-level ESPN status found'`
+   - `live_injury_source = 'team_pending'`
+3. Treat `team_pending` as a live-risk bucket for Step 8 luck suppression.
+4. Suppress `team_pending` rows from the "active players only" top-10 projection display.
+
+### Why
+This is the smallest scoped fix that closes the Step 8 visibility gap without:
+
+- adding a new schema column
+- changing pick filtering logic
+- inventing a second injury contract
+
+The picker was already protected because `sanity_check_picks()` blocks pending teams using the live injury feed directly. The real issue was the Step 8 artifact still presenting unresolved pending-team players as normal active rows.
+
+### Consequences
+- `data/player_projections_today.csv` can now carry `live_injury_bucket='team_pending'` for unresolved pending-team rows.
+- Luck-derived Step 8 fields are cleared for those rows the same way they are for other live-risk states.
+- The active top-10 Step 8 display no longer shows unresolved pending-team players as normal active projections.
+- Pick filtering behavior is unchanged; pending teams were already blocked downstream in `nba_props.py`.
+- Live-slate monitoring is still needed on the next real pending-team day because today's saved projection artifact had `0` fallback rows.
+
+### Alternatives Considered
+- Add a new `live_status_unresolved` column (rejected — wider schema change than needed)
+- Remove all pending-team players from the full projection artifact (rejected — too destructive; the artifact should remain diagnostic)
+- Leave the gap in Step 8 and rely only on `sanity_check_picks()` (rejected — still misleading for manual review of `player_projections_today.csv`)
+
+---
+
+## [DEC-028] Capture PrizePicks market type from `odds_type` and gate promo-line picks
+
+- Date: 2026-04-12
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+DEC-026 identified that the PrizePicks scraper was blind to market-side metadata. Direct API verification on 2026-04-12 then resolved the exact field semantics:
+
+- `projection_type` was a content label such as `"Single Stat"`
+- `odds_type` carried the actual market contract (`"standard"`, `"goblin"`, `"demon"`)
+- `is_promo` was present as a boolean
+
+Every scraped line had been stored as if it were a 2-way market even though PrizePicks offers three line types:
+
+- `"standard"` — normal 2-way market (OVER and UNDER both available)
+- `"goblin"` — artificially low line, **More (OVER) only** — no UNDER offered
+- `"demon"` — artificially high line, **Less (UNDER) only** — no OVER offered
+
+The system's UNDER-heavy strategy (AST/TRB/STL/BLK UNDER at 65–79% hit rates) was generating UNDER picks on goblin lines that are structurally unplaceable on PrizePicks. Picks were being sent to real-money betslips against lines that don't offer the bet direction.
+
+### Decision
+
+1. **`prizepicks_scraper.py`** — `_parse_projections()`: log attribute keys plus both `projection_type` and `odds_type` samples for diagnostics, then normalize the market contract from `attrs.get("odds_type") or attrs.get("projection_type") or "standard"`.
+2. Store that normalized market contract in the existing `projection_type` column for backward compatibility, and also store `is_promo`.
+3. **`nba_props.py`** — `_normalize_historical_lines_frame()`, `fetch_prizepicks_lines()`, `save_lines_snapshot()`, `merge_vegas_lines()`, and the predict paths now carry both `projection_type` and `is_promo`.
+4. **`nba_props.py`** — `filter_best_picks()`: block `UNDER` on `goblin` or promo lines and block `OVER` on `demon` lines immediately after direction is established.
+5. Re-apply the same gate in the `volume_fill` and `emergency_fill` paths so unplaceable directions cannot leak back into the pick pool through fallback logic.
+6. Add `projection_type` and `is_promo` to pick outputs for debugging and future post-gate analysis.
+
+### Why
+
+The old implementation was sending structurally unplaceable picks into both `picks_latest.csv` and betslip construction. That is a direct revenue leak. Preserving the normalized market contract under the existing `projection_type` column keeps the schema change small while still fixing the logic.
+
+### Consequences
+
+- `historical_lines.csv` schema gains two columns for fresh saves: `projection_type` and `is_promo`
+- UNDER picks on goblin lines are blocked at the filter stage — will reduce daily pick volume on days with many goblin lines.
+- OVER picks on demon lines are blocked similarly.
+- Legacy and Odds API rows still normalize to `projection_type='standard'` when no market metadata is available
+- `python prizepicks_scraper.py` succeeded on 2026-04-12 and materially rewrote `historical_lines.csv` with `projection_type` and `is_promo`
+- `python nba_props.py predict` then materially rewrote `picks_latest.csv` / `picks_history.csv` with `projection_type`, `is_promo`, `break_even_prob`, and `exceeds_ev_threshold`
+- Odds API fallback lines and legacy data remain unaffected (`"standard"` default).
+
+### Alternatives Considered
+
+- Block only at betslip construction (rejected — pick still pollutes `picks_history.csv` as a false positive)
+- Use raw `projection_type` from the API as the contract field (rejected — live API verification showed it is a content label, not the market-side contract)
+- Gate only on `is_promo` and ignore `goblin` / `demon` (rejected — `odds_type` carries more precise directionality and avoids under-blocking demon/standard distinctions)
+- Audit historical lines manually first (rejected — adds delay while leaving the live money leak in place)
+
+---
+
+## [DEC-029] Extract the shared injury feed into `injury_feed.py`
+
+- Date: 2026-04-12
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+The live injury feed introduced in DEC-020 was still physically implemented inside `nba_props.py`, while `run_daily.py` needed to call the same merge logic during Step 6. That forced a cross-import from the daily runner into the picker module:
+
+- `run_daily.py` imported `fetch_injury_data()` from `nba_props.py`
+- `nba_props.py` also owned the helper constants and parsing code for official NBA and ESPN injury feeds
+
+That coupling was the wrong boundary. The injury feed is a shared data contract, not picker-only logic.
+
+### Decision
+
+Create a dedicated `injury_feed.py` module that owns:
+
+- official NBA injury-report parsing
+- ESPN injury parsing
+- merge precedence between official NBA and ESPN
+- preservation of `not_yet_submitted` / pending-team state
+
+Then import `fetch_injury_data()` from `injury_feed.py` in both `run_daily.py` and `nba_props.py`.
+
+### Why
+
+This keeps the live injury contract in one place, removes the cross-import from the daily runner into the picker, and makes the feed testable without dragging in the larger `nba_props.py` surface.
+
+### Consequences
+
+- `injury_feed.py` is now the canonical home of live injury-fetch and merge logic
+- `run_daily.py` Step 6 and `nba_props.py` now read the same feed contract directly
+- Official NBA statuses continue to override ESPN when both sources mention the same player
+- Pending-team state continues to survive the merge, which is necessary for the later Step 8 `team_pending` fallback
+- The shared module is covered by `tests/test_injury_feed_merge.py`
+
+### Alternatives Considered
+
+- Leave the helpers inside `nba_props.py` and keep the cross-import (rejected — wrong ownership boundary)
+- Duplicate the injury merge logic in `run_daily.py` (rejected — guaranteed drift between Step 6 and picker behavior)
+
+---
+
+## [DEC-030] Harden the live PrizePicks fetch path before relying on schema materialization
+
+- Date: 2026-04-12
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+After the market-type fix in DEC-028, the next required step was to materialize the new columns into the canonical artifacts:
+
+- `data/historical_lines.csv`
+- `output/picks_latest.csv`
+- `output/picks_history.csv`
+
+The existing `prizepicks_scraper.py` path still had two operational weaknesses:
+
+1. `_fetch_direct()` only tried a narrow set of header/param combinations, even though manual live checks showed the simpler `league_id` request shape could succeed where the heavier query failed.
+2. If direct fetch failed and Playwright tried to launch a persistent Chrome profile, `TargetClosedError` could bubble out and crash the entire fetch rather than failing closed.
+
+That combination meant the live save objective could fail even when PrizePicks was only intermittently blocking requests.
+
+### Decision
+
+Keep the market-type logic unchanged and harden only the fetch mechanics:
+
+1. Expand `_fetch_direct()` to try multiple request shapes, starting with the lightest `league_id`-only variant, then progressively richer browser-style header/param variants.
+2. Add small backoff after `403` / `429` responses in the direct loop.
+3. Wrap the Playwright persistent-context launch in a broad exception handler so profile-launch failures log a warning and return `None` instead of crashing the whole save.
+
+### Why
+
+The objective here was operational reliability, not a new product rule. The canonical artifacts could not reflect DEC-028 until one successful live PrizePicks-backed save actually completed. A narrowly hardened fetch path was the smallest change that unblocked that.
+
+### Consequences
+
+- `python prizepicks_scraper.py` succeeded live on 2026-04-12 via the new minimal direct variant and rewrote `data/historical_lines.csv`
+- The newest verified PrizePicks snapshot contained `77` validated NBA rows across `2026-04-14` / `2026-04-15`
+- The captured market mix for that snapshot was `76 demon`, `1 standard`, `0 promo`
+- Playwright profile failures now degrade to warnings instead of aborting the line-save process
+- `python nba_props.py predict` could then rewrite the pick artifacts under the new schema
+
+### Alternatives Considered
+
+- Leave the fetch path alone and wait for a lucky unblocked direct call (rejected — too fragile for a required artifact migration step)
+- Remove the Playwright fallback entirely (rejected — direct API remains intermittent and the browser path is still a useful fallback when it works)
+- Build a separate one-off migration script for `historical_lines.csv` without a live fetch (rejected — would not provide true current market labels)

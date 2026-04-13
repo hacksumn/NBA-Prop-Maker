@@ -25,6 +25,7 @@ import sys
 import math
 import gc
 import re
+from itertools import combinations
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -33,6 +34,7 @@ warnings.filterwarnings('ignore')
 
 from player_pool_guard import sanitize_player_names
 from probability_utils import apply_isotonic_calibrators, over_probability_from_quantiles, quantile_tags
+from injury_feed import fetch_injury_data
 
 # =============================================================================
 # CONFIGURATION
@@ -432,42 +434,6 @@ def _attach_probability_outputs(pred_df: pd.DataFrame,
 
     return working
 
-_OFFICIAL_NBA_TEAM_TO_ABBR = {
-    'Atlanta Hawks': 'ATL',
-    'Boston Celtics': 'BOS',
-    'Brooklyn Nets': 'BKN',
-    'Charlotte Hornets': 'CHA',
-    'Chicago Bulls': 'CHI',
-    'Cleveland Cavaliers': 'CLE',
-    'Dallas Mavericks': 'DAL',
-    'Denver Nuggets': 'DEN',
-    'Detroit Pistons': 'DET',
-    'Golden State Warriors': 'GSW',
-    'Houston Rockets': 'HOU',
-    'Indiana Pacers': 'IND',
-    'LA Clippers': 'LAC',
-    'Los Angeles Lakers': 'LAL',
-    'Memphis Grizzlies': 'MEM',
-    'Miami Heat': 'MIA',
-    'Milwaukee Bucks': 'MIL',
-    'Minnesota Timberwolves': 'MIN',
-    'New Orleans Pelicans': 'NOP',
-    'New York Knicks': 'NYK',
-    'Oklahoma City Thunder': 'OKC',
-    'Orlando Magic': 'ORL',
-    'Philadelphia 76ers': 'PHI',
-    'Phoenix Suns': 'PHX',
-    'Portland Trail Blazers': 'POR',
-    'Sacramento Kings': 'SAC',
-    'San Antonio Spurs': 'SAS',
-    'Toronto Raptors': 'TOR',
-    'Utah Jazz': 'UTA',
-    'Washington Wizards': 'WAS',
-}
-
-_INJURY_BUCKET_ORDER = ['out', 'doubtful', 'questionable', 'probable', 'day_to_day', 'available']
-
-
 def _atomic_csv(df: pd.DataFrame, path: Path) -> None:
     path = Path(path)
     tmp = path.with_suffix(path.suffix + '.tmp')
@@ -494,12 +460,22 @@ def _get_line_archive_dir(day_str: str) -> Path:
     return archive_dir
 
 
+def _normalize_projection_type(value: object) -> str:
+    projection_type = str(value or 'standard').strip().lower()
+    return projection_type if projection_type in {'standard', 'goblin', 'demon'} else 'standard'
+
+
 def _normalize_historical_lines_frame(df: pd.DataFrame,
                                       game_date: Optional[str] = None,
                                       source: str = 'unknown',
                                       snapshot_ts: Optional[str] = None) -> pd.DataFrame:
     if df is None or len(df) == 0:
-        return pd.DataFrame(columns=['game_date', 'player', 'player_norm', 'prop', 'line', 'num_books', 'source', 'snapshot_ts'])
+        return pd.DataFrame(
+            columns=[
+                'game_date', 'player', 'player_norm', 'prop', 'line', 'num_books',
+                'source', 'snapshot_ts', 'projection_type', 'is_promo',
+            ]
+        )
 
     out = df.copy()
     if game_date is not None:
@@ -518,7 +494,20 @@ def _normalize_historical_lines_frame(df: pd.DataFrame,
         out['snapshot_ts'] = out['snapshot_ts'].replace('', pd.NA).fillna(snap_value)
     else:
         out['snapshot_ts'] = snap_value
-    keep_cols = ['game_date', 'player', 'player_norm', 'prop', 'line', 'num_books', 'source', 'snapshot_ts']
+    raw_projection_type = out['projection_type'] if 'projection_type' in out.columns else out.get('odds_type')
+    if raw_projection_type is not None:
+        out['projection_type'] = raw_projection_type.apply(_normalize_projection_type)
+    else:
+        out['projection_type'] = 'standard'
+    if 'is_promo' in out.columns:
+        out['is_promo'] = out['is_promo'].fillna(False).astype(bool)
+    else:
+        out['is_promo'] = False
+
+    keep_cols = [
+        'game_date', 'player', 'player_norm', 'prop', 'line', 'num_books',
+        'source', 'snapshot_ts', 'projection_type', 'is_promo',
+    ]
     for col in keep_cols:
         if col not in out.columns:
             out[col] = np.nan
@@ -529,6 +518,8 @@ def _normalize_historical_lines_frame(df: pd.DataFrame,
     out['prop'] = out['prop'].astype(str)
     out['source'] = out['source'].astype(str)
     out['snapshot_ts'] = out['snapshot_ts'].astype(str)
+    out['projection_type'] = out['projection_type'].astype(str)
+    out['is_promo'] = out['is_promo'].astype(bool)
     return out.drop_duplicates(subset=['game_date', 'player_norm', 'prop', 'line', 'source', 'snapshot_ts']).reset_index(drop=True)
 
 
@@ -1054,6 +1045,9 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
             )
             if slate_date is None:
                 continue
+            projection_type = _normalize_projection_type(
+                attrs.get('odds_type') or attrs.get('projection_type') or 'standard'
+            )
             rows.append({
                 'game_date': slate_date,
                 'player': player_name,
@@ -1061,6 +1055,8 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
                 'line': float(line),
                 'odds': -110,       # PrizePicks is pick'em; use standard juice as placeholder
                 'num_books': 1,
+                'projection_type': projection_type,
+                'is_promo': bool(attrs.get('is_promo', False)),
             })
 
         if not rows:
@@ -1071,7 +1067,11 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
         # De-dup per slate; PrizePicks can expose tomorrow's board before the
         # calendar day rolls over, so the real slate date must survive grouping.
         df = df.groupby(['game_date', 'player', 'prop'], as_index=False).agg(
-            line=('line', 'median'), odds=('odds', 'first'), num_books=('num_books', 'sum')
+            line=('line', 'median'),
+            odds=('odds', 'first'),
+            num_books=('num_books', 'sum'),
+            projection_type=('projection_type', 'first'),
+            is_promo=('is_promo', 'max'),
         )
         df, summary = sanitize_player_names(
             df,
@@ -1174,12 +1174,16 @@ def save_lines_snapshot(vegas_df: pd.DataFrame, game_date: Optional[str] = None,
         return
     path = CONFIG['data_dir'] / 'historical_lines.csv'
     if 'game_date' in vegas_df.columns:
-        snap_input = vegas_df[[c for c in ['game_date', 'player', 'prop', 'line', 'num_books'] if c in vegas_df.columns]].copy()
+        snap_input = vegas_df[
+            [c for c in ['game_date', 'player', 'prop', 'line', 'num_books', 'projection_type', 'is_promo'] if c in vegas_df.columns]
+        ].copy()
         snap_input['game_date'] = pd.to_datetime(snap_input['game_date'], errors='coerce').dt.strftime('%Y-%m-%d')
         snap_input = snap_input.dropna(subset=['game_date']).copy()
     else:
         resolved_game_date = game_date or datetime.now().strftime('%Y-%m-%d')
-        snap_input = vegas_df[[c for c in ['player', 'prop', 'line', 'num_books'] if c in vegas_df.columns]].copy()
+        snap_input = vegas_df[
+            [c for c in ['player', 'prop', 'line', 'num_books', 'projection_type', 'is_promo'] if c in vegas_df.columns]
+        ].copy()
         snap_input['game_date'] = resolved_game_date
     snap = _normalize_historical_lines_frame(snap_input, source=source)
     if len(snap) == 0:
@@ -1373,262 +1377,6 @@ def fetch_player_positions() -> pd.DataFrame:
     except Exception as e:
         print(f"  Position fetch failed: {e}")
         return pd.DataFrame(columns=['player_norm', 'position_group'])
-
-
-def _classify_injury_bucket(item: dict) -> Optional[str]:
-    """Map ESPN injury payloads to a coarse pregame availability bucket."""
-    status = str(item.get('status', '') or '').strip().lower()
-    type_desc = str(item.get('type', {}).get('description', '') or '').strip().lower()
-    short_comment = str(item.get('shortComment', '') or '').strip().lower()
-    long_comment = str(item.get('longComment', '') or '').strip().lower()
-    text = ' '.join([type_desc, short_comment, long_comment])
-
-    if status == 'out' or type_desc == 'out':
-        return 'out'
-    if 'doubtful' in text:
-        return 'doubtful'
-    if 'questionable' in text or 'game-time decision' in text or 'gameday decision' in text:
-        return 'questionable'
-    if 'probable' in text or 'expected to play' in text or 'will play' in text:
-        return 'probable'
-    if status == 'day-to-day' or 'day-to-day' in text or 'day to day' in text:
-        return 'day_to_day'
-    return None
-
-
-def _new_injury_entry() -> Dict[str, object]:
-    entry = {bucket: [] for bucket in _INJURY_BUCKET_ORDER}
-    entry['status_map'] = {}
-    entry['not_yet_submitted'] = False
-    entry['report_label'] = ''
-    entry['report_url'] = ''
-    return entry
-
-
-def _ensure_injury_entry(injuries: dict, team_abbr: str) -> Dict[str, object]:
-    if team_abbr not in injuries:
-        injuries[team_abbr] = _new_injury_entry()
-    return injuries[team_abbr]
-
-
-def _set_injury_status(entry: Dict[str, object],
-                       player_norm: str,
-                       bucket: str,
-                       *,
-                       status: str = '',
-                       comment: str = '',
-                       source: str = '',
-                       overwrite: bool = False) -> None:
-    if bucket not in _INJURY_BUCKET_ORDER:
-        return
-    current = entry.get('status_map', {}).get(player_norm)
-    if current and not overwrite:
-        return
-    for existing_bucket in _INJURY_BUCKET_ORDER:
-        if player_norm in entry.get(existing_bucket, []):
-            entry[existing_bucket] = [x for x in entry[existing_bucket] if x != player_norm]
-    entry.setdefault(bucket, []).append(player_norm)
-    entry.setdefault('status_map', {})[player_norm] = {
-        'bucket': bucket,
-        'status': status,
-        'comment': comment,
-        'source': source,
-    }
-
-
-def _parse_official_report_name(tokens: List[str]) -> Optional[str]:
-    for i in range(len(tokens) - 1, -1, -1):
-        if ',' not in tokens[i]:
-            continue
-        start = i
-        if tokens[i] in {'Jr.,', 'Sr.,', 'II,', 'III,', 'IV,', 'V,'} and start > 0:
-            start -= 1
-        while start > 0 and tokens[start - 1].endswith('-'):
-            start -= 1
-        raw = ' '.join(tokens[start:]).replace('- ', '-').strip()
-        if ',' not in raw:
-            continue
-        last, first = raw.split(',', 1)
-        full_name = f"{first.strip()} {last.strip()}".strip()
-        return full_name or None
-    return None
-
-
-def fetch_official_nba_injury_data() -> dict:
-    """Fetch the latest official NBA injury report PDF for current-day statuses."""
-    try:
-        from bs4 import BeautifulSoup
-        from pypdf import PdfReader
-    except Exception:
-        return {}
-
-    page_url = "https://official.nba.com/nba-injury-report-2025-26-season/"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    try:
-        page = requests.get(page_url, headers=headers, timeout=45)
-        if page.status_code != 200:
-            return {}
-        soup = BeautifulSoup(page.text, 'html.parser')
-        report_links = []
-        for a in soup.find_all('a', href=True):
-            href = a['href']
-            text = a.get_text(' ', strip=True)
-            if 'ak-static.cms.nba.com' in href and 'report' in text.lower():
-                report_links.append((text, href))
-        if not report_links:
-            return {}
-
-        report_label, report_url = report_links[-1]
-        pdf_resp = requests.get(report_url, headers=headers, timeout=45)
-        if pdf_resp.status_code != 200 or not pdf_resp.content:
-            return {}
-
-        reader = PdfReader(io.BytesIO(pdf_resp.content))
-        flat_text = re.sub(r'\s+', ' ', ' '.join(page.extract_text() or '' for page in reader.pages)).strip()
-        if not flat_text:
-            return {}
-
-        team_names = sorted(_OFFICIAL_NBA_TEAM_TO_ABBR, key=len, reverse=True)
-        team_alt = '|'.join(re.escape(name) for name in team_names)
-        team_pat = re.compile(
-            rf'({team_alt})(.*?)(?=({team_alt})|\d{{1,2}}:\d{{2}} \(ET\)|$)'
-        )
-        status_bucket_map = {
-            'Out': 'out',
-            'Doubtful': 'doubtful',
-            'Questionable': 'questionable',
-            'Probable': 'probable',
-            'Available': 'available',
-        }
-        injuries = {}
-        for team_name, segment, _ in team_pat.findall(flat_text):
-            team_abbr = _OFFICIAL_NBA_TEAM_TO_ABBR.get(team_name)
-            if not team_abbr:
-                continue
-            entry = _ensure_injury_entry(injuries, team_abbr)
-            entry['report_label'] = report_label
-            entry['report_url'] = report_url
-            pending_segment = 'NOT YET SUBMITTED' in segment.upper()
-            found_status = False
-
-            tokens = segment.split()
-            for idx, token in enumerate(tokens):
-                if token not in status_bucket_map:
-                    continue
-                full_name = _parse_official_report_name(tokens[max(0, idx - 5):idx])
-                if not full_name:
-                    continue
-                player_norm = _normalize_name(full_name)
-                _set_injury_status(
-                    entry,
-                    player_norm,
-                    status_bucket_map[token],
-                    status=token,
-                    comment='NBA official injury report',
-                    source='nba_official',
-                    overwrite=True,
-                )
-                found_status = True
-
-            if found_status:
-                entry['not_yet_submitted'] = False
-            elif pending_segment and not entry.get('status_map'):
-                entry['not_yet_submitted'] = True
-
-        return {
-            team: entry for team, entry in injuries.items()
-            if entry.get('not_yet_submitted') or entry.get('status_map')
-        }
-    except Exception as e:
-        print(f"  Official NBA injury report unavailable: {e}")
-        return {}
-
-
-def _fetch_espn_injury_data() -> dict:
-    """Fetch current ESPN injury data keyed by team abbreviation."""
-    url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code != 200:
-            return {}
-        data = r.json()
-        injuries = {}
-        for team in data.get('injuries', []):
-            for item in team.get('injuries', []):
-                name = item.get('athlete', {}).get('displayName', '')
-                abbr = (
-                    item.get('athlete', {}).get('team', {}).get('abbreviation', '') or
-                    team.get('abbreviation', '') or
-                    ''
-                )
-                if not abbr or not name:
-                    continue
-                bucket = _classify_injury_bucket(item)
-                if bucket is None:
-                    continue
-
-                team_entry = _ensure_injury_entry(injuries, abbr)
-                player_norm = _normalize_name(name)
-                _set_injury_status(
-                    team_entry,
-                    player_norm,
-                    bucket,
-                    status=item.get('status', ''),
-                    comment=item.get('shortComment', '') or item.get('longComment', ''),
-                    source='espn',
-                    overwrite=True,
-                )
-        return injuries
-    except Exception as e:
-        print(f"  Injury data unavailable: {e}")
-        return {}
-
-
-def fetch_injury_data() -> dict:
-    """Fetch combined injury/status data, preferring the official NBA report over ESPN."""
-    official = fetch_official_nba_injury_data()
-    espn = _fetch_espn_injury_data()
-
-    injuries = {}
-    for source_data in [official, espn]:
-        for team_abbr, team_data in source_data.items():
-            entry = _ensure_injury_entry(injuries, team_abbr)
-            if team_data.get('not_yet_submitted'):
-                entry['not_yet_submitted'] = True
-            if team_data.get('report_label'):
-                entry['report_label'] = team_data.get('report_label', '')
-            if team_data.get('report_url'):
-                entry['report_url'] = team_data.get('report_url', '')
-
-    for team_abbr, team_data in official.items():
-        entry = _ensure_injury_entry(injuries, team_abbr)
-        for player_norm, detail in team_data.get('status_map', {}).items():
-            _set_injury_status(
-                entry,
-                player_norm,
-                detail.get('bucket', ''),
-                status=detail.get('status', ''),
-                comment=detail.get('comment', ''),
-                source=detail.get('source', 'nba_official'),
-                overwrite=True,
-            )
-
-    for team_abbr, team_data in espn.items():
-        entry = _ensure_injury_entry(injuries, team_abbr)
-        for player_norm, detail in team_data.get('status_map', {}).items():
-            if player_norm in entry.get('status_map', {}):
-                continue
-            _set_injury_status(
-                entry,
-                player_norm,
-                detail.get('bucket', ''),
-                status=detail.get('status', ''),
-                comment=detail.get('comment', ''),
-                source=detail.get('source', 'espn'),
-                overwrite=False,
-            )
-
-    return injuries
 
 
 def apply_injury_adjustments(pred_df, injury_data, df):
@@ -3080,6 +2828,59 @@ def _attach_market_model_scores(pred_df: pd.DataFrame,
 # MODEL TRAINING
 # =============================================================================
 
+LAYER_FEATURE_GROUPS = {
+    'pbp': ['possessions', 'raw_ppp', 'garbage_time_flag', 'competitive_poss'],
+    'season_ppp': ['adj_ppp', 'raw_ppp_season', 'opp_def_rtg_avg', 'total_possessions', 'efg_pct', 'ts_pct'],
+    'blowout': ['clean_pts', 'clean_reb', 'clean_ast', 'clean_fg3m', 'clean_min', 'pts_delta', 'n_exclude', 'n_heavy', 'n_partial'],
+    'usage': ['usg_pct', 'pts_per_poss', 'ast_per_poss', 'reb_per_poss', 'min_pg', 'poss_pg', 'off_rtg', 'net_rtg', 'role_weight'],
+    'luck': ['total_luck_score', 'efg_luck_score', 'fg3_luck_score', 'ft_luck_score', 'pts_luck_adj', 'fg3_regressed', 'ft_regressed'],
+}
+
+
+def _summarize_layer_feature_coverage(
+    frame: pd.DataFrame,
+    all_layer_cols: List[str],
+    added_layer_cols: Optional[List[str]] = None,
+) -> Dict[str, object]:
+    present_cols = [c for c in all_layer_cols if c in frame.columns]
+    total_rows = len(frame)
+    if total_rows == 0 or not present_cols:
+        return {
+            'rows_with_any_layer': 0,
+            'rows_without_any_layer': total_rows,
+            'rows_with_any_added': 0,
+            'group_counts': {},
+            'group_missing_counts': {},
+        }
+
+    layer_non_null = frame[present_cols].notna()
+    any_layer_mask = layer_non_null.any(axis=1)
+
+    present_added_cols = [c for c in (added_layer_cols or []) if c in frame.columns]
+    if present_added_cols:
+        any_added_mask = frame[present_added_cols].notna().any(axis=1)
+    else:
+        any_added_mask = pd.Series(False, index=frame.index)
+
+    group_counts = {}
+    group_missing_counts = {}
+    for group_name, group_cols in LAYER_FEATURE_GROUPS.items():
+        present_group_cols = [c for c in group_cols if c in frame.columns]
+        if not present_group_cols:
+            continue
+        count = int(frame[present_group_cols].notna().any(axis=1).sum())
+        group_counts[group_name] = count
+        group_missing_counts[group_name] = total_rows - count
+
+    return {
+        'rows_with_any_layer': int(any_layer_mask.sum()),
+        'rows_without_any_layer': int((~any_layer_mask).sum()),
+        'rows_with_any_added': int(any_added_mask.sum()),
+        'group_counts': group_counts,
+        'group_missing_counts': group_missing_counts,
+    }
+
+
 def _merge_layer_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Merge enriched layer features (PBP/PPP, blowout, usage, luck) onto a game-log
@@ -3247,13 +3048,37 @@ def _merge_layer_features(df: pd.DataFrame) -> pd.DataFrame:
         n_recovered = int(unmatched_mask.sum()) - int(still_unmatched.sum())
         unmatched_mask = still_unmatched
 
-    n_matched_final = int((~unmatched_mask).sum())
+    coverage = _summarize_layer_feature_coverage(merged, LAYER_COLS, cols_to_add)
+    n_matched_final = coverage['rows_with_any_layer']
     recover_note = f" (+{n_recovered} via name fallback)" if n_recovered > 0 else ""
-    print(f"  [Layer features] Merged {len(cols_to_add)} features — {n_matched_final:,}/{len(df):,} rows matched{recover_note}")
+    added_note = ""
+    if cols_to_add:
+        added_note = f"; {coverage['rows_with_any_added']:,}/{len(df):,} rows received >=1 newly merged value"
+    print(
+        f"  [Layer features] Merged {len(cols_to_add)} features — "
+        f"{n_matched_final:,}/{len(df):,} rows have layer coverage{recover_note}{added_note}"
+    )
 
-    if unmatched_mask.any() and 'player' in merged.columns:
-        missing = sorted(merged.loc[unmatched_mask, 'player'].dropna().unique().tolist())
-        print(f"  [Layer features] WARNING — {len(missing)} players without enriched features (predictions use rolling averages only):")
+    group_counts = coverage['group_counts']
+    if group_counts:
+        group_summary = ", ".join(
+            f"{group_name}: {count:,}/{len(df):,}"
+            for group_name, count in group_counts.items()
+        )
+        print(f"  [Layer features] Coverage by layer — {group_summary}")
+
+    partial_gaps = [
+        f"{group_name}: {missing_count}"
+        for group_name, missing_count in coverage['group_missing_counts'].items()
+        if missing_count > 0
+    ]
+    if partial_gaps:
+        print(f"  [Layer features] Partial gaps — {', '.join(partial_gaps)}")
+
+    no_layer_mask = ~merged[[c for c in LAYER_COLS if c in merged.columns]].notna().any(axis=1)
+    if no_layer_mask.any() and 'player' in merged.columns:
+        missing = sorted(merged.loc[no_layer_mask, 'player'].dropna().unique().tolist())
+        print(f"  [Layer features] WARNING — {len(missing)} players without any layer features:")
         for name in missing[:40]:
             print(f"    - {name}")
         if len(missing) > 40:
@@ -4453,22 +4278,52 @@ def merge_vegas_lines(pred_df: pd.DataFrame, vegas_df: pd.DataFrame) -> pd.DataF
         'player_turnovers': 'tov',
     }
     
+    has_proj_type = 'projection_type' in vegas_df.columns
+    has_is_promo = 'is_promo' in vegas_df.columns
+
     # Process each prop type
     for vegas_prop, our_prop in prop_map.items():
-        prop_lines = vegas_df[vegas_df['prop'] == vegas_prop][['player', 'line']].copy()
-        prop_lines = prop_lines.groupby('player', as_index=False)['line'].median()  # deduplicate
+        subset_cols = ['player', 'line']
+        if has_proj_type:
+            subset_cols.append('projection_type')
+        if has_is_promo:
+            subset_cols.append('is_promo')
+        prop_lines = vegas_df[vegas_df['prop'] == vegas_prop][subset_cols].copy()
+
+        if has_proj_type:
+            # Preserve projection_type alongside the median line dedup
+            pt_map = prop_lines.groupby('player')['projection_type'].first().to_dict()
+        if has_is_promo:
+            promo_map = prop_lines.groupby('player')['is_promo'].max().to_dict()
+        if has_proj_type or has_is_promo:
+            prop_lines = prop_lines.groupby('player', as_index=False)['line'].median()
+            if has_proj_type:
+                prop_lines[f'{our_prop}_projection_type'] = (
+                    prop_lines['player'].map(pt_map).fillna('standard').apply(_normalize_projection_type)
+                )
+            else:
+                prop_lines[f'{our_prop}_projection_type'] = 'standard'
+            if has_is_promo:
+                prop_lines[f'{our_prop}_is_promo'] = prop_lines['player'].map(promo_map).fillna(False).astype(bool)
+            else:
+                prop_lines[f'{our_prop}_is_promo'] = False
+        else:
+            prop_lines = prop_lines.groupby('player', as_index=False)['line'].median()
+            prop_lines[f'{our_prop}_projection_type'] = 'standard'
+            prop_lines[f'{our_prop}_is_promo'] = False
+
         prop_lines = prop_lines.rename(columns={'line': f'{our_prop}_line'})
 
         if len(prop_lines) > 0:
             pred_df = pred_df.merge(prop_lines, on='player', how='left')
-            
+
             # Calculate edge
             pred_col = f'{our_prop}_pred'
             line_col = f'{our_prop}_line'
-            
+
             if pred_col in pred_df.columns and line_col in pred_df.columns:
                 pred_df[f'{our_prop}_edge'] = pred_df[pred_col] - pred_df[line_col]
-    
+
     return pred_df
 
 
@@ -5092,6 +4947,18 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if direction == 'UNDER' and not quality[prop].get('allow_under', quality[prop].get('allowed', False)):
                 continue
 
+            # Promo-line gate: PrizePicks does not offer UNDER on goblin lines (artificially
+            # low, More-only) or OVER on demon lines (artificially high, Less-only).
+            # Picks on these lines are structurally unplaceable on PrizePicks.
+            proj_type = _normalize_projection_type(row.get(f'{prop}_projection_type') or 'standard')
+            is_promo = bool(row.get(f'{prop}_is_promo', False))
+            if direction == 'UNDER' and proj_type == 'goblin':
+                continue
+            if direction == 'OVER' and proj_type == 'demon':
+                continue
+            if direction == 'UNDER' and is_promo:
+                continue
+
             # σ-tier: flag low-σ UNDER picks where the book is systematically mispriced.
             # σ-context analysis shows that when the model predicts a tight distribution
             # (σ < p25 threshold), the actual OVER hit rate is 31–37% for AST/TRB —
@@ -5345,13 +5212,17 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 cal_p_over=cal_p_over,
                 prob_source=prob_source,
             )
+            break_even_prob = round((1.0 / _PP_MULTIPLIERS[2]) ** 0.5, 4)
 
             picks.append({
                 'player':         row['player'],
                 'team':           row.get('team', ''),
+                'opponent':       row.get('opp', row.get('opponent', '')),
                 'prop':           prop.upper(),
                 'direction':      direction,
                 'line':           line,
+                'projection_type': proj_type,
+                'is_promo':       is_promo,
                 'prediction':     round(float(pred), 1),
                 'edge':           round(float(combined_edge), 1),
                 'confidence':     conf_pct,
@@ -5378,6 +5249,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 'lane_rank_bonus': priority_rank_bonus,
                 'sigma': round(sigma_val, 3) if sigma_val is not None else None,
                 'low_sigma_under': low_sigma_under,
+                'break_even_prob': break_even_prob,
+                'exceeds_ev_threshold': bool(dir_prob >= break_even_prob),
                 **prob_payload,
             })
 
@@ -5549,13 +5422,21 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     cal_p_over=cal_p_over_fill,
                     prob_source=prob_source_fill,
                 )
+                proj_type_fill = _normalize_projection_type(row.get(f'{prop}_projection_type') or 'standard')
+                is_promo_fill = bool(row.get(f'{prop}_is_promo', False))
+                if proj_type_fill == 'goblin' or is_promo_fill:
+                    continue
+                break_even_prob_fill = round((1.0 / _PP_MULTIPLIERS[2]) ** 0.5, 4)
 
                 picks.append({
                     'player':               row['player'],
                     'team':                 row.get('team', ''),
+                    'opponent':             row.get('opp', row.get('opponent', '')),
                     'prop':                 prop.upper(),
                     'direction':            'UNDER',
                     'line':                 line,
+                    'projection_type':      proj_type_fill,
+                    'is_promo':             is_promo_fill,
                     'prediction':           round(float(pred), 1),
                     'edge':                 round(float(combined_edge), 1),
                     'confidence':           conf_pct_fill,
@@ -5582,6 +5463,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'lane_rank_bonus':      0.0,
                     'sigma':                None,
                     'low_sigma_under':      False,
+                    'break_even_prob':      break_even_prob_fill,
+                    'exceeds_ev_threshold': bool(dir_prob_fill >= break_even_prob_fill),
                     **prob_payload_fill,
                 })
                 _existing.add((row['player'], prop.upper()))
@@ -5698,13 +5581,23 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     cal_p_over=cal_p_over,
                     prob_source=prob_source_emergency,
                 )
+                proj_type_emergency = _normalize_projection_type(row.get(f'{prop}_projection_type') or 'standard')
+                is_promo_emergency = bool(row.get(f'{prop}_is_promo', False))
+                if direction == 'UNDER' and (proj_type_emergency == 'goblin' or is_promo_emergency):
+                    continue
+                if direction == 'OVER' and proj_type_emergency == 'demon':
+                    continue
+                break_even_prob_emergency = round((1.0 / _PP_MULTIPLIERS[2]) ** 0.5, 4)
 
                 picks.append({
                     'player':               row['player'],
                     'team':                 row.get('team', ''),
+                    'opponent':             row.get('opp', row.get('opponent', '')),
                     'prop':                 prop.upper(),
                     'direction':            direction,
                     'line':                 line,
+                    'projection_type':      proj_type_emergency,
+                    'is_promo':             is_promo_emergency,
                     'prediction':           round(float(pred), 1),
                     'edge':                 round(float(combined_edge), 1),
                     'confidence':           conf_pct_emergency,
@@ -5731,6 +5624,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'lane_rank_bonus':      0.0,
                     'sigma':                None,
                     'low_sigma_under':      False,
+                    'break_even_prob':      break_even_prob_emergency,
+                    'exceeds_ev_threshold': bool(dir_prob_emergency >= break_even_prob_emergency),
                     **prob_payload_emergency,
                 })
                 _existing.add((row['player'], prop.upper()))
@@ -5743,6 +5638,26 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             )
 
     picks_df = pd.DataFrame(picks)
+    if len(picks_df) == 0:
+        return picks_df
+    if 'projection_type' not in picks_df.columns:
+        picks_df['projection_type'] = 'standard'
+    picks_df['projection_type'] = picks_df['projection_type'].apply(_normalize_projection_type)
+    if 'is_promo' not in picks_df.columns:
+        picks_df['is_promo'] = False
+    picks_df['is_promo'] = picks_df['is_promo'].fillna(False).astype(bool)
+    market_block_mask = (
+        (
+            picks_df['direction'].astype(str).str.upper().eq('UNDER') &
+            (picks_df['projection_type'].eq('goblin') | picks_df['is_promo'])
+        ) |
+        (
+            picks_df['direction'].astype(str).str.upper().eq('OVER') &
+            picks_df['projection_type'].eq('demon')
+        )
+    )
+    if market_block_mask.any():
+        picks_df = picks_df.loc[~market_block_mask].copy()
     if len(picks_df) == 0:
         return picks_df
 
@@ -6710,117 +6625,281 @@ def _calc_payout(wager: float, n_picks: int) -> float:
     return round(wager * mult, 2)
 
 
-def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
-    """
-    Auto-log suggested PrizePicks Power Play bet slips to betslips_history.csv.
-    Generates 2-pick, 3-pick, and 4-pick slips from the top picks by confidence.
-    Each pick leg is stored in its own set of columns (Pick_1_Player, Pick_1_Prop,
-    Pick_1_Dir, Pick_1_Line ... Pick_4_Player, etc.) for clean, readable output.
-    """
-    slip_path = CONFIG['output_dir'] / 'betslips_history.csv'
+def _power_play_break_even_prob(n_picks: int) -> float:
+    mult = _PP_MULTIPLIERS.get(n_picks, n_picks * 2.0)
+    return float((1.0 / max(mult, 1e-9)) ** (1.0 / max(int(n_picks), 1)))
 
-    # Exclude volume_fill picks from betslips — they use relaxed thresholds and are
-    # confidence-capped at 63%. Also enforce a hard confidence floor so only
-    # high-conviction picks can enter real-money parlays.
+
+def _coerce_pick_side_probability(row: pd.Series) -> float:
+    dir_prob = row.get('dir_prob', row.get('ou_prob'))
+    if dir_prob is not None and not pd.isna(dir_prob):
+        prob = float(dir_prob)
+    else:
+        conf = pd.to_numeric(pd.Series([row.get('confidence')]), errors='coerce').iloc[0]
+        prob = float(conf) / 100.0 if pd.notna(conf) else 0.50
+    return float(np.clip(prob, 0.01, 0.99))
+
+
+def _estimate_leg_correlation(left: pd.Series, right: pd.Series) -> float:
+    left_player = _normalize_name(left.get('player', ''))
+    right_player = _normalize_name(right.get('player', ''))
+    if left_player and left_player == right_player:
+        return 0.70
+
+    left_team = str(left.get('team', '') or '').strip().upper()
+    right_team = str(right.get('team', '') or '').strip().upper()
+    if left_team and left_team == right_team:
+        return 0.35
+
+    left_opp = str(left.get('opponent', '') or '').strip().upper()
+    right_opp = str(right.get('opponent', '') or '').strip().upper()
+    if (left_team and left_team == right_opp) or (right_team and right_team == left_opp):
+        return 0.15
+
+    return 0.0
+
+
+def _estimate_joint_probabilities(subset: pd.DataFrame) -> Dict[str, float]:
+    if subset is None or len(subset) == 0:
+        return {
+            'joint_prob_raw': 0.0,
+            'estimated_correlation': 0.0,
+            'joint_prob_adj': 0.0,
+        }
+
+    probs = [_coerce_pick_side_probability(row) for _, row in subset.iterrows()]
+    joint_raw = float(np.prod(probs))
+    if len(probs) == 1:
+        return {
+            'joint_prob_raw': joint_raw,
+            'estimated_correlation': 0.0,
+            'joint_prob_adj': joint_raw,
+        }
+
+    running_joint = probs[0]
+    pair_rhos: List[float] = []
+    rows = [row for _, row in subset.iterrows()]
+    for idx in range(1, len(rows)):
+        current_prob = probs[idx]
+        prior_rhos = [_estimate_leg_correlation(rows[idx], rows[j]) for j in range(idx)]
+        pair_rhos.extend(prior_rhos)
+        rho = float(np.mean(prior_rhos)) if prior_rhos else 0.0
+        variance_term = max(running_joint * (1.0 - running_joint) * current_prob * (1.0 - current_prob), 0.0)
+        running_joint = running_joint * current_prob + rho * math.sqrt(variance_term)
+        running_joint = float(np.clip(running_joint, 0.0, 0.999))
+
+    return {
+        'joint_prob_raw': joint_raw,
+        'estimated_correlation': float(np.mean(pair_rhos)) if pair_rhos else 0.0,
+        'joint_prob_adj': running_joint,
+    }
+
+
+def _sort_betslip_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
+    if candidates is None or len(candidates) == 0:
+        return pd.DataFrame()
+
+    working = candidates.copy()
+    working['_selection_priority'] = pd.to_numeric(working.get('selection_priority'), errors='coerce').fillna(0.0)
+    working['_dir_prob'] = [
+        _coerce_pick_side_probability(row)
+        for _, row in working.iterrows()
+    ]
+    working['_confidence'] = pd.to_numeric(working.get('confidence'), errors='coerce').fillna(0.0)
+    working['_edge_abs'] = pd.to_numeric(working.get('edge'), errors='coerce').fillna(0.0).abs()
+    working = working.sort_values(
+        ['_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
+        ascending=False,
+    )
+
+    # Keep one prop per player in slips. This preserves the existing bankroll rule
+    # while still allowing correlation-aware selection across teams/games.
+    deduped = []
+    seen_players = set()
+    for _, row in working.iterrows():
+        player_key = _normalize_name(row.get('player', ''))
+        if player_key in seen_players:
+            continue
+        seen_players.add(player_key)
+        deduped.append(row)
+    if not deduped:
+        return working.iloc[0:0].copy()
+
+    out = pd.DataFrame(deduped).reset_index(drop=True)
+    return out.drop(columns=['_selection_priority', '_dir_prob', '_confidence', '_edge_abs'], errors='ignore')
+
+
+def _prepare_betslip_candidate_pool(picks_df: pd.DataFrame,
+                                    *,
+                                    direction: Optional[str] = None,
+                                    allowed_props: Optional[set] = None) -> pd.DataFrame:
     eligible_df = picks_df.copy()
     if 'pick_source' in eligible_df.columns:
         eligible_df = eligible_df[~eligible_df['pick_source'].isin(['volume_fill', 'emergency_fill'])]
     if 'confidence' in eligible_df.columns:
         conf = pd.to_numeric(eligible_df['confidence'], errors='coerce').fillna(0.0)
         eligible_df = eligible_df[conf >= 70.0]
+    if direction is not None and 'direction' in eligible_df.columns:
+        eligible_df = eligible_df[eligible_df['direction'].astype(str).str.upper() == str(direction).upper()]
+    if allowed_props is not None and 'prop' in eligible_df.columns:
+        prop_set = {str(prop).upper() for prop in allowed_props}
+        eligible_df = eligible_df[eligible_df['prop'].astype(str).str.upper().isin(prop_set)]
+    return _sort_betslip_candidates(eligible_df)
 
-    # One pick per player — take the highest-confidence prop for each player
-    seen_players = []
-    deduped = []
-    for _, row in eligible_df.sort_values('confidence', ascending=False).iterrows():
-        if row['player'] not in seen_players:
-            seen_players.append(row['player'])
-            deduped.append(row)
-        if len(deduped) >= 4:
-            break
-    top = pd.DataFrame(deduped).reset_index(drop=True)
 
-    if len(top) == 0:
-        return pd.DataFrame()
+def _select_best_power_play_subset(candidates: pd.DataFrame,
+                                   size: int,
+                                   wager: float,
+                                   candidate_limit: int) -> Tuple[pd.DataFrame, Dict[str, float]]:
+    if candidates is None or len(candidates) < size:
+        return pd.DataFrame(), {}
+
+    pool = candidates.head(candidate_limit).reset_index(drop=True)
+    best_subset = pd.DataFrame()
+    best_metrics: Dict[str, float] = {}
+    best_score = -float('inf')
+    best_prob = -float('inf')
+
+    for combo in combinations(range(len(pool)), size):
+        subset = pool.iloc[list(combo)].reset_index(drop=True)
+        metrics = _estimate_joint_probabilities(subset)
+        gross_mult = float(_PP_MULTIPLIERS.get(size, size * 2.0))
+        break_even_joint_prob = 1.0 / gross_mult
+        ev_per_unit = metrics['joint_prob_adj'] * gross_mult - 1.0
+        metrics.update({
+            'break_even_joint_prob': break_even_joint_prob,
+            'ev_per_unit': ev_per_unit,
+            'ev_dollar': wager * ev_per_unit,
+        })
+        if (
+            ev_per_unit > best_score or
+            (math.isclose(ev_per_unit, best_score, rel_tol=1e-9, abs_tol=1e-9) and metrics['joint_prob_adj'] > best_prob)
+        ):
+            best_subset = subset
+            best_metrics = metrics
+            best_score = ev_per_unit
+            best_prob = metrics['joint_prob_adj']
+
+    return best_subset, best_metrics
+
+
+def _build_betslip_row(subset: pd.DataFrame,
+                       *,
+                       game_date: str,
+                       slip_type: str,
+                       wager: float,
+                       max_legs: int = 4) -> Dict[str, object]:
+    metrics = _estimate_joint_probabilities(subset)
+    n_legs = len(subset)
+    gross_mult = float(_PP_MULTIPLIERS.get(n_legs, n_legs * 2.0))
+    metrics.update({
+        'break_even_joint_prob': 1.0 / gross_mult,
+        'ev_per_unit': metrics['joint_prob_adj'] * gross_mult - 1.0,
+        'ev_dollar': wager * (metrics['joint_prob_adj'] * gross_mult - 1.0),
+    })
+
+    row_data = {
+        'game_date': game_date,
+        'slip_type': slip_type,
+        'wager': wager,
+        'potential_payout': _calc_payout(wager, n_legs),
+        'joint_prob_raw': round(metrics['joint_prob_raw'], 4),
+        'estimated_correlation': round(metrics['estimated_correlation'], 3),
+        'joint_prob_adj': round(metrics['joint_prob_adj'], 4),
+        'break_even_joint_prob': round(metrics['break_even_joint_prob'], 4),
+        'ev_per_unit': round(metrics['ev_per_unit'], 4),
+        'ev_dollar': round(metrics['ev_dollar'], 2),
+        'result': '',
+        'actual_payout': '',
+    }
+    for i, (_, leg) in enumerate(subset.iterrows(), start=1):
+        row_data[f'Pick_{i}_Player'] = leg['player']
+        row_data[f'Pick_{i}_Prop'] = str(leg['prop']).upper()
+        row_data[f'Pick_{i}_Dir'] = str(leg['direction']).upper()
+        row_data[f'Pick_{i}_Line'] = leg['line']
+    for i in range(len(subset) + 1, max_legs + 1):
+        row_data[f'Pick_{i}_Player'] = ''
+        row_data[f'Pick_{i}_Prop'] = ''
+        row_data[f'Pick_{i}_Dir'] = ''
+        row_data[f'Pick_{i}_Line'] = ''
+    return row_data
+
+
+def _grade_power_play_results(results: List[Optional[str]], wager: float) -> Tuple[Optional[str], Optional[float], int]:
+    graded = [r for r in results if r in {'WIN', 'LOSS', 'PUSH'}]
+    effective_picks = len(graded)
+    if effective_picks == 0:
+        return None, None, 0
+    if any(r == 'LOSS' for r in graded):
+        return 'LOSS', 0.0, effective_picks
+    if all(r == 'WIN' for r in graded):
+        return 'WIN', _calc_payout(wager, effective_picks), effective_picks
+    return 'PUSH', float(wager), effective_picks
+
+
+def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
+    """
+    Auto-log suggested PrizePicks Power Play bet slips to betslips_history.csv.
+    Uses EV-ranked candidate selection under the current Power Play payout model.
+    """
+    slip_path = CONFIG['output_dir'] / 'betslips_history.csv'
 
     # Build column schema: Pick_1..Pick_4, each with Player/Prop/Dir/Line
     MAX_LEGS = 4
     pick_cols = []
     for i in range(1, MAX_LEGS + 1):
         pick_cols += [f'Pick_{i}_Player', f'Pick_{i}_Prop', f'Pick_{i}_Dir', f'Pick_{i}_Line']
+    metric_cols = [
+        'joint_prob_raw',
+        'estimated_correlation',
+        'joint_prob_adj',
+        'break_even_joint_prob',
+        'ev_per_unit',
+        'ev_dollar',
+    ]
 
     rows = []
+    power_pool = _prepare_betslip_candidate_pool(picks_df)
     for size in [2, 3, 4]:
-        subset = top.head(size)
+        candidate_limit = {2: 6, 3: 8, 4: 10}.get(size, max(6, size * 2))
+        subset, _ = _select_best_power_play_subset(power_pool, size, wager, candidate_limit)
         if len(subset) < size:
             continue
-        payout = _calc_payout(wager, size)
-        row_data = {
-            'game_date':        game_date,
-            'slip_type':        f'{size}-pick Power Play',
-            'wager':            wager,
-            'potential_payout': payout,
-            'result':           '',
-            'actual_payout':    '',
-        }
-        # Fill in per-leg columns
-        for i, (_, r) in enumerate(subset.iterrows(), start=1):
-            row_data[f'Pick_{i}_Player'] = r['player']
-            row_data[f'Pick_{i}_Prop']   = r['prop'].upper()
-            row_data[f'Pick_{i}_Dir']    = r['direction'].upper()
-            row_data[f'Pick_{i}_Line']   = r['line']
-        # Pad unused leg columns with empty string
-        for i in range(len(subset) + 1, MAX_LEGS + 1):
-            row_data[f'Pick_{i}_Player'] = ''
-            row_data[f'Pick_{i}_Prop']   = ''
-            row_data[f'Pick_{i}_Dir']    = ''
-            row_data[f'Pick_{i}_Line']   = ''
-        rows.append(row_data)
+        rows.append(
+            _build_betslip_row(
+                subset,
+                game_date=game_date,
+                slip_type=f'{size}-pick Power Play',
+                wager=wager,
+                max_legs=MAX_LEGS,
+            )
+        )
 
     # ── UNDER-Only slip track ────────────────────────────────────────────────
     # Build dedicated slips from UNDER picks on the post-retrain high-signal props.
     # A hard confidence floor is already applied above, so STL/BLK only enter this
     # pool when they survive both the live quality policy and the >=70 betslip gate.
     _under_props = {'AST', 'TRB', 'STL', 'BLK'}
-    under_pool = eligible_df[
-        (eligible_df['direction'] == 'UNDER') &
-        (eligible_df['prop'].str.upper().isin(_under_props))
-    ].copy()
-    under_pool = under_pool.sort_values('confidence', ascending=False)
-    under_seen = []
-    under_deduped = []
-    for _, row in under_pool.iterrows():
-        if row['player'] not in under_seen:
-            under_seen.append(row['player'])
-            under_deduped.append(row)
-        if len(under_deduped) >= 4:
-            break
-    under_top = pd.DataFrame(under_deduped).reset_index(drop=True)
+    under_pool = _prepare_betslip_candidate_pool(
+        picks_df,
+        direction='UNDER',
+        allowed_props=_under_props,
+    )
 
     for size in [2, 3]:
-        subset = under_top.head(size)
+        candidate_limit = {2: 6, 3: 8}.get(size, max(6, size * 2))
+        subset, _ = _select_best_power_play_subset(under_pool, size, wager, candidate_limit)
         if len(subset) < size:
             continue
-        payout = _calc_payout(wager, size)
-        row_data = {
-            'game_date':        game_date,
-            'slip_type':        f'{size}-pick UNDER-Only',
-            'wager':            wager,
-            'potential_payout': payout,
-            'result':           '',
-            'actual_payout':    '',
-        }
-        for i, (_, r) in enumerate(subset.iterrows(), start=1):
-            row_data[f'Pick_{i}_Player'] = r['player']
-            row_data[f'Pick_{i}_Prop']   = r['prop'].upper()
-            row_data[f'Pick_{i}_Dir']    = r['direction'].upper()
-            row_data[f'Pick_{i}_Line']   = r['line']
-        for i in range(len(subset) + 1, MAX_LEGS + 1):
-            row_data[f'Pick_{i}_Player'] = ''
-            row_data[f'Pick_{i}_Prop']   = ''
-            row_data[f'Pick_{i}_Dir']    = ''
-            row_data[f'Pick_{i}_Line']   = ''
-        rows.append(row_data)
+        rows.append(
+            _build_betslip_row(
+                subset,
+                game_date=game_date,
+                slip_type=f'{size}-pick UNDER-Only',
+                wager=wager,
+                max_legs=MAX_LEGS,
+            )
+        )
     # ── End UNDER-Only track ─────────────────────────────────────────────────
 
     if not rows:
@@ -6829,7 +6908,7 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
     # Define final column order
     col_order = [
         'game_date', 'slip_type', 'wager', 'potential_payout',
-    ] + pick_cols + ['result', 'actual_payout']
+    ] + metric_cols + pick_cols + ['result', 'actual_payout']
 
     new_df = pd.DataFrame(rows)[col_order]
 
@@ -6851,6 +6930,87 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
     combined.to_csv(slip_path, index=False)
     print(f"  Betslips logged -> {slip_path}  ({len(rows)} slips for {game_date})")
     return new_df.reset_index(drop=True)
+
+
+def backtest_under_only_slips(history_df: Optional[pd.DataFrame] = None, wager: float = 20.0) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    """Replay current under-only Power Play slip rules against graded picks_history rows."""
+    if history_df is None:
+        history_path = CONFIG['output_dir'] / 'picks_history.csv'
+        if not history_path.exists():
+            return pd.DataFrame(), {'error': 'picks_history.csv not found'}
+        history_df = pd.read_csv(history_path, low_memory=False)
+
+    if history_df is None or len(history_df) == 0:
+        return pd.DataFrame(), {'error': 'no history rows'}
+
+    working = history_df.copy()
+    if 'game_date' not in working.columns or 'result' not in working.columns:
+        return pd.DataFrame(), {'error': 'missing required picks_history columns'}
+
+    working['game_date'] = pd.to_datetime(working['game_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+    working = working.dropna(subset=['game_date']).copy()
+    working['result'] = working['result'].astype(str).str.upper()
+    working = working[working['result'].isin(['WIN', 'LOSS', 'PUSH', 'DNP'])].copy()
+    if len(working) == 0:
+        return pd.DataFrame(), {'error': 'no graded under-only candidates'}
+
+    detail_rows = []
+    for game_date, day_df in working.groupby('game_date', sort=True):
+        candidate_pool = _prepare_betslip_candidate_pool(
+            day_df,
+            direction='UNDER',
+            allowed_props={'AST', 'TRB', 'STL', 'BLK'},
+        )
+        for size in [2, 3]:
+            candidate_limit = {2: 6, 3: 8}[size]
+            subset, metrics = _select_best_power_play_subset(candidate_pool, size, wager, candidate_limit)
+            if len(subset) < size:
+                continue
+            results = [str(result).upper() for result in subset.get('result', pd.Series(dtype=str)).tolist()]
+            slip_result, actual_payout, effective_legs = _grade_power_play_results(results, wager)
+            if slip_result is None:
+                continue
+            row_data = _build_betslip_row(
+                subset,
+                game_date=game_date,
+                slip_type=f'{size}-pick UNDER-Only Backtest',
+                wager=wager,
+            )
+            row_data['result'] = slip_result
+            row_data['actual_payout'] = round(actual_payout, 2)
+            row_data['effective_legs'] = effective_legs
+            row_data['eligible_picks'] = len(candidate_pool)
+            detail_rows.append(row_data)
+
+    detail_df = pd.DataFrame(detail_rows)
+    if len(detail_df) == 0:
+        return detail_df, {'error': 'no backtest slips generated'}
+
+    summary: Dict[str, object] = {
+        'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'wager_per_slip': wager,
+        'slip_types': {},
+    }
+    for slip_type, slip_df in detail_df.groupby('slip_type'):
+        total_wagered = float(slip_df['wager'].sum())
+        total_payout = float(pd.to_numeric(slip_df['actual_payout'], errors='coerce').fillna(0.0).sum())
+        wins = int((slip_df['result'] == 'WIN').sum())
+        losses = int((slip_df['result'] == 'LOSS').sum())
+        pushes = int((slip_df['result'] == 'PUSH').sum())
+        summary['slip_types'][slip_type] = {
+            'slips': int(len(slip_df)),
+            'wins': wins,
+            'losses': losses,
+            'pushes': pushes,
+            'win_rate': round(wins / max(wins + losses, 1), 4),
+            'total_wagered': round(total_wagered, 2),
+            'total_payout': round(total_payout, 2),
+            'roi': round((total_payout - total_wagered) / max(total_wagered, 1.0), 4),
+            'avg_ev_per_unit': round(pd.to_numeric(slip_df['ev_per_unit'], errors='coerce').fillna(0.0).mean(), 4),
+            'avg_joint_prob_adj': round(pd.to_numeric(slip_df['joint_prob_adj'], errors='coerce').fillna(0.0).mean(), 4),
+        }
+
+    return detail_df.reset_index(drop=True), summary
 
 
 def _migrate_picks_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -7325,6 +7485,12 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Option
         ('p_under_raw', np.nan),
         ('p_under_cal', np.nan),
         ('prob_source', ''),
+        ('sigma', np.nan),
+        ('low_sigma_under', False),
+        ('projection_type', 'standard'),
+        ('is_promo', False),
+        ('break_even_prob', np.nan),
+        ('exceeds_ev_threshold', False),
     ]:
         if col not in picks_df.columns:
             picks_df[col] = default
@@ -8015,7 +8181,8 @@ def main():
                     f"\nUsing {len(active_hist)} cached lines from historical_lines.csv "
                     f"(active slate {active_slate_date}) [source: {_line_source}]"
                 )
-                vegas = active_hist[['player', 'prop', 'line']].copy()
+                _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_hist.columns]
+                vegas = active_hist[['player', 'prop', 'line'] + _market_cols].copy()
                 vegas['num_books'] = active_hist['num_books'].values if 'num_books' in active_hist.columns else 1
         if len(vegas) == 0:
             print("\nFetching Vegas lines...")
@@ -8024,7 +8191,8 @@ def main():
                 save_lines_snapshot(vegas_raw, source=_line_source)
                 active_live, live_slate_date = _select_active_slate_lines(vegas_raw)
                 active_slate_date = live_slate_date or today_str
-                vegas = active_live[['player', 'prop', 'line']].copy()
+                _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_live.columns]
+                vegas = active_live[['player', 'prop', 'line'] + _market_cols].copy()
                 vegas['num_books'] = active_live['num_books'].values if 'num_books' in active_live.columns else 1
 
         print(f"\nActive slate date: {active_slate_date}")
@@ -8172,7 +8340,8 @@ def main():
             save_lines_snapshot(vegas_raw, source=_line_source_all)
             active_live_all, live_slate_date_all = _select_active_slate_lines(vegas_raw)
             active_slate_date_all = live_slate_date_all or active_slate_date_all
-            vegas = active_live_all[['player', 'prop', 'line']].copy()
+            _market_cols_all = [c for c in ['projection_type', 'is_promo'] if c in active_live_all.columns]
+            vegas = active_live_all[['player', 'prop', 'line'] + _market_cols_all].copy()
             vegas['num_books'] = active_live_all['num_books'].values if 'num_books' in active_live_all.columns else 1
         pred_df = generate_predictions(df, vegas, use_feature_cache=False)
         reg_candidates = compute_regression_candidates(df)

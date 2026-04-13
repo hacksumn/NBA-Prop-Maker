@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-04-12 19:40:47",
+  "wager_per_slip": 20.0,
+  "slip_types": {
+    "2-pick UNDER-Only Backtest": {
+      "slips": 9,
+      "wins": 5,
+      "losses": 4,
+      "pushes": 0,
+      "win_rate": 0.5556,
+      "total_wagered": 180.0,
+      "total_payout": 260.0,
+      "roi": 0.4444,
+      "avg_ev_per_unit": 1.7016,
+      "avg_joint_prob_adj": 0.9005
+    },
+    "3-pick UNDER-Only Backtest": {
+      "slips": 9,
+      "wins": 5,
+      "losses": 4,
+      "pushes": 0,
+      "win_rate": 0.5556,
+      "total_wagered": 180.0,
+      "total_payout": 400.0,
+      "roi": 1.2222,
+      "avg_ev_per_unit": 3.2965,
+      "avg_joint_prob_adj": 0.8593
+    }
+  }
+}

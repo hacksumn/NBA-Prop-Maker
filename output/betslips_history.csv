@@ -1,81 +1,81 @@
-game_date,slip_type,wager,potential_payout,Pick_1_Player,Pick_1_Prop,Pick_1_Dir,Pick_1_Line,Pick_2_Player,Pick_2_Prop,Pick_2_Dir,Pick_2_Line,Pick_3_Player,Pick_3_Prop,Pick_3_Dir,Pick_3_Line,Pick_4_Player,Pick_4_Prop,Pick_4_Dir,Pick_4_Line,result,actual_payout
-2026-03-17,2-pick Power Play,20.0,60.0,Keldon Johnson,PA,UNDER,19.5,Justin Edwards,PA,UNDER,17.0,,,,,,,,,WIN,60.0
-2026-03-17,3-pick Power Play,20.0,100.0,Keldon Johnson,PA,UNDER,19.5,Justin Edwards,PA,UNDER,17.0,Justin Edwards,PR,UNDER,16.5,,,,,WIN,100.0
-2026-03-17,4-pick Power Play,20.0,200.0,Keldon Johnson,PA,UNDER,19.5,Justin Edwards,PA,UNDER,17.0,Justin Edwards,PR,UNDER,16.5,Justin Edwards,PRA,UNDER,17.5,LOSS,0.0
-2026-03-18,2-pick Power Play,20.0,60.0,Jaylin Williams,PR,UNDER,26.0,Ayo Dosunmu,PRA,UNDER,26.5,,,,,,,,,LOSS,0.0
-2026-03-18,3-pick Power Play,20.0,100.0,Jaylin Williams,PR,UNDER,26.0,Ayo Dosunmu,PRA,UNDER,26.5,Jaylen Brown,PRA,OVER,36.5,,,,,LOSS,0.0
-2026-03-18,4-pick Power Play,20.0,200.0,Jaylin Williams,PR,UNDER,26.0,Ayo Dosunmu,PRA,UNDER,26.5,Jaylen Brown,PRA,OVER,36.5,Julius Randle,PA,UNDER,30.5,LOSS,0.0
-2026-03-19,2-pick Power Play,20.0,60.0,Jabari Walker,PR,UNDER,22.0,Daniss Jenkins,PRA,UNDER,22.5,,,,,,,,,WIN,60.0
-2026-03-19,3-pick Power Play,20.0,100.0,Jabari Walker,PR,UNDER,22.0,Daniss Jenkins,PRA,UNDER,22.5,Luka Dončić,PR,UNDER,44.5,,,,,LOSS,0.0
-2026-03-19,4-pick Power Play,20.0,200.0,Jabari Walker,PR,UNDER,22.0,Daniss Jenkins,PRA,UNDER,22.5,Luka Dončić,PR,UNDER,44.5,Bam Adebayo,PRA,OVER,32.25,LOSS,0.0
-2026-03-20,2-pick Power Play,20.0,60.0,Julius Randle,PA,UNDER,31.5,Ayo Dosunmu,PA,UNDER,23.5,,,,,,,,,LOSS,0.0
-2026-03-20,3-pick Power Play,20.0,100.0,Julius Randle,PA,UNDER,31.5,Ayo Dosunmu,PA,UNDER,23.5,Daniss Jenkins,PRA,UNDER,22.5,,,,,LOSS,0.0
-2026-03-20,4-pick Power Play,20.0,200.0,Julius Randle,PA,UNDER,31.5,Ayo Dosunmu,PA,UNDER,23.5,Daniss Jenkins,PRA,UNDER,22.5,Donovan Clingan,PRA,OVER,25.5,LOSS,0.0
-2026-03-21,2-pick Power Play,20.0,60.0,Ace Bailey,PA,UNDER,26.5,Oso Ighodaro,PRA,UNDER,22.5,,,,,,,,,LOSS,0.0
-2026-03-21,3-pick Power Play,20.0,100.0,Ace Bailey,PA,UNDER,26.5,Oso Ighodaro,PRA,UNDER,22.5,Justin Edwards,PR,UNDER,19.5,,,,,LOSS,0.0
-2026-03-21,4-pick Power Play,20.0,200.0,Ace Bailey,PA,UNDER,26.5,Oso Ighodaro,PRA,UNDER,22.5,Justin Edwards,PR,UNDER,19.5,VJ Edgecombe,PA,UNDER,28.5,LOSS,0.0
-2026-03-25,2-pick Power Play,20.0,60.0,Darius Garland,PRA,OVER,27.5,Evan Mobley,PRA,OVER,31.5,,,,,,,,,LOSS,0.0
-2026-03-25,3-pick Power Play,20.0,100.0,Darius Garland,PRA,OVER,27.5,Evan Mobley,PRA,OVER,31.5,Victor Wembanyama,PR,UNDER,42.0,,,,,LOSS,0.0
-2026-03-25,4-pick Power Play,20.0,200.0,Darius Garland,PRA,OVER,27.5,Evan Mobley,PRA,OVER,31.5,Victor Wembanyama,PR,UNDER,42.0,Kawhi Leonard,PRA,OVER,37.5,LOSS,0.0
-2026-03-27,2-pick Power Play,20.0,60.0,Darius Garland,PA,OVER,26.5,Jonathan Kuminga,PR,OVER,12.5,,,,,,,,,LOSS,0.0
-2026-03-27,3-pick Power Play,20.0,100.0,Darius Garland,PA,OVER,26.5,Jonathan Kuminga,PR,OVER,12.5,Tyler Herro,PRA,OVER,28.0,,,,,LOSS,0.0
-2026-03-27,4-pick Power Play,20.0,200.0,Darius Garland,PA,OVER,26.5,Jonathan Kuminga,PR,OVER,12.5,Tyler Herro,PRA,OVER,28.0,Nikola Jokić,PR,UNDER,44.5,LOSS,0.0
-2026-03-28,2-pick Power Play,20.0,60.0,Jalen Johnson,TRB,UNDER,11.5,Corey Kispert,PA,UNDER,15.5,,,,,,,,,WIN,60.0
-2026-03-28,3-pick Power Play,20.0,100.0,Jalen Johnson,TRB,UNDER,11.5,Corey Kispert,PA,UNDER,15.5,Josh Giddey,PR,UNDER,28.5,,,,,LOSS,0.0
-2026-03-28,4-pick Power Play,20.0,200.0,Jalen Johnson,TRB,UNDER,11.5,Corey Kispert,PA,UNDER,15.5,Josh Giddey,PR,UNDER,28.5,Malik Monk,PRA,UNDER,27.5,LOSS,0.0
-2026-03-29,2-pick Power Play,20.0,60.0,Jericho Sims,TRB,UNDER,9.0,Derrick White,AST,UNDER,6.5,,,,,,,,,WIN,40.0
-2026-03-29,3-pick Power Play,20.0,100.0,Jericho Sims,TRB,UNDER,9.0,Derrick White,AST,UNDER,6.5,Devin Carter,AST,UNDER,5.5,,,,,WIN,60.0
-2026-03-29,4-pick Power Play,20.0,200.0,Jericho Sims,TRB,UNDER,9.0,Derrick White,AST,UNDER,6.5,Devin Carter,AST,UNDER,5.5,Jrue Holiday,PTS,UNDER,19.0,WIN,100.0
-2026-03-29,2-pick Power Play,20.0,60.0,Quentin Grimes,PA,OVER,12.5,Austin Reaves,PTS,UNDER,31.5,,,,,,,,,LOSS,0.0
-2026-03-29,3-pick Power Play,20.0,100.0,Quentin Grimes,PA,OVER,12.5,Austin Reaves,PTS,UNDER,31.5,LeBron James,PTS,UNDER,26.0,,,,,LOSS,0.0
-2026-03-29,4-pick Power Play,20.0,200.0,Quentin Grimes,PA,OVER,12.5,Austin Reaves,PTS,UNDER,31.5,LeBron James,PTS,UNDER,26.0,Payton Pritchard,AST,UNDER,6.5,LOSS,0.0
-2026-03-29,2-pick Power Play,20.0,60.0,Bennedict Mathurin,TRB,UNDER,8.5,Caris LeVert,AST,UNDER,4.5,,,,,,,,,LOSS,0.0
-,,,,,,,,,,,,,,,,,,,,LOSS,0.0
-2026-03-31,2-pick Power Play,20.0,60.0,Ausar Thompson,TRB,UNDER,8.0,Donovan Mitchell,AST,UNDER,7.0,,,,,,,,,WIN,60.0
-2026-03-31,3-pick Power Play,20.0,100.0,Ausar Thompson,TRB,UNDER,8.0,Donovan Mitchell,AST,UNDER,7.0,Ja'Kobe Walter,TRB,UNDER,5.0,,,,,WIN,100.0
-2026-03-31,4-pick Power Play,20.0,200.0,Ausar Thompson,TRB,UNDER,8.0,Donovan Mitchell,AST,UNDER,7.0,Ja'Kobe Walter,TRB,UNDER,5.0,Deni Avdija,PA,UNDER,34.5,LOSS,0.0
-2026-04-01,2-pick Power Play,20.0,60.0,Derrick White,PTS,UNDER,16.5,OG Anunoby,PTS,UNDER,15.5,,,,,,,,,LOSS,0.0
-2026-04-01,3-pick Power Play,20.0,100.0,Derrick White,PTS,UNDER,16.5,OG Anunoby,PTS,UNDER,15.5,Mikal Bridges,PRA,UNDER,22.0,,,,,LOSS,0.0
-2026-04-01,4-pick Power Play,20.0,200.0,Derrick White,PTS,UNDER,16.5,OG Anunoby,PTS,UNDER,15.5,Mikal Bridges,PRA,UNDER,22.0,Victor Wembanyama,PTS,OVER,24.75,LOSS,0.0
-2026-04-02,2-pick Power Play,20.0,60.0,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,,,,,,,,,WIN,60.0
-2026-04-02,3-pick Power Play,20.0,100.0,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,De'Anthony Melton,PTS,UNDER,13.5,,,,,WIN,100.0
-2026-04-02,4-pick Power Play,20.0,200.0,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,De'Anthony Melton,PTS,UNDER,13.5,Donovan Mitchell,PA,UNDER,32.0,WIN,200.0
-2026-04-03,2-pick Power Play,20.0,60.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,,,,,,,,,LOSS,0.0
-2026-04-03,3-pick Power Play,20.0,100.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,,,,,LOSS,0.0
-2026-04-03,4-pick Power Play,20.0,200.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,Myles Turner,BLK,UNDER,1.5,LOSS,0.0
-2026-04-03,2-pick UNDER-Only,20.0,60.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,,,,,,,,,LOSS,0.0
-2026-04-03,3-pick UNDER-Only,20.0,100.0,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,,,,,LOSS,0.0
-2026-04-05,2-pick Power Play,20.0,60.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,,,,,,,,,WIN,60.0
-2026-04-05,3-pick Power Play,20.0,100.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,,,,,WIN,100.0
-2026-04-05,4-pick Power Play,20.0,200.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,WIN,200.0
-2026-04-05,2-pick UNDER-Only,20.0,60.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,,,,,,,,,WIN,60.0
-2026-04-05,3-pick UNDER-Only,20.0,100.0,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,,,,,WIN,100.0
-2026-04-06,2-pick Power Play,20.0,60.0,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,WIN,40.0
-2026-04-06,3-pick Power Play,20.0,100.0,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,,,,,WIN,40.0
-2026-04-06,4-pick Power Play,20.0,200.0,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,Nikola Jokić,AST,UNDER,11.0,LOSS,0.0
-2026-04-06,2-pick UNDER-Only,20.0,60.0,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,WIN,40.0
-2026-04-06,3-pick UNDER-Only,20.0,100.0,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,,,,,WIN,40.0
-2026-04-07,2-pick Power Play,20.0,60.0,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,LOSS,0.0
-2026-04-07,3-pick Power Play,20.0,100.0,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kyle Anderson,AST,UNDER,4.0,,,,,LOSS,0.0
-2026-04-07,2-pick UNDER-Only,20.0,60.0,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,LOSS,0.0
-2026-04-07,3-pick UNDER-Only,20.0,100.0,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kyle Anderson,AST,UNDER,4.0,,,,,LOSS,0.0
-2026-04-08,2-pick Power Play,20.0,60.0,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,,,,,,,,,WIN,60.0
-2026-04-08,3-pick Power Play,20.0,100.0,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,Scoot Henderson,AST,UNDER,4.5,,,,,WIN,100.0
-2026-04-08,4-pick Power Play,20.0,200.0,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,Scoot Henderson,AST,UNDER,4.5,De'Aaron Fox,STL,UNDER,2.0,LOSS,0.0
-2026-04-08,2-pick UNDER-Only,20.0,60.0,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,,,,,,,,,WIN,60.0
-2026-04-08,3-pick UNDER-Only,20.0,100.0,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,Scoot Henderson,AST,UNDER,4.5,,,,,WIN,100.0
-2026-04-09,2-pick Power Play,20.0,60.0,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,,,,,,,,,LOSS,0.0
-2026-04-09,3-pick Power Play,20.0,100.0,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,Deandre Ayton,TRB,UNDER,8.75,,,,,LOSS,0.0
-2026-04-09,4-pick Power Play,20.0,200.0,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,Deandre Ayton,TRB,UNDER,8.75,Jay Huff,TRB,UNDER,6.0,LOSS,0.0
-2026-04-09,2-pick UNDER-Only,20.0,60.0,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,,,,,,,,,LOSS,0.0
-2026-04-09,3-pick UNDER-Only,20.0,100.0,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,Deandre Ayton,TRB,UNDER,8.75,,,,,LOSS,0.0
-2026-04-10,2-pick Power Play,20.0,60.0,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,,,,,,,,,LOSS,0.0
-2026-04-10,3-pick Power Play,20.0,100.0,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,Kawhi Leonard,AST,UNDER,4.5,,,,,LOSS,0.0
-2026-04-10,4-pick Power Play,20.0,200.0,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,Kawhi Leonard,AST,UNDER,4.5,Nique Clifford,AST,UNDER,5.5,LOSS,0.0
-2026-04-10,2-pick UNDER-Only,20.0,60.0,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,,,,,,,,,LOSS,0.0
-2026-04-10,3-pick UNDER-Only,20.0,100.0,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,Kawhi Leonard,AST,UNDER,4.5,,,,,LOSS,0.0
-2026-04-12,2-pick Power Play,20.0,60.0,Maxime Raynaud,STL,UNDER,1.5,Scottie Barnes,TRB,UNDER,9.5,,,,,,,,,,
-2026-04-12,3-pick Power Play,20.0,100.0,Maxime Raynaud,STL,UNDER,1.5,Scottie Barnes,TRB,UNDER,9.5,Precious Achiuwa,BLK,UNDER,1.5,,,,,,
-2026-04-12,4-pick Power Play,20.0,200.0,Maxime Raynaud,STL,UNDER,1.5,Scottie Barnes,TRB,UNDER,9.5,Precious Achiuwa,BLK,UNDER,1.5,Brandon Ingram,TRB,UNDER,7.5,,
-2026-04-12,2-pick UNDER-Only,20.0,60.0,Maxime Raynaud,STL,UNDER,1.5,Scottie Barnes,TRB,UNDER,9.5,,,,,,,,,,
-2026-04-12,3-pick UNDER-Only,20.0,100.0,Maxime Raynaud,STL,UNDER,1.5,Scottie Barnes,TRB,UNDER,9.5,Precious Achiuwa,BLK,UNDER,1.5,,,,,,
+game_date,slip_type,wager,potential_payout,joint_prob_raw,estimated_correlation,joint_prob_adj,break_even_joint_prob,ev_per_unit,ev_dollar,Pick_1_Player,Pick_1_Prop,Pick_1_Dir,Pick_1_Line,Pick_2_Player,Pick_2_Prop,Pick_2_Dir,Pick_2_Line,Pick_3_Player,Pick_3_Prop,Pick_3_Dir,Pick_3_Line,Pick_4_Player,Pick_4_Prop,Pick_4_Dir,Pick_4_Line,result,actual_payout
+2026-03-17,2-pick Power Play,20.0,60.0,,,,,,,Keldon Johnson,PA,UNDER,19.5,Justin Edwards,PA,UNDER,17.0,,,,,,,,,WIN,60.0
+2026-03-17,3-pick Power Play,20.0,100.0,,,,,,,Keldon Johnson,PA,UNDER,19.5,Justin Edwards,PA,UNDER,17.0,Justin Edwards,PR,UNDER,16.5,,,,,WIN,100.0
+2026-03-17,4-pick Power Play,20.0,200.0,,,,,,,Keldon Johnson,PA,UNDER,19.5,Justin Edwards,PA,UNDER,17.0,Justin Edwards,PR,UNDER,16.5,Justin Edwards,PRA,UNDER,17.5,LOSS,0.0
+2026-03-18,2-pick Power Play,20.0,60.0,,,,,,,Jaylin Williams,PR,UNDER,26.0,Ayo Dosunmu,PRA,UNDER,26.5,,,,,,,,,LOSS,0.0
+2026-03-18,3-pick Power Play,20.0,100.0,,,,,,,Jaylin Williams,PR,UNDER,26.0,Ayo Dosunmu,PRA,UNDER,26.5,Jaylen Brown,PRA,OVER,36.5,,,,,LOSS,0.0
+2026-03-18,4-pick Power Play,20.0,200.0,,,,,,,Jaylin Williams,PR,UNDER,26.0,Ayo Dosunmu,PRA,UNDER,26.5,Jaylen Brown,PRA,OVER,36.5,Julius Randle,PA,UNDER,30.5,LOSS,0.0
+2026-03-19,2-pick Power Play,20.0,60.0,,,,,,,Jabari Walker,PR,UNDER,22.0,Daniss Jenkins,PRA,UNDER,22.5,,,,,,,,,WIN,60.0
+2026-03-19,3-pick Power Play,20.0,100.0,,,,,,,Jabari Walker,PR,UNDER,22.0,Daniss Jenkins,PRA,UNDER,22.5,Luka Dončić,PR,UNDER,44.5,,,,,LOSS,0.0
+2026-03-19,4-pick Power Play,20.0,200.0,,,,,,,Jabari Walker,PR,UNDER,22.0,Daniss Jenkins,PRA,UNDER,22.5,Luka Dončić,PR,UNDER,44.5,Bam Adebayo,PRA,OVER,32.25,LOSS,0.0
+2026-03-20,2-pick Power Play,20.0,60.0,,,,,,,Julius Randle,PA,UNDER,31.5,Ayo Dosunmu,PA,UNDER,23.5,,,,,,,,,LOSS,0.0
+2026-03-20,3-pick Power Play,20.0,100.0,,,,,,,Julius Randle,PA,UNDER,31.5,Ayo Dosunmu,PA,UNDER,23.5,Daniss Jenkins,PRA,UNDER,22.5,,,,,LOSS,0.0
+2026-03-20,4-pick Power Play,20.0,200.0,,,,,,,Julius Randle,PA,UNDER,31.5,Ayo Dosunmu,PA,UNDER,23.5,Daniss Jenkins,PRA,UNDER,22.5,Donovan Clingan,PRA,OVER,25.5,LOSS,0.0
+2026-03-21,2-pick Power Play,20.0,60.0,,,,,,,Ace Bailey,PA,UNDER,26.5,Oso Ighodaro,PRA,UNDER,22.5,,,,,,,,,LOSS,0.0
+2026-03-21,3-pick Power Play,20.0,100.0,,,,,,,Ace Bailey,PA,UNDER,26.5,Oso Ighodaro,PRA,UNDER,22.5,Justin Edwards,PR,UNDER,19.5,,,,,LOSS,0.0
+2026-03-21,4-pick Power Play,20.0,200.0,,,,,,,Ace Bailey,PA,UNDER,26.5,Oso Ighodaro,PRA,UNDER,22.5,Justin Edwards,PR,UNDER,19.5,VJ Edgecombe,PA,UNDER,28.5,LOSS,0.0
+2026-03-25,2-pick Power Play,20.0,60.0,,,,,,,Darius Garland,PRA,OVER,27.5,Evan Mobley,PRA,OVER,31.5,,,,,,,,,LOSS,0.0
+2026-03-25,3-pick Power Play,20.0,100.0,,,,,,,Darius Garland,PRA,OVER,27.5,Evan Mobley,PRA,OVER,31.5,Victor Wembanyama,PR,UNDER,42.0,,,,,LOSS,0.0
+2026-03-25,4-pick Power Play,20.0,200.0,,,,,,,Darius Garland,PRA,OVER,27.5,Evan Mobley,PRA,OVER,31.5,Victor Wembanyama,PR,UNDER,42.0,Kawhi Leonard,PRA,OVER,37.5,LOSS,0.0
+2026-03-27,2-pick Power Play,20.0,60.0,,,,,,,Darius Garland,PA,OVER,26.5,Jonathan Kuminga,PR,OVER,12.5,,,,,,,,,LOSS,0.0
+2026-03-27,3-pick Power Play,20.0,100.0,,,,,,,Darius Garland,PA,OVER,26.5,Jonathan Kuminga,PR,OVER,12.5,Tyler Herro,PRA,OVER,28.0,,,,,LOSS,0.0
+2026-03-27,4-pick Power Play,20.0,200.0,,,,,,,Darius Garland,PA,OVER,26.5,Jonathan Kuminga,PR,OVER,12.5,Tyler Herro,PRA,OVER,28.0,Nikola Jokić,PR,UNDER,44.5,LOSS,0.0
+2026-03-28,2-pick Power Play,20.0,60.0,,,,,,,Jalen Johnson,TRB,UNDER,11.5,Corey Kispert,PA,UNDER,15.5,,,,,,,,,WIN,60.0
+2026-03-28,3-pick Power Play,20.0,100.0,,,,,,,Jalen Johnson,TRB,UNDER,11.5,Corey Kispert,PA,UNDER,15.5,Josh Giddey,PR,UNDER,28.5,,,,,LOSS,0.0
+2026-03-28,4-pick Power Play,20.0,200.0,,,,,,,Jalen Johnson,TRB,UNDER,11.5,Corey Kispert,PA,UNDER,15.5,Josh Giddey,PR,UNDER,28.5,Malik Monk,PRA,UNDER,27.5,LOSS,0.0
+2026-03-29,2-pick Power Play,20.0,60.0,,,,,,,Jericho Sims,TRB,UNDER,9.0,Derrick White,AST,UNDER,6.5,,,,,,,,,WIN,40.0
+2026-03-29,3-pick Power Play,20.0,100.0,,,,,,,Jericho Sims,TRB,UNDER,9.0,Derrick White,AST,UNDER,6.5,Devin Carter,AST,UNDER,5.5,,,,,WIN,60.0
+2026-03-29,4-pick Power Play,20.0,200.0,,,,,,,Jericho Sims,TRB,UNDER,9.0,Derrick White,AST,UNDER,6.5,Devin Carter,AST,UNDER,5.5,Jrue Holiday,PTS,UNDER,19.0,WIN,100.0
+2026-03-29,2-pick Power Play,20.0,60.0,,,,,,,Quentin Grimes,PA,OVER,12.5,Austin Reaves,PTS,UNDER,31.5,,,,,,,,,LOSS,0.0
+2026-03-29,3-pick Power Play,20.0,100.0,,,,,,,Quentin Grimes,PA,OVER,12.5,Austin Reaves,PTS,UNDER,31.5,LeBron James,PTS,UNDER,26.0,,,,,LOSS,0.0
+2026-03-29,4-pick Power Play,20.0,200.0,,,,,,,Quentin Grimes,PA,OVER,12.5,Austin Reaves,PTS,UNDER,31.5,LeBron James,PTS,UNDER,26.0,Payton Pritchard,AST,UNDER,6.5,LOSS,0.0
+2026-03-29,2-pick Power Play,20.0,60.0,,,,,,,Bennedict Mathurin,TRB,UNDER,8.5,Caris LeVert,AST,UNDER,4.5,,,,,,,,,LOSS,0.0
+,,,,,,,,,,,,,,,,,,,,,,,,,,LOSS,0.0
+2026-03-31,2-pick Power Play,20.0,60.0,,,,,,,Ausar Thompson,TRB,UNDER,8.0,Donovan Mitchell,AST,UNDER,7.0,,,,,,,,,WIN,60.0
+2026-03-31,3-pick Power Play,20.0,100.0,,,,,,,Ausar Thompson,TRB,UNDER,8.0,Donovan Mitchell,AST,UNDER,7.0,Ja'Kobe Walter,TRB,UNDER,5.0,,,,,WIN,100.0
+2026-03-31,4-pick Power Play,20.0,200.0,,,,,,,Ausar Thompson,TRB,UNDER,8.0,Donovan Mitchell,AST,UNDER,7.0,Ja'Kobe Walter,TRB,UNDER,5.0,Deni Avdija,PA,UNDER,34.5,LOSS,0.0
+2026-04-01,2-pick Power Play,20.0,60.0,,,,,,,Derrick White,PTS,UNDER,16.5,OG Anunoby,PTS,UNDER,15.5,,,,,,,,,LOSS,0.0
+2026-04-01,3-pick Power Play,20.0,100.0,,,,,,,Derrick White,PTS,UNDER,16.5,OG Anunoby,PTS,UNDER,15.5,Mikal Bridges,PRA,UNDER,22.0,,,,,LOSS,0.0
+2026-04-01,4-pick Power Play,20.0,200.0,,,,,,,Derrick White,PTS,UNDER,16.5,OG Anunoby,PTS,UNDER,15.5,Mikal Bridges,PRA,UNDER,22.0,Victor Wembanyama,PTS,OVER,24.75,LOSS,0.0
+2026-04-02,2-pick Power Play,20.0,60.0,,,,,,,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,,,,,,,,,WIN,60.0
+2026-04-02,3-pick Power Play,20.0,100.0,,,,,,,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,De'Anthony Melton,PTS,UNDER,13.5,,,,,WIN,100.0
+2026-04-02,4-pick Power Play,20.0,200.0,,,,,,,Evan Mobley,PA,UNDER,24.5,Jarrett Allen,PTS,OVER,14.0,De'Anthony Melton,PTS,UNDER,13.5,Donovan Mitchell,PA,UNDER,32.0,WIN,200.0
+2026-04-03,2-pick Power Play,20.0,60.0,,,,,,,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,,,,,,,,,LOSS,0.0
+2026-04-03,3-pick Power Play,20.0,100.0,,,,,,,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,,,,,LOSS,0.0
+2026-04-03,4-pick Power Play,20.0,200.0,,,,,,,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,Myles Turner,BLK,UNDER,1.5,LOSS,0.0
+2026-04-03,2-pick UNDER-Only,20.0,60.0,,,,,,,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,,,,,,,,,LOSS,0.0
+2026-04-03,3-pick UNDER-Only,20.0,100.0,,,,,,,Daniel Gafford,BLK,UNDER,1.5,Onyeka Okongwu,BLK,UNDER,1.5,Neemias Queta,BLK,UNDER,1.5,,,,,LOSS,0.0
+2026-04-05,2-pick Power Play,20.0,60.0,,,,,,,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,,,,,,,,,WIN,60.0
+2026-04-05,3-pick Power Play,20.0,100.0,,,,,,,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,,,,,WIN,100.0
+2026-04-05,4-pick Power Play,20.0,200.0,,,,,,,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,WIN,200.0
+2026-04-05,2-pick UNDER-Only,20.0,60.0,,,,,,,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,,,,,,,,,WIN,60.0
+2026-04-05,3-pick UNDER-Only,20.0,100.0,,,,,,,Jay Huff,BLK,UNDER,1.5,Amen Thompson,STL,UNDER,2.5,Cody Williams,BLK,UNDER,1.0,,,,,WIN,100.0
+2026-04-06,2-pick Power Play,20.0,60.0,,,,,,,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,WIN,40.0
+2026-04-06,3-pick Power Play,20.0,100.0,,,,,,,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,,,,,WIN,40.0
+2026-04-06,4-pick Power Play,20.0,200.0,,,,,,,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,Nikola Jokić,AST,UNDER,11.0,LOSS,0.0
+2026-04-06,2-pick UNDER-Only,20.0,60.0,,,,,,,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,WIN,40.0
+2026-04-06,3-pick UNDER-Only,20.0,100.0,,,,,,,Jalen Suggs,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kawhi Leonard,STL,UNDER,2.5,,,,,WIN,40.0
+2026-04-07,2-pick Power Play,20.0,60.0,,,,,,,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,LOSS,0.0
+2026-04-07,3-pick Power Play,20.0,100.0,,,,,,,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kyle Anderson,AST,UNDER,4.0,,,,,LOSS,0.0
+2026-04-07,2-pick UNDER-Only,20.0,60.0,,,,,,,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,,,,,,,,,LOSS,0.0
+2026-04-07,3-pick UNDER-Only,20.0,100.0,,,,,,,Derik Queen,BLK,UNDER,1.5,Ousmane Dieng,BLK,UNDER,1.0,Kyle Anderson,AST,UNDER,4.0,,,,,LOSS,0.0
+2026-04-08,2-pick Power Play,20.0,60.0,,,,,,,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,,,,,,,,,WIN,60.0
+2026-04-08,3-pick Power Play,20.0,100.0,,,,,,,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,Scoot Henderson,AST,UNDER,4.5,,,,,WIN,100.0
+2026-04-08,4-pick Power Play,20.0,200.0,,,,,,,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,Scoot Henderson,AST,UNDER,4.5,De'Aaron Fox,STL,UNDER,2.0,LOSS,0.0
+2026-04-08,2-pick UNDER-Only,20.0,60.0,,,,,,,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,,,,,,,,,WIN,60.0
+2026-04-08,3-pick UNDER-Only,20.0,100.0,,,,,,,Jalen Suggs,STL,UNDER,2.5,Duncan Robinson,STL,UNDER,1.5,Scoot Henderson,AST,UNDER,4.5,,,,,WIN,100.0
+2026-04-09,2-pick Power Play,20.0,60.0,,,,,,,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,,,,,,,,,LOSS,0.0
+2026-04-09,3-pick Power Play,20.0,100.0,,,,,,,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,Deandre Ayton,TRB,UNDER,8.75,,,,,LOSS,0.0
+2026-04-09,4-pick Power Play,20.0,200.0,,,,,,,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,Deandre Ayton,TRB,UNDER,8.75,Jay Huff,TRB,UNDER,6.0,LOSS,0.0
+2026-04-09,2-pick UNDER-Only,20.0,60.0,,,,,,,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,,,,,,,,,LOSS,0.0
+2026-04-09,3-pick UNDER-Only,20.0,100.0,,,,,,,Brandin Podziemski,AST,UNDER,5.5,Quenton Jackson,AST,UNDER,5.5,Deandre Ayton,TRB,UNDER,8.75,,,,,LOSS,0.0
+2026-04-10,2-pick Power Play,20.0,60.0,,,,,,,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,,,,,,,,,LOSS,0.0
+2026-04-10,3-pick Power Play,20.0,100.0,,,,,,,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,Kawhi Leonard,AST,UNDER,4.5,,,,,LOSS,0.0
+2026-04-10,4-pick Power Play,20.0,200.0,,,,,,,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,Kawhi Leonard,AST,UNDER,4.5,Nique Clifford,AST,UNDER,5.5,LOSS,0.0
+2026-04-10,2-pick UNDER-Only,20.0,60.0,,,,,,,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,,,,,,,,,LOSS,0.0
+2026-04-10,3-pick UNDER-Only,20.0,100.0,,,,,,,Jeremiah Fears,AST,UNDER,5.5,Darius Garland,AST,UNDER,7.5,Kawhi Leonard,AST,UNDER,4.5,,,,,LOSS,0.0
+2026-04-12,2-pick Power Play,20.0,60.0,0.9801,0.0,0.9801,0.3333,1.9403,38.81,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,,,,,,,,,WIN,60.0
+2026-04-12,3-pick Power Play,20.0,100.0,0.9703,0.0,0.9703,0.2,3.8515,77.03,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,Luguentz Dort,TRB,UNDER,4.0,,,,,WIN,100.0
+2026-04-12,4-pick Power Play,20.0,200.0,0.9606,0.0,0.9606,0.1,8.606,172.12,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,Luguentz Dort,TRB,UNDER,4.0,Davion Mitchell,AST,UNDER,7.5,WIN,200.0
+2026-04-12,2-pick UNDER-Only,20.0,60.0,0.9801,0.0,0.9801,0.3333,1.9403,38.81,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,,,,,,,,,WIN,60.0
+2026-04-12,3-pick UNDER-Only,20.0,100.0,0.9703,0.0,0.9703,0.2,3.8515,77.03,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,Luguentz Dort,TRB,UNDER,4.0,,,,,WIN,100.0
