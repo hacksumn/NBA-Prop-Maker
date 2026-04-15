@@ -27,10 +27,13 @@ Materialization status:
 - Branch: `master`
 - Scope: full pipeline, daily prediction, grading, and betslip construction
 - Owner: Jake
-- Last updated: 2026-04-13
+- Last updated: 2026-04-15
 
 ## What Is Working
-- Full daily pipeline was last confirmed end-to-end on `2026-04-11`; today's changes were verified with targeted tests, backtests, and live API smokes rather than a full rerun
+
+- Full daily pipeline last confirmed end-to-end on `2026-04-15` (log output above); three critical Step 6/8 bugs fixed in this session (DEC-032, DEC-033)
+- **Absence threshold (DEC-032)**: `detect_recent_absences()` now requires missed most-recent game before flagging; load-managed stars (Curry, Turner) no longer contaminate absence list or trigger luck suppression
+- **Step 8 dedup + name normalization (DEC-033)**: all layer sources deduped before merge; Layers 3/4/5 join on `player_norm` (NFKD ASCII); diacritic players (Jokić, Dončić, etc.) now get correct features instead of zeros
 - Box score ingestion (Step 1) and pick grading (Step 1.5) with live NBA API fallback
 - Betslip construction and grading (Steps 1.6-9)
 - Step 3 clean baselines use local `data/nba_data.csv` as the primary per-player game-log source and only fall back to `PlayerGameLog` when local rows are missing

@@ -1246,6 +1246,9 @@ def step8_merge_projections(errors):
         proj = pd.DataFrame(player_summaries)
         logger.info(f"  Base projections: {len(proj)} players")
 
+        # Add normalized name key to proj once — used for all name-based merges below
+        proj["player_norm"] = proj["player"].apply(_normalize_player_name)
+
         # ── Merge Layer 5: Blowout-clean baselines ────────────────────────────
         if CLEAN_BASELINES.exists():
             logger.info("  Merging Layer 5 (blowout-clean baselines)...")
@@ -1254,8 +1257,10 @@ def step8_merge_projections(errors):
                  "pts_delta", "reb_delta", "ast_delta",
                  "n_full", "n_partial", "n_heavy", "n_exclude"]
             ].rename(columns={"player_name": "player"})
-            bl = bl.drop_duplicates(subset=["player"], keep="first")
-            proj = proj.merge(bl, on="player", how="left")
+            bl["player_norm"] = bl["player"].apply(_normalize_player_name)
+            bl = bl.drop_duplicates(subset=["player_norm"], keep="first")
+            # Merge on normalized name to handle diacritics (e.g. Jokić vs Jokic)
+            proj = proj.merge(bl.drop(columns=["player"]), on="player_norm", how="left")
             merged_count = proj["clean_pts"].notna().sum()
             _ok(f"Layer 5 merged: {merged_count} players have blowout-clean baselines")
         else:
@@ -1267,15 +1272,17 @@ def step8_merge_projections(errors):
             adj = pd.read_csv(PLAYER_ADJ_PPP)
             adj_cols = [c for c in ["adj_ppp", "raw_ppp", "avg_opp_def_rtg",
                                      "total_possessions"] if c in adj.columns]
-            # Merge on player_id (adj_ppp uses abbreviated names — player_id is reliable)
+            # Merge on player_id (most reliable — not affected by diacritics)
             if "player_id" in adj.columns and "player_id" in proj.columns:
                 adj["player_id"] = pd.to_numeric(adj["player_id"], errors="coerce")
                 proj["player_id"] = pd.to_numeric(proj["player_id"], errors="coerce")
+                adj = adj.drop_duplicates(subset=["player_id"], keep="first")
                 proj = proj.merge(adj[["player_id"] + adj_cols], on="player_id", how="left")
             else:
-                # fallback: try full name match via player_name column
-                adj["player"] = adj["player_name"] if "player_name" in adj.columns else ""
-                proj = proj.merge(adj[["player"] + adj_cols], on="player", how="left")
+                # fallback: normalized name match
+                adj["player_norm"] = (adj["player_name"] if "player_name" in adj.columns else adj.get("player", pd.Series(dtype=str))).apply(_normalize_player_name)
+                adj = adj.drop_duplicates(subset=["player_norm"], keep="first")
+                proj = proj.merge(adj[["player_norm"] + adj_cols], on="player_norm", how="left")
             merged_count = proj["adj_ppp"].notna().sum() if "adj_ppp" in proj.columns else 0
             _ok(f"Layer 2 merged: {merged_count} players have adj_ppp")
         else:
@@ -1285,14 +1292,16 @@ def step8_merge_projections(errors):
         if PLAYER_PROFILES.exists():
             logger.info("  Merging Layer 3 (usage profiles)...")
             prof = pd.read_csv(PLAYER_PROFILES)
-            # profiles uses player_name (lowercase); rename to player for merge
+            # profiles uses player_name (lowercase); normalize for diacritic-safe merge
             if "player_name" in prof.columns:
                 prof = prof.rename(columns={"player_name": "player"})
             elif "PLAYER_NAME" in prof.columns:
                 prof = prof.rename(columns={"PLAYER_NAME": "player"})
-            usage_cols = [c for c in ["player", "usg_pct", "ts_pct", "role_tier",
+            prof["player_norm"] = prof["player"].apply(_normalize_player_name)
+            prof = prof.drop_duplicates(subset=["player_norm"], keep="first")
+            usage_cols = [c for c in ["player_norm", "usg_pct", "ts_pct", "role_tier",
                                        "pts_per_poss", "ast_per_poss"] if c in prof.columns]
-            proj = proj.merge(prof[usage_cols], on="player", how="left")
+            proj = proj.merge(prof[usage_cols], on="player_norm", how="left")
             merged_count = proj["usg_pct"].notna().sum() if "usg_pct" in proj.columns else 0
             _ok(f"Layer 3 merged: {merged_count} players have usage profiles")
         else:
@@ -1307,10 +1316,12 @@ def step8_merge_projections(errors):
                 if col in luck.columns:
                     luck["player"] = luck[col]
                     break
-            luck_cols = [c for c in ["player", "total_luck_score", "luck_label",
+            luck["player_norm"] = luck["player"].apply(_normalize_player_name)
+            luck = luck.drop_duplicates(subset=["player_norm"], keep="first")
+            luck_cols = [c for c in ["player_norm", "total_luck_score", "luck_label",
                                       "pts_luck_adj", "fg3_luck_score", "ft_luck_score",
                                       "efg_luck_score"] if c in luck.columns]
-            proj = proj.merge(luck[luck_cols], on="player", how="left")
+            proj = proj.merge(luck[luck_cols], on="player_norm", how="left")
             merged_count = proj["total_luck_score"].notna().sum() if "total_luck_score" in proj.columns else 0
             _ok(f"Layer 4 merged: {merged_count} players have luck scores")
         else:

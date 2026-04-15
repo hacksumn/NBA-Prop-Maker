@@ -647,25 +647,39 @@ def detect_recent_absences(
         return []
 
     # Players who appeared in at least one game
-    appeared = set(gl["PLAYER_ID"].unique())
     games_played = gl.groupby("PLAYER_ID")["GAME_ID"].nunique()
+    # Track last game date per player to distinguish injury from load management
+    player_last_date = gl.groupby("PLAYER_ID")["game_date"].max()
+    most_recent_team_date = recent_dates[-1] if len(recent_dates) > 0 else None
 
-    # Players on roster who appeared in fewer than last_n_games - 2 games
+    # Flag players with low game count who also missed the most recent team game.
+    # If a player has low gp BUT played in the most recent game, that signals
+    # deliberate load management (e.g. Curry, Turner) — do NOT flag them.
     likely_out = []
     for pid in team_players:
         gp = games_played.get(pid, 0)
-        if gp <= max(1, last_n_games - 3):
-            row = team_roster.loc[team_roster["player_id"] == pid].head(1)
-            if not row.empty:
-                row = row.iloc[0]
-                likely_out.append({
-                    "player_id": pid,
-                    "player_name": row["player_name"],
-                    "team_abbr": team_abbr,
-                    "recent_gp": gp,
-                    "latest_played_team": row.get("latest_played_team"),
-                    "latest_game_date": row.get("latest_game_date"),
-                })
+        if gp > max(1, last_n_games - 3):
+            continue  # played enough games overall — not an absence concern
+
+        # Recency gate: if player appeared in the most recent team game, skip.
+        # Low gp + played recently = rest/load management, not structural absence.
+        if most_recent_team_date is not None and gp > 0:
+            last_played = player_last_date.get(pid, pd.NaT)
+            if pd.notna(last_played) and last_played >= most_recent_team_date:
+                continue  # played in the most recent game → load management
+
+        # Gate passed — flag this player as likely absent
+        row = team_roster.loc[team_roster["player_id"] == pid].head(1)
+        if not row.empty:
+            row = row.iloc[0]
+            likely_out.append({
+                "player_id": pid,
+                "player_name": row["player_name"],
+                "team_abbr": team_abbr,
+                "recent_gp": gp,
+                "latest_played_team": row.get("latest_played_team"),
+                "latest_game_date": row.get("latest_game_date"),
+            })
 
     if likely_out:
         log.info(f"  Likely absent players for {team_abbr}:")

@@ -1202,6 +1202,81 @@ This preserves evaluation integrity. The whole point of the market-type work was
 
 ---
 
+## [DEC-032] Absence threshold: require missed most-recent game, not just low total gp
+
+- Date: 2026-04-15
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+`detect_recent_absences()` in `usage_injury_model.py` flagged any player with `gp <= max(1, last_n_games - 3)` (i.e. ≤ 2 of 5 recent games). This threshold was too broad: it treated load-managed stars (Curry playing 2 of 5 while appearing in the most recent game) as structurally absent and fed that signal into Step 8 luck suppression and the projection display.
+
+### Decision
+
+Add a recency gate after the gp threshold: if a player with low gp appeared in the **most recent team game date** (`last_played >= most_recent_team_date`), skip the flag — they are being rested, not injured. Only flag when gp is low **and** the player was absent from the most recent game.
+
+Key logic:
+
+- `gp > max(1, last_n_games - 3)` → continue (played enough overall)
+- `gp > 0` and `last_played >= most_recent_team_date` → continue (played recently = load management)
+- Otherwise → flag as likely absent
+
+### Why
+
+Structural absences (injury, illness, trade) cluster at the end of the observation window. Load management produces scattered misses across the window. A player who played the last game is available for the next game regardless of how many games they skipped earlier in the window.
+
+### Consequences
+
+- Curry-type rest patterns no longer contaminate the absence list or trigger luck suppression
+- Players genuinely injured (missed last 1-2 games) are still correctly flagged
+- Step 8 absence-risk gate (`absence_recent_gp <= 2`) now reflects actual availability concern, not general game-load scheduling
+
+### Alternatives Considered
+
+- Check last-2-games instead of last-1 (more conservative; rejected — adds complexity with minimal benefit given the gp≤2 base gate)
+- Raise the gp threshold to ≤1 (rejected — misses players who played once long ago and have been injured since)
+
+---
+
+## [DEC-033] Step 8 layer merges: deduplicate source files and use normalized names as join keys
+
+- Date: 2026-04-15
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+Two bugs were identified in `step8_merge_projections` in `run_daily.py`:
+
+1. **Duplicate rows**: Only Layer 5 deduped its source file before merging. Layers 3 and 4 did not, so if `player_profiles.csv` or `player_luck_scores.csv` had duplicate player rows, the merge produced duplicate rows in `proj`. The final `proj.drop_duplicates(subset=["player"])` masked this by keeping the first occurrence, but the wrong row could be first.
+
+2. **17.7% missing features**: All name-based merges (Layers 3, 4, 5) used raw player name strings as join keys. Players with diacritics (Nikola Jokić, Luka Dončić, etc.) stored differently in different source CSVs (with vs. without accent marks) produced NaN rows in `proj`. Those NaN cells were filled with zeros downstream, corrupting predictions for high-value players.
+
+### Decision
+
+1. Add `drop_duplicates(subset=["player_norm"], keep="first")` to all source DataFrames before merging in Layers 2, 3, 4, and 5.
+2. Add `proj["player_norm"] = proj["player"].apply(_normalize_player_name)` once before the Layer 5 merge, then use `player_norm` (NFKD ASCII-stripped, lowercase) as the join key for all three name-based layers (5, 3, 4).
+3. Layer 2 (`adj_ppp`) keeps `player_id` as the primary join key (more reliable); add `drop_duplicates(subset=["player_id"])` there.
+
+### Why
+
+`_normalize_player_name` already existed in `run_daily.py` (used at line 1352 for the live injury merge) and applies the same NFKD normalization used elsewhere in `nba_props.py`. Using it consistently across all layer merges ensures diacritic-variant names resolve to the same key regardless of source encoding. Deduping before merge (not only after) prevents the first-merge-wins problem.
+
+### Consequences
+
+- Layer feature miss rate drops from ~17.7% to near-zero for diacritic-affected players
+- Luka Dončić, Nikola Jokić, and similar names now get their Layer 3/4/5 features instead of zeros
+- No schema changes — `player_norm` is an intermediate merge key, not written to the final CSV
+- The post-merge `drop_duplicates(subset=["player"])` remains as a final safety net
+
+### Alternatives Considered
+
+- Manual name mapping table (rejected — brittle, hard to maintain)
+- Merge on `player_id` for all layers (rejected — Layers 3, 4, 5 source CSVs don't reliably carry NBA API player IDs)
+
+---
+
 ## 2026-04-15 — April 14 Picks Missing from picks_history.csv (Manual Backfill)
 
 ### Context
