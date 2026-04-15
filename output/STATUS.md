@@ -32,6 +32,7 @@ Materialization status:
 ## What Is Working
 
 - Full daily pipeline last confirmed end-to-end on `2026-04-15` (log output above); three critical Step 6/8 bugs fixed in this session (DEC-032, DEC-033)
+- **UNDER-only strategy locked (DEC-034)**: fallback policy now hard-blocks OVER for pts/pra/pr/pa/stl/blk; dynamic policy adds matching `_over_hardblocked` gate; `allow_structural_micro_props=True` re-enables STL/BLK structural UNDER picks (73%/78% training hit rate). Only TRB/AST/TOV OVER remain mathematically eligible.
 - **Absence threshold (DEC-032)**: `detect_recent_absences()` now requires missed most-recent game before flagging; load-managed stars (Curry, Turner) no longer contaminate absence list or trigger luck suppression
 - **Step 8 dedup + name normalization (DEC-033)**: all layer sources deduped before merge; Layers 3/4/5 join on `player_norm` (NFKD ASCII); diacritic players (Jokić, Dončić, etc.) now get correct features instead of zeros
 - Box score ingestion (Step 1) and pick grading (Step 1.5) with live NBA API fallback

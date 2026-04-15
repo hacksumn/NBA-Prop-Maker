@@ -68,8 +68,9 @@ CONFIG = {
     'live_pick_meta_floor_max': 60.0,      # Prevent over-tightening on thin slates
     'live_pick_meta_floor_slack': 10.0,    # Allow some slack below prop policy floor
     'live_pick_volatility_ceiling_mult': 1.0,  # 1.0 = use learned p75/high-vol reference directly
-    'live_pick_estimated_hit_rate_floor': 65.0,  # Publish only when learned hit rate clears this bar
-    'live_pick_market_model_only': True,   # Do not publish volume/emergency fill picks on the official card
+    'live_pick_estimated_hit_rate_floor': 54.5,  # Lowered from 65.0: true break-even for PrizePicks
+    'live_pick_market_model_only': False,  # Allow all pick sources to compete on merit, not just market_model
+    'allow_structural_micro_props': True,  # STL/BLK structural UNDER: 74%/79% training hit — re-enabled 2026-04-15 (DEC-034)
 
     # Targets
     'targets': ['pts', 'trb', 'ast', 'pra', 'pr', 'pa'],
@@ -1045,6 +1046,8 @@ def _live_card_meta_floor(prop: str,
     quality = quality_policy or _load_target_quality_policy()
     prop_key = str(prop or '').lower()
     policy = quality.get(prop_key, {})
+    if str(policy.get('meta_gate_mode', 'hard')).lower() == 'off':
+        return 0.0
     base_floor = float(policy.get('min_meta_prob', 0.55)) * 100.0
     floor = base_floor - float(CONFIG.get('live_pick_meta_floor_slack', 10.0))
     floor = max(float(CONFIG.get('live_pick_meta_floor_min', 45.0)), floor)
@@ -1074,6 +1077,9 @@ def _apply_live_accuracy_gates(picks_df: pd.DataFrame,
     working['meta_floor'] = working.get('prop', pd.Series('', index=working.index)).apply(
         lambda prop: _live_card_meta_floor(str(prop), quality)
     )
+    working['meta_gate_mode'] = working.get('prop', pd.Series('', index=working.index)).apply(
+        lambda prop: str(quality.get(str(prop).lower(), {}).get('meta_gate_mode', 'hard')).lower()
+    )
     working['volatility_ceiling'] = working.get('prop', pd.Series('', index=working.index)).apply(
         lambda prop: _live_card_volatility_ceiling(str(prop))
     )
@@ -1083,8 +1089,14 @@ def _apply_live_accuracy_gates(picks_df: pd.DataFrame,
         working.get('estimated_hit_rate', pd.Series(np.nan, index=working.index)),
         errors='coerce',
     )
-    working['estimated_hit_rate_floor'] = float(CONFIG.get('live_pick_estimated_hit_rate_floor', 65.0))
-    working['meta_gate_pass'] = meta_vals.notna() & (meta_vals >= working['meta_floor'])
+    # Lowered from 65.0 to 54.5: the old floor was unrealistically high,
+    # causing every pick to fail accuracy_gate_pass and fall through to
+    # relaxed tiers. 54.5% is the true break-even point for PrizePicks.
+    working['estimated_hit_rate_floor'] = float(CONFIG.get('live_pick_estimated_hit_rate_floor', 54.5))
+    working['meta_gate_pass'] = (
+        working['meta_gate_mode'].eq('off') |
+        (meta_vals.notna() & (meta_vals >= working['meta_floor']))
+    )
     working['volatility_gate_pass'] = vol_vals.notna() & (vol_vals <= working['volatility_ceiling'])
     working['estimated_hit_rate_pass'] = (
         estimated_vals.notna() &
@@ -3720,6 +3732,9 @@ def _attach_market_model_scores(pred_df: pd.DataFrame,
                 market_block,
                 raw_edge=raw_edge,
                 market_edge_pred=pd.Series(edge_pred, index=market_block.index),
+                p_over_raw=merged.get(f'{target}_p_over_raw'),
+                p_over_cal=merged.get(f'{target}_p_over_cal'),
+                sigma=merged.get(f'{target}_sigma'),
             )
             meta_features = _model_feature_names(meta_models[target]) or market_feature_sets.get('meta', {}).get(target, list(meta_block.columns))
             for col in meta_features:
@@ -5238,19 +5253,25 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
                                  edge_analysis: Optional[Dict[str, Dict]] = None) -> Dict[str, Dict]:
     """Build per-target betting policy from a results/edge-analysis snapshot."""
     fallback = {
-        # PTS OVER disabled: 46% forward WR (137 picks), selection-induced upward bias (+2.8 pts on OVER),
-        # near-zero feature signal (confidence r=0.02), market too efficient on points.
-        # PTS UNDER marginal (54.5% forward WR, 132 picks) — allowed at higher edge bar.
-        # min_edge_over=9.9 acts as a hard block; dynamic policy will set allow_over=False when eval data present.
-        'pts': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.60, 'min_meta_prob': 0.58, 'min_edge': 2.5, 'min_edge_over': 9.9, 'min_edge_under': 2.5, 'rmse': 5.0},
-        'trb': {'allowed': False, 'allow_over': False, 'allow_under': False, 'shrunk_acc': 0.54, 'min_prob': 0.62, 'min_meta_prob': 0.59, 'min_edge': 1.0, 'min_edge_over': 1.4, 'min_edge_under': 1.2, 'rmse': 2.5},
-        'ast': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.58, 'min_prob': 0.60, 'min_meta_prob': 0.57, 'min_edge': 0.8, 'min_edge_over': 1.6, 'min_edge_under': 0.9, 'rmse': 1.8},
-        'pra': {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.62, 'min_prob': 0.59, 'min_meta_prob': 0.56, 'min_edge': 2.5, 'min_edge_over': 2.5, 'min_edge_under': 2.8, 'rmse': 6.9},
-        'pr':  {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.63, 'min_prob': 0.59, 'min_meta_prob': 0.56, 'min_edge': 2.2, 'min_edge_over': 2.3, 'min_edge_under': 2.6, 'rmse': 6.3},
-        'pa':  {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.62, 'min_prob': 0.59, 'min_meta_prob': 0.56, 'min_edge': 2.0, 'min_edge_over': 2.3, 'min_edge_under': 2.4, 'rmse': 5.8},
-        'stl': {'allowed': False, 'allow_over': False, 'allow_under': False, 'shrunk_acc': 0.57, 'min_prob': 0.62, 'min_meta_prob': 0.60, 'min_edge': 0.5, 'min_edge_over': 0.8, 'min_edge_under': 0.8, 'rmse': 0.9},
-        'blk': {'allowed': False, 'allow_over': False, 'allow_under': False, 'shrunk_acc': 0.56, 'min_prob': 0.64, 'min_meta_prob': 0.61, 'min_edge': 0.5, 'min_edge_over': 0.8, 'min_edge_under': 0.8, 'rmse': 0.75},
-        'tov': {'allowed': False, 'allow_over': False, 'allow_under': False, 'shrunk_acc': 0.58, 'min_prob': 0.61, 'min_meta_prob': 0.58, 'min_edge': 0.8, 'min_edge_over': 1.2, 'min_edge_under': 1.0, 'rmse': 1.1},
+        # Fallback defaults — OVER permanently blocked on props with sustained sub-breakeven
+        # live performance (DEC-034). Dynamic policy tightens further via training metrics.
+        # OVER blocked props (live evidence):
+        #   pts  OVER: 46.0% live (137 picks), clv_corr=0.068 — no market correlation
+        #   pra  OVER: 48.0% live (152 picks), clv_corr=0.055 — weakest CLV in dataset
+        #   pr   OVER: 47.8% live (134 picks), clv_corr=0.097
+        #   pa   OVER: 52.5% live (118 picks), clv_corr=0.084 — near breakeven, not worth it
+        #   blk  OVER: 33.3% live (n=222 training) — actively harmful
+        #   stl  OVER: 61.0% (n=146 training) — tiny sample, insufficient; block pending evidence
+        # UNDER allowed — all props have confirmed UNDER edge (56–67% live, 63–79% training)
+        'pts': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 2.0, 'min_edge_over': 9.9, 'min_edge_under': 2.0, 'rmse': 5.0},
+        'trb': {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 0.8, 'min_edge_over': 1.0, 'min_edge_under': 0.8, 'rmse': 2.5},
+        'ast': {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 0.6, 'min_edge_over': 0.8, 'min_edge_under': 0.6, 'rmse': 1.8},
+        'pra': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 2.0, 'min_edge_over': 9.9, 'min_edge_under': 2.0, 'rmse': 6.9},
+        'pr':  {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 1.8, 'min_edge_over': 9.9, 'min_edge_under': 1.8, 'rmse': 6.3},
+        'pa':  {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 1.5, 'min_edge_over': 9.9, 'min_edge_under': 1.5, 'rmse': 5.8},
+        'stl': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 0.4, 'min_edge_over': 9.9, 'min_edge_under': 0.4, 'rmse': 0.9},
+        'blk': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 0.3, 'min_edge_over': 9.9, 'min_edge_under': 0.3, 'rmse': 0.75},
+        'tov': {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.57, 'min_meta_prob': 0.55, 'min_edge': 0.5, 'min_edge_over': 0.8, 'min_edge_under': 0.5, 'rmse': 1.1},
     }
 
     results = results or {}
@@ -5286,6 +5307,7 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
         market_hit = float(market_hit) if market_hit is not None else None
         meta_auc = float(meta_summary.get('auc')) if meta_summary.get('auc') is not None else None
         meta_top_hit = float(meta_summary.get('top_prob_hit_rate')) if meta_summary.get('top_prob_hit_rate') is not None else None
+        meta_positive_rate = float(meta_summary.get('positive_rate')) if meta_summary.get('positive_rate') is not None else None
         clv_corr = edge_res.get('clv_corr')
         clv_corr = float(clv_corr) if clv_corr is not None else 0.0
 
@@ -5352,6 +5374,21 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             meta_blend_weight = 0.10
             meta_conf_weight = 0.04
 
+        meta_signal_lift = (
+            meta_top_hit - meta_positive_rate
+            if meta_top_hit is not None and meta_positive_rate is not None
+            else None
+        )
+        meta_is_unreliable = (
+            meta_auc is not None and meta_auc < 0.52 and
+            (meta_signal_lift is None or meta_signal_lift < 0.015)
+        )
+        if meta_is_unreliable:
+            meta_gate_mode = 'off'
+            meta_blend_weight = 0.0
+            meta_conf_weight = 0.0
+            min_meta_prob = 0.50
+
         baseline_allowed = (
             n_real >= 1500 and
             shrunk_acc >= 0.56 and
@@ -5402,25 +5439,18 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
         allow_under = (
             allowed and
             under_n >= 300 and
-            under_hit is not None and under_hit >= 0.60
+            under_hit is not None and under_hit >= 0.52
         )
-        # PTS UNDER: lower hit threshold (0.54 vs 0.60) when pts_under_tracking_allowed
-        if stat == 'pts' and pts_under_tracking_allowed and not allow_under:
-            allow_under = (
-                under_n >= 300 and
-                under_hit is not None and under_hit >= 0.54
-            )
+        # OVER blocked permanently for props with sustained below-breakeven live evidence.
+        # Cross-target OVER: 48.3% training, all live OVER rates sub-breakeven except TRB/AST.
+        # Dynamic gate keeps OVER off unless over_hit >= 0.52 AND no fallback hard-block.
+        _over_hardblocked = stat in ('pts', 'pra', 'pr', 'pa', 'stl', 'blk')
         allow_over = (
+            not _over_hardblocked and
             allowed and
-            over_n >= 300 and
-            over_hit is not None and over_hit >= 0.60 and
-            strong_n >= 250
+            over_n >= 200 and
+            over_hit is not None and over_hit >= 0.52
         )
-        # PTS OVER: permanently blocked regardless of dynamic metrics.
-        # Forward WR=46% (137 picks). Selection-induced bias means any high-edge
-        # OVER pick is most likely the model being fooled by outlier game noise.
-        if stat == 'pts':
-            allow_over = False
 
         min_edge_under = min_edge
         if under_0_1_hit is not None and under_0_1_hit < 0.56:
@@ -5430,14 +5460,12 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
 
         min_edge_over = min_edge
         if over_0_1_hit is not None and over_0_1_hit < 0.53:
-            min_edge_over += 0.35
-        if over_1_2_hit is not None and over_1_2_hit < 0.58:
             min_edge_over += 0.20
-        if over_hit is not None and over_hit < 0.62:
+        if over_1_2_hit is not None and over_1_2_hit < 0.58:
             min_edge_over += 0.10
 
         if not allow_over:
-            min_edge_over = max(min_edge_over, min_edge + 0.50)
+            min_edge_over = max(min_edge_over, min_edge + 0.25)
         if not allow_under:
             min_edge_under = max(min_edge_under, min_edge + 0.30)
         elif tracking_under_allowed and not allow_over:
@@ -5445,6 +5473,9 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             min_meta_prob = min(min_meta_prob, 0.56)
             min_edge_under = min(min_edge_under, max(0.60, rmse * 0.30))
 
+        # Priority under lane REMOVED: it was artificially boosting TRB/AST UNDERs
+        # and causing all picks to cluster on the same prop type.
+        # All props now compete on equal footing based on edge quality.
         priority_under_lane = False
         priority_under_min_edge = min_edge_under
         priority_under_support_gap = 0.0
@@ -5453,23 +5484,6 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
         priority_under_selection_priority = 0.0
         priority_under_require_l10 = True
         priority_under_require_l5 = False
-        if stat in {'ast', 'trb'} and allow_under:
-            under_hit_floor = 0.64 if stat == 'ast' else 0.61
-            under_01_floor = 0.63 if stat == 'ast' else 0.58
-            under_12_floor = 0.66 if stat == 'ast' else 0.64
-            priority_under_lane = (
-                under_n >= 800 and
-                under_hit is not None and under_hit >= under_hit_floor and
-                under_0_1_hit is not None and under_0_1_hit >= under_01_floor and
-                under_1_2_hit is not None and under_1_2_hit >= under_12_floor
-            )
-            if priority_under_lane:
-                priority_under_min_edge = max(min_edge_under, 0.85 if stat == 'ast' else 0.90)
-                priority_under_support_gap = 0.60 if stat == 'ast' else 0.75
-                priority_under_conf_bonus = 0.045 if stat == 'ast' else 0.030
-                priority_under_rank_bonus = 0.035 if stat == 'ast' else 0.025
-                priority_under_selection_priority = 1.00 if stat == 'ast' else 0.70
-                priority_under_require_l5 = True
 
         policy[stat] = {
             'allowed': allowed,
@@ -5497,6 +5511,9 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             'market_hit': round(market_hit, 4) if market_hit is not None else None,
             'meta_auc': round(meta_auc, 4) if meta_auc is not None else None,
             'meta_top_hit': round(meta_top_hit, 4) if meta_top_hit is not None else None,
+            'meta_positive_rate': round(meta_positive_rate, 4) if meta_positive_rate is not None else None,
+            'meta_signal_lift': round(meta_signal_lift, 4) if meta_signal_lift is not None else None,
+            'meta_is_unreliable': meta_is_unreliable,
             'priority_under_lane': priority_under_lane,
             'priority_under_min_edge': round(priority_under_min_edge, 3),
             'priority_under_support_gap': round(priority_under_support_gap, 3),
@@ -6008,6 +6025,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             meta_gate_mode = str(quality[prop].get('meta_gate_mode', 'hard')).lower()
             meta_blend_weight = float(quality[prop].get('meta_blend_weight', 0.35))
             meta_conf_weight = float(quality[prop].get('meta_conf_weight', 0.10))
+            if meta_gate_mode == 'off':
+                meta_prob = None
             if (not use_calibrated_prob and
                     CONFIG.get('require_meta_for_live_picks', False) and
                     meta_prob is None and meta_gate_mode == 'hard'):
@@ -6019,7 +6038,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             market_prob = 1.0 / (1.0 + math.exp(-abs(market_edge_pred if market_edge_pred is not None else combined_edge) / rmse))
             if use_calibrated_prob:
                 dir_prob = dir_prob
-            elif meta_prob is not None:
+            elif meta_prob is not None and meta_gate_mode != 'off' and meta_blend_weight > 0:
                 market_blend_weight = 0.15 if meta_gate_mode == 'hard' else 0.20
                 model_blend_weight = max(0.0, 1.0 - meta_blend_weight - market_blend_weight)
                 dir_prob = (
@@ -6043,7 +6062,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if l5_agrees is False:
                 min_prob += 0.02
             min_meta_prob = float(quality[prop].get('min_meta_prob', 0.55))
-            if not use_calibrated_prob:
+            if not use_calibrated_prob and meta_gate_mode != 'off':
                 if meta_prob is None:
                     if meta_gate_mode == 'medium':
                         min_prob += 0.01
@@ -6371,6 +6390,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     if meta_prob_fill_raw is not None and not pd.isna(meta_prob_fill_raw)
                     else None
                 )
+                if str(quality[prop].get('meta_gate_mode', 'hard')).lower() == 'off':
+                    meta_prob_fill = None
                 if meta_prob_fill is not None and meta_prob_fill < 0.48:
                     continue
 
@@ -6536,6 +6557,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     if meta_prob_raw is not None and not pd.isna(meta_prob_raw)
                     else None
                 )
+                if str(quality[prop].get('meta_gate_mode', 'hard')).lower() == 'off':
+                    meta_prob = None
                 if meta_prob is not None and meta_prob < 0.45:
                     continue
 
@@ -6791,19 +6814,15 @@ def build_live_pick_card(picks_df: pd.DataFrame,
             working[gate_col] = False
 
     market_model_mask = working['pick_source'].astype(str).eq('market_model')
-    all_rows_mask = pd.Series(True, index=working.index)
+    # Simplified tier cascade: 5 tiers instead of 11.
+    # No more 'last_resort' catch-all — if nothing passes the gates,
+    # we return fewer picks rather than publishing garbage.
     tier_specs = [
-        ('core_lane', working['accuracy_gate_pass'] & working['top_tier_lane_pass']),
         ('core', working['accuracy_gate_pass']),
-        ('market_lane_relaxed', market_model_mask & working['meta_gate_pass'] & working['volatility_gate_pass'] & working['top_tier_lane_pass']),
-        ('market_relaxed', market_model_mask & working['meta_gate_pass'] & working['volatility_gate_pass']),
-        ('market_lane_meta_only', market_model_mask & working['meta_gate_pass'] & working['top_tier_lane_pass']),
-        ('market_meta_only', market_model_mask & working['meta_gate_pass']),
-        ('fill_lane_structured', working['meta_gate_pass'] & working['volatility_gate_pass'] & working['top_tier_lane_pass']),
-        ('fill_structured', working['meta_gate_pass'] & working['volatility_gate_pass']),
-        ('fill_lane_meta_only', working['meta_gate_pass'] & working['top_tier_lane_pass']),
-        ('fill_meta_only', working['meta_gate_pass']),
-        ('last_resort', all_rows_mask),
+        ('market_structured', market_model_mask & working['meta_gate_pass'] & working['volatility_gate_pass']),
+        ('market_meta', market_model_mask & working['meta_gate_pass']),
+        ('structured', working['meta_gate_pass'] & working['volatility_gate_pass']),
+        ('meta_only', working['meta_gate_pass']),
     ]
 
     goal = max(target_picks, min_picks)
@@ -9430,7 +9449,7 @@ def main():
                     pred_s = f"{float(pred):>5.1f}"
                     edge_s = f"{float(edge):>+5.1f}"
                     conf_s = f"{float(conf):>4.0f}%"
-                    hit_s  = f"{float(hit)*100:>4.0f}%" if hit is not None and not pd.isna(hit) else "  -- "
+                    hit_s  = f"{float(hit):>4.0f}%" if hit is not None and not pd.isna(hit) else "  -- "
                 except Exception:
                     line_s = pred_s = edge_s = conf_s = hit_s = "  ?  "
                 print(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {pred_s} {edge_s} {conf_s} {hit_s}  {tier}{extras_str}")

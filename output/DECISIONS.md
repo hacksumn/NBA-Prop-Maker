@@ -1397,3 +1397,63 @@ A model retrain with more data and better features (FGA, usage rate) could achie
 - PTS OVER is now permanently hard-blocked (not just dynamically)
 - PTS UNDER gate is in place for future auto-enable when data quality improves
 - Fallback is consistent with forward-observed performance
+
+---
+
+## [DEC-034] UNDER-only strategy: block OVER on all composite/defensive props; re-enable STL/BLK structural picks
+
+- Date: 2026-04-15
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+Live performance analysis across 1,313 graded picks revealed a structural asymmetry:
+
+| Direction | Live WR | Training WR |
+|-----------|---------|-------------|
+| UNDER     | 58.9%   | 63.1%       |
+| OVER      | 48.5%   | 48.3%       |
+
+OVER performance by prop (live graded picks):
+
+| Prop | Live OVER WR | n  | clv_corr |
+|------|--------------|----|----------|
+| PTS  | 46.0%        | 137 | 0.068   |
+| PRA  | 48.0%        | 152 | 0.055   |
+| PR   | 47.8%        | 134 | 0.097   |
+| PA   | 52.5%        | 118 | 0.084   |
+| BLK  | 33.3% (training, n=222) | — | 0.243 |
+| STL  | 61.0% (training, n=146) | — | 0.324 |
+
+The fallback quality policy still had `allow_over: True` for all props. If training data is ever missing or sparse, the fallback would allow OVER picks on props with confirmed sub-breakeven live performance. The dynamic policy already blocked most of these (over_hit < 0.52 threshold), but the fallback was a gap.
+
+Additionally, `allow_structural_micro_props` was set to `False`, silently disabling STL/BLK structural UNDER picks despite their 74%/79% training hit rates.
+
+### Decision
+
+1. **Fallback policy**: Set `allow_over: False` and `min_edge_over: 9.9` for `pts`, `pra`, `pr`, `pa`, `stl`, `blk` — permanently blocked in the safe-default path.
+2. **Dynamic policy**: Add `_over_hardblocked = stat in ('pts', 'pra', 'pr', 'pa', 'stl', 'blk')` gate that short-circuits `allow_over = False` regardless of training metrics. This prevents re-enabling if model performance fluctuates.
+3. **Keep `trb` and `ast` OVER eligible**: Both have positive clv_corr and TRB OVER is 50% (small n). The mathematical gate (over_hit >= 0.52) still filters them. Not hard-blocked.
+4. **Re-enable `allow_structural_micro_props: True`**: STL/BLK structural UNDER picks (L10 avg < line = UNDER) are restored. These use the 73%/78% historical win rate as confidence, clear the 70-confidence betslip gate, and represent the system's highest-confidence pick class.
+
+### Why
+
+- PrizePicks lines are systematically set too high. Players underperform their lines far more often than they exceed them. The OVER models are fighting the structural bias of the market.
+- clv_corr for all blocked OVER props is near zero — the market is not providing information that improves OVER predictions.
+- The composite props (PRA/PR/PA) are sums of stats the model already tracks individually. The UNDER edge on composites comes from each component having independent downside risk. The OVER requires ALL components to exceed expectations simultaneously — that's a product of probabilities, not a sum.
+- STL/BLK structural picks don't need a model. The market sets lines at 1.5 for players averaging <1.0. The pick writes itself.
+
+### Consequences
+
+- OVER picks will only appear for TRB and AST (and TOV), and only when training data confirms over_hit >= 0.52
+- STL/BLK structural UNDER picks re-enter the card, with confidence = historical win rate (73/78%)
+- These picks are betslip-eligible since they clear the hard 70-confidence floor
+- Expected effect: cards become near-exclusively UNDER; slip quality improves
+
+### Alternatives Considered
+
+- Block OVER for TRB/AST too (rejected — insufficient evidence yet; TRB/AST OVER data is ambiguous at small live sample)
+- Add explicit UNDER-only config flag (considered; rejected — the per-prop gates are more precise and don't require a global kill switch that could interfere with future re-evaluation)
+
+---
