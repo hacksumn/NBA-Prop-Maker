@@ -266,7 +266,13 @@ def _summarise_live_pick_outputs():
             try:
                 line_s = f"{float(line):>5.1f}"
                 conf_s = f"{float(conf):>4.0f}%"
-                hit_s  = f"{float(hit)*100:>4.0f}%" if hit is not None and str(hit) not in ("", "nan") else "  -- "
+                if hit is not None and str(hit) not in ("", "nan"):
+                    hit_val = float(hit)
+                    if 0.0 <= hit_val <= 1.0:
+                        hit_val *= 100.0
+                    hit_s = f"{hit_val:>4.0f}%"
+                else:
+                    hit_s = "  -- "
             except Exception:
                 line_s = conf_s = hit_s = "  ?  "
             logger.info(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {conf_s} {hit_s}  {tier}")

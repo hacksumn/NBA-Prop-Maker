@@ -567,18 +567,98 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
     return block.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
+def _combine_live_edges(raw_edge: pd.Series,
+                        market_edge_pred: pd.Series,
+                        raw_weight: float = 0.45,
+                        market_weight: float = 0.55) -> pd.Series:
+    raw_edge = pd.to_numeric(raw_edge, errors='coerce').fillna(0.0)
+    market_edge_pred = pd.to_numeric(market_edge_pred, errors='coerce').fillna(0.0)
+    return raw_edge * raw_weight + market_edge_pred * market_weight
+
+
+def _build_meta_target_bundle(raw_edge: pd.Series,
+                              market_edge_pred: pd.Series,
+                              actual_edge: pd.Series) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    combined_edge = _combine_live_edges(raw_edge, market_edge_pred)
+    actual_edge = pd.to_numeric(actual_edge, errors='coerce').fillna(0.0)
+    meta_target = ((combined_edge > 0) == (actual_edge > 0)).astype(int)
+    # Keep all rows, but emphasize clearer historical outcomes over coin-flip finishes near the line.
+    margin_weight = 0.75 + actual_edge.abs().clip(lower=0.0, upper=3.0) * 0.50
+    return meta_target, margin_weight, combined_edge
+
+
+def _extract_probability_meta_inputs(probability_oof: Optional[pd.DataFrame]) -> pd.DataFrame:
+    if probability_oof is None or len(probability_oof) == 0 or 'row_idx' not in probability_oof.columns:
+        return pd.DataFrame()
+    aux = probability_oof.copy()
+    aux['row_idx'] = pd.to_numeric(aux['row_idx'], errors='coerce')
+    aux = aux.dropna(subset=['row_idx']).copy()
+    aux['row_idx'] = aux['row_idx'].astype(int)
+
+    keep_cols = ['row_idx']
+    for col in ['p_over_raw', 'q25', 'q75', 'rate']:
+        if col in aux.columns:
+            keep_cols.append(col)
+    aux = aux[keep_cols].drop_duplicates(subset=['row_idx'], keep='last').set_index('row_idx')
+
+    sigma = pd.Series(np.nan, index=aux.index, dtype=float)
+    if {'q25', 'q75'}.issubset(aux.columns):
+        sigma = (pd.to_numeric(aux['q75'], errors='coerce') - pd.to_numeric(aux['q25'], errors='coerce')) / 1.35
+    elif 'rate' in aux.columns:
+        sigma = np.sqrt(pd.to_numeric(aux['rate'], errors='coerce').clip(lower=0.0))
+
+    aux['sigma_raw'] = pd.to_numeric(sigma, errors='coerce').clip(lower=0.05)
+    if 'p_over_raw' in aux.columns:
+        aux['p_over_raw'] = pd.to_numeric(aux['p_over_raw'], errors='coerce')
+    return aux
+
+
 def _build_meta_feature_block(market_block: pd.DataFrame, raw_edge: pd.Series,
-                              market_edge_pred: pd.Series) -> pd.DataFrame:
+                              market_edge_pred: pd.Series,
+                              p_over_raw: Optional[pd.Series] = None,
+                              p_over_cal: Optional[pd.Series] = None,
+                              sigma: Optional[pd.Series] = None) -> pd.DataFrame:
     meta = market_block.copy()
     raw_edge = pd.to_numeric(raw_edge, errors='coerce').fillna(0.0)
     market_edge_pred = pd.to_numeric(market_edge_pred, errors='coerce').fillna(0.0)
+    combined_edge = _combine_live_edges(raw_edge, market_edge_pred)
     meta['signal_raw_edge'] = raw_edge
     meta['signal_abs_raw_edge'] = raw_edge.abs()
     meta['signal_market_edge_pred'] = market_edge_pred
     meta['signal_abs_market_edge_pred'] = market_edge_pred.abs()
+    meta['signal_combined_edge'] = combined_edge
+    meta['signal_abs_combined_edge'] = combined_edge.abs()
     meta['signal_edge_disagreement'] = (market_edge_pred - raw_edge).abs()
     meta['signal_direction_match'] = (np.sign(market_edge_pred) == np.sign(raw_edge)).astype(float)
+    meta['signal_market_support_ratio'] = market_edge_pred.abs() / (raw_edge.abs() + 0.35)
+    meta['signal_disagreement_ratio'] = meta['signal_edge_disagreement'] / (combined_edge.abs() + 0.35)
     meta['signal_shock_penalty'] = meta['market_role_shock'] * meta['signal_abs_market_edge_pred']
+
+    prob_series = None
+    if p_over_cal is not None:
+        prob_series = pd.to_numeric(p_over_cal, errors='coerce')
+    elif p_over_raw is not None:
+        prob_series = pd.to_numeric(p_over_raw, errors='coerce')
+    if prob_series is not None:
+        prob_series = pd.Series(prob_series, index=getattr(prob_series, 'index', meta.index)).reindex(meta.index)
+        direction_prob = pd.Series(np.nan, index=meta.index, dtype=float)
+        over_mask = combined_edge > 0
+        under_mask = combined_edge < 0
+        direction_prob.loc[over_mask] = prob_series.loc[over_mask]
+        direction_prob.loc[under_mask] = 1.0 - prob_series.loc[under_mask]
+        meta['signal_direction_prob'] = direction_prob
+        meta['signal_direction_prob_margin'] = (direction_prob - 0.50).abs()
+        meta['signal_prob_direction_match'] = (
+            np.sign(prob_series.fillna(0.50) - 0.50) == np.sign(combined_edge)
+        ).astype(float)
+
+    sigma_series = pd.to_numeric(sigma, errors='coerce') if sigma is not None else None
+    if sigma_series is not None:
+        sigma_series = pd.Series(sigma_series, index=getattr(sigma_series, 'index', meta.index)).reindex(meta.index)
+        sigma_series = sigma_series.clip(lower=0.05)
+        meta['signal_sigma'] = sigma_series
+        meta['signal_edge_to_sigma'] = meta['signal_abs_combined_edge'] / sigma_series
+        meta['signal_market_edge_to_sigma'] = meta['signal_abs_market_edge_pred'] / sigma_series
     return meta.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
@@ -1295,6 +1375,7 @@ class AdvancedPropModel:
         )
         oof_df = pd.DataFrame({
             'target': target,
+            'row_idx': df.loc[valid_mask].index.values,
             'game_date': pd.to_datetime(df.loc[valid_mask, 'game_date']).values,
             'actual': pd.to_numeric(y.loc[valid_mask], errors='coerce').values,
             'line': pd.to_numeric(line_col.loc[valid_mask], errors='coerce').values,
@@ -1406,6 +1487,7 @@ class AdvancedPropModel:
         )
         oof_df = pd.DataFrame({
             'target': target,
+            'row_idx': df.loc[valid_mask].index.values,
             'game_date': pd.to_datetime(df.loc[valid_mask, 'game_date']).values,
             'actual': pd.to_numeric(y.loc[valid_mask], errors='coerce').values,
             'line': pd.to_numeric(line_col.loc[valid_mask], errors='coerce').values,
@@ -1491,6 +1573,7 @@ class AdvancedPropModel:
 
         oof_df = pd.DataFrame({
             'target': target,
+            'row_idx': df.loc[valid_mask].index.values,
             'game_date': pd.to_datetime(df.loc[valid_mask, 'game_date']).values,
             'actual': pd.to_numeric(y.loc[valid_mask], errors='coerce').values,
             'line': pd.to_numeric(line_col.loc[valid_mask], errors='coerce').values,
@@ -1634,7 +1717,8 @@ class AdvancedPropModel:
     def train_model(self, df: pd.DataFrame, target: str,
                     n_splits: int = 5,
                     lines_lookup: dict = None,
-                    importance_threshold: float = 0.001) -> Dict:
+                    importance_threshold: float = 0.005,
+                    max_features_per_target: int = 40) -> Dict:
         """
         Train one regression model (raw stat) and one classifier (OVER/UNDER vs line).
 
@@ -1753,13 +1837,25 @@ class AdvancedPropModel:
 
             real_train_mask = source_tr.eq('real') & line_tr.notna()
             if int(real_train_mask.sum()) >= 400 and int(real_mask.sum()) >= 25:
+                raw_pred_train = pd.Series(
+                    model.predict(X_tr.loc[real_train_mask]),
+                    index=X_tr.loc[real_train_mask].index,
+                )
+                raw_pred_val = pd.Series(
+                    y_pred[real_mask.values],
+                    index=df_val.loc[real_mask].index,
+                )
                 market_train = _build_market_feature_block(
-                    df.iloc[train_idx].loc[real_train_mask], target, line_tr.loc[real_train_mask]
+                    df.iloc[train_idx].loc[real_train_mask],
+                    target,
+                    line_tr.loc[real_train_mask],
+                    raw_pred=raw_pred_train,
                 )
                 market_val = _build_market_feature_block(
                     df_val.loc[real_mask],
                     target,
                     line_val.loc[real_mask],
+                    raw_pred=raw_pred_val,
                 )
                 y_edge_train = y_tr.loc[real_train_mask] - line_tr.loc[real_train_mask]
                 y_edge_val = y_val.loc[real_mask] - line_val.loc[real_mask]
@@ -1781,17 +1877,21 @@ class AdvancedPropModel:
                         'pred': float(line_val.at[row_idx] + edge_pred_val.at[row_idx]),
                     })
 
+                raw_edge_val = pd.Series(y_pred[real_mask.values], index=market_val.index) - line_val.loc[real_mask]
                 meta_val = _build_meta_feature_block(
                     market_val,
-                    raw_edge=pd.Series(y_pred[real_mask], index=market_val.index) - line_val.loc[real_mask],
+                    raw_edge=raw_edge_val,
                     market_edge_pred=edge_pred_val,
                 )
-                meta_val['meta_target'] = (
-                    ((edge_pred_val > 0) == (y_edge_val > 0)) &
-                    (y_edge_val.abs() >= 0.75)
-                ).astype(int).values
+                meta_target, meta_margin_weight, _ = _build_meta_target_bundle(
+                    raw_edge=raw_edge_val,
+                    market_edge_pred=edge_pred_val,
+                    actual_edge=y_edge_val,
+                )
+                meta_val['meta_target'] = meta_target.values
                 meta_val['game_date'] = pd.to_datetime(df_val.loc[real_mask, 'game_date']).values
-                meta_val['sample_weight'] = sample_weights[val_idx][real_mask.values]
+                meta_val['row_idx'] = market_val.index.values
+                meta_val['sample_weight'] = sample_weights[val_idx][real_mask.values] * meta_margin_weight.values
                 meta_oof_frames.append(meta_val.reset_index(drop=True))
 
             cv_results.append({'fold': fold, 'mae': mae, 'rmse': rmse,
@@ -1836,6 +1936,8 @@ class AdvancedPropModel:
 
         # ── Feature selection ─────────────────────────────────────────────────
         all_imp  = pd.concat(feature_imp).groupby('feature')['importance'].mean()
+        # Sort by importance descending and apply hard cap
+        all_imp = all_imp.sort_values(ascending=False)
         selected = all_imp[all_imp >= importance_threshold].index.tolist()
         required_features = [
             c for c in TARGET_REQUIRED_FEATURES.get(target, [])
@@ -1849,6 +1951,20 @@ class AdvancedPropModel:
                 f"{', '.join(missing_required[:10])}"
                 f"{'...' if len(missing_required) > 10 else ''}"
             )
+        # Hard cap: keep only the top N features by importance to prevent overfitting
+        if len(selected) > max_features_per_target:
+            # Ensure required features are always kept
+            required_set = set(required_features)
+            # Rank selected features by importance, keep top N
+            ranked = [f for f in all_imp.index if f in selected]
+            kept = []
+            for f in ranked:
+                if len(kept) >= max_features_per_target and f not in required_set:
+                    continue
+                kept.append(f)
+            selected = kept
+            print(f"  Feature cap applied: {len(selected)}/{len(all_imp)} kept "
+                  f"(hard cap = {max_features_per_target})")
         dropped  = len(all_imp) - len(selected)
         if dropped > 0:
             print(f"\n  Feature selection: {len(selected)}/{len(all_imp)} kept "
@@ -1943,10 +2059,14 @@ class AdvancedPropModel:
             self.probability_sidecars[target] = probability_sidecar_result['sidecar']
             self._store_probability_oof(probability_sidecar_result['oof_frame'])
             probability_summary = probability_sidecar_result.get('summary')
+        probability_meta_inputs = _extract_probability_meta_inputs(
+            probability_sidecar_result['oof_frame'] if probability_sidecar_result else None
+        )
         edge_feature_names = []
         meta_feature_names = []
         meta_summary = None
         final_edge = None
+        edge_raw_pred_full = None
 
         # ── Final classifier model ────────────────────────────────────────────
         # Train only on rows that have a real historical line.
@@ -1966,7 +2086,21 @@ class AdvancedPropModel:
 
         if n_clf >= 500:
             print(f"  Training market-edge model on {n_clf:,} real-line rows...")
-            market_X_full = _build_market_feature_block(df.loc[clf_mask], target, line_col.loc[clf_mask])
+            edge_fp_input = None
+            if target in BLEND_REGRESSION_TARGETS:
+                edge_fp_input = _build_fp_projection_proxy(df.loc[clf_mask], target).fillna(
+                    _sum_target_feature(df.loc[clf_mask], target, 'best_estimate')
+                ).fillna(0.0)
+            edge_raw_pred_full = pd.Series(
+                _predict_regression_model(final_reg, X_sel.loc[clf_mask], fp_input=edge_fp_input),
+                index=df.loc[clf_mask].index,
+            )
+            market_X_full = _build_market_feature_block(
+                df.loc[clf_mask],
+                target,
+                line_col.loc[clf_mask],
+                raw_pred=edge_raw_pred_full,
+            )
             edge_feature_names = market_X_full.columns.tolist()
             y_edge_full = y.loc[clf_mask] - line_col.loc[clf_mask]
             final_edge = xgb.XGBRegressor(**edge_params)
@@ -1993,16 +2127,24 @@ class AdvancedPropModel:
                 market_edge_summary = _summarize_calibration(fallback_records)
 
         meta_df = pd.concat(meta_oof_frames, ignore_index=True) if meta_oof_frames else pd.DataFrame()
-        if n_clf >= 500 and final_edge is not None and (len(meta_df) < 500 or market_edge_summary is None):
+        if n_clf >= 500 and final_edge is not None:
             real_df = df.loc[clf_mask].copy()
+            real_df['_orig_idx'] = real_df.index
             real_df['game_date'] = pd.to_datetime(real_df['game_date'], errors='coerce')
             real_df = real_df.sort_values('game_date').reset_index(drop=True)
             real_line = pd.to_numeric(line_col.loc[clf_mask], errors='coerce').reset_index(drop=True)
             real_y = y.loc[clf_mask].reset_index(drop=True)
-            real_market = _build_market_feature_block(real_df, target, real_line)
+            real_raw_pred = None
+            if edge_raw_pred_full is not None:
+                real_raw_pred = edge_raw_pred_full.loc[real_df['_orig_idx']].reset_index(drop=True)
+            real_market = _build_market_feature_block(real_df, target, real_line, raw_pred=real_raw_pred)
             real_y_edge = (real_y - real_line).reset_index(drop=True)
-            raw_proxy = (_sum_target_feature(real_df, target, 'best_estimate') - real_line).fillna(
-                _sum_target_feature(real_df, target, 'l10') - real_line
+            raw_proxy = (
+                pd.to_numeric(real_raw_pred, errors='coerce') - real_line
+                if real_raw_pred is not None
+                else (_sum_target_feature(real_df, target, 'best_estimate') - real_line).fillna(
+                    _sum_target_feature(real_df, target, 'l10') - real_line
+                )
             )
 
             dedicated_market_records = []
@@ -2029,17 +2171,25 @@ class AdvancedPropModel:
                             'line': float(real_line.iloc[local_idx]),
                             'pred': float(real_line.iloc[local_idx] + edge_val_pred.at[local_idx]),
                         })
+                    row_idx_vals = real_df.iloc[edge_val_idx]['_orig_idx'].astype(int).values
+                    dedicated_probability_meta = probability_meta_inputs.reindex(row_idx_vals) if len(probability_meta_inputs) else pd.DataFrame(index=row_idx_vals)
+                    dedicated_probability_meta.index = edge_val_idx
                     meta_block = _build_meta_feature_block(
                         real_market.iloc[edge_val_idx],
                         raw_edge=raw_proxy.iloc[edge_val_idx],
                         market_edge_pred=edge_val_pred,
+                        p_over_raw=dedicated_probability_meta['p_over_raw'] if 'p_over_raw' in dedicated_probability_meta.columns else None,
+                        sigma=dedicated_probability_meta['sigma_raw'] if 'sigma_raw' in dedicated_probability_meta.columns else None,
                     )
-                    meta_block['meta_target'] = (
-                        ((edge_val_pred > 0) == (real_y_edge.iloc[edge_val_idx] > 0)) &
-                        (real_y_edge.iloc[edge_val_idx].abs() >= 0.75)
-                    ).astype(int).values
+                    meta_target, meta_margin_weight, _ = _build_meta_target_bundle(
+                        raw_edge=raw_proxy.iloc[edge_val_idx],
+                        market_edge_pred=edge_val_pred,
+                        actual_edge=real_y_edge.iloc[edge_val_idx],
+                    )
+                    meta_block['meta_target'] = meta_target.values
                     meta_block['game_date'] = real_df.iloc[edge_val_idx]['game_date'].values
-                    meta_block['sample_weight'] = sample_weights[clf_mask.values][edge_val_idx]
+                    meta_block['row_idx'] = row_idx_vals
+                    meta_block['sample_weight'] = sample_weights[clf_mask.values][edge_val_idx] * meta_margin_weight.values
                     dedicated_meta_frames.append(meta_block.reset_index(drop=True))
 
             if dedicated_market_records:
@@ -2058,19 +2208,25 @@ class AdvancedPropModel:
                 df.loc[clf_mask],
                 target,
                 line_col.loc[clf_mask],
+                raw_pred=fallback_raw_pred,
             )
             fallback_edge_pred = pd.Series(final_edge.predict(fallback_market), index=fallback_market.index)
             fallback_meta = _build_meta_feature_block(
                 fallback_market,
                 raw_edge=fallback_raw_pred - line_col.loc[clf_mask],
                 market_edge_pred=fallback_edge_pred,
+                p_over_raw=probability_meta_inputs['p_over_raw'] if 'p_over_raw' in probability_meta_inputs.columns else None,
+                sigma=probability_meta_inputs['sigma_raw'] if 'sigma_raw' in probability_meta_inputs.columns else None,
             )
-            fallback_meta['meta_target'] = (
-                ((fallback_edge_pred > 0) == (y_edge_full > 0)) &
-                (y_edge_full.abs() >= 0.75)
-            ).astype(int).values
+            fallback_target, fallback_margin_weight, _ = _build_meta_target_bundle(
+                raw_edge=fallback_raw_pred - line_col.loc[clf_mask],
+                market_edge_pred=fallback_edge_pred,
+                actual_edge=y_edge_full,
+            )
+            fallback_meta['meta_target'] = fallback_target.values
             fallback_meta['game_date'] = pd.to_datetime(df.loc[clf_mask, 'game_date']).values
-            fallback_meta['sample_weight'] = sample_weights[clf_mask.values]
+            fallback_meta['row_idx'] = df.loc[clf_mask].index.values
+            fallback_meta['sample_weight'] = sample_weights[clf_mask.values] * fallback_margin_weight.values
             meta_df = fallback_meta.reset_index(drop=True)
             print("  Meta model fallback: using full real-line rows because OOF coverage was too thin.")
 
@@ -2079,7 +2235,7 @@ class AdvancedPropModel:
                 meta_df = meta_df.sort_values('game_date').reset_index(drop=True)
                 meta_feature_names = [
                     c for c in meta_df.columns
-                    if c not in {'meta_target', 'game_date', 'sample_weight'}
+                    if c not in {'meta_target', 'game_date', 'sample_weight', 'row_idx'}
                 ]
                 meta_probs = np.full(len(meta_df), np.nan)
                 meta_cv_splits = max(3, min(5, len(meta_df) // 300))

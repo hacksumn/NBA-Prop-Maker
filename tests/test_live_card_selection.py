@@ -2,10 +2,44 @@ import unittest
 
 import pandas as pd
 
-from nba_props import _apply_consistency_scores, _apply_estimated_hit_rates, build_live_pick_card
+from nba_props import (
+    _apply_consistency_scores,
+    _apply_estimated_hit_rates,
+    _apply_live_accuracy_gates,
+    _live_card_meta_floor,
+    build_live_pick_card,
+)
 
 
 class LiveCardSelectionTests(unittest.TestCase):
+    def test_meta_gate_off_bypasses_meta_floor(self):
+        quality = {
+            "pts": {
+                "meta_gate_mode": "off",
+                "min_meta_prob": 0.62,
+            }
+        }
+        self.assertEqual(_live_card_meta_floor("PTS", quality), 0.0)
+
+        picks = pd.DataFrame(
+            [
+                {
+                    "player": "PTS Under",
+                    "prop": "PTS",
+                    "direction": "UNDER",
+                    "meta_prob": None,
+                    "estimated_hit_rate": 68.0,
+                    "volatility_metric": 2.1,
+                    "pick_source": "market_model",
+                }
+            ]
+        )
+        gated = _apply_live_accuracy_gates(
+            picks,
+            quality_policy=quality,
+        )
+        self.assertTrue(bool(gated.loc[0, "meta_gate_pass"]))
+
     def test_consistency_score_prefers_lower_volatility_and_higher_support(self):
         picks = pd.DataFrame(
             [

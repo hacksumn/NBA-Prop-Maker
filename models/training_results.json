@@ -1,1272 +1,1428 @@
 {
   "pts": {
     "target": "pts",
-    "avg_mae": 4.612713228983193,
-    "avg_rmse": 5.996243064874764,
-    "avg_bet_accuracy": 0.5116751269035533,
-    "avg_proxy_bet_accuracy": 0.5375325147577688,
-    "avg_all_line_bet_accuracy": 0.5361181009897668,
-    "n_features_original": 153,
-    "n_features_selected": 153,
-    "n_samples": 71535,
-    "n_real_lines": 3940,
-    "n_proxy_lines": 67595,
-    "n_cal_records": 3940,
-    "oof_bias": -0.036654523085203485,
+    "avg_mae": 4.625845536585269,
+    "avg_rmse": 6.022082641903004,
+    "avg_bet_accuracy": 0.5076505429417572,
+    "avg_proxy_bet_accuracy": 0.5315532411056267,
+    "avg_all_line_bet_accuracy": 0.5306432748538011,
+    "n_features_original": 180,
+    "n_features_selected": 29,
+    "n_samples": 71824,
+    "n_real_lines": 4052,
+    "n_proxy_lines": 67772,
+    "n_cal_records": 4052,
+    "oof_bias": -0.10470274763572329,
     "real_line_summary": {
-      "n_records": 3940,
-      "hit_rate": 0.5116751269035533,
-      "avg_edge": -0.21817786775091488,
-      "avg_abs_edge": 1.4055897659719583,
-      "avg_actual_minus_line": 0.03546954314720812,
-      "clv_corr": 0.05449464489641548,
+      "n_records": 4052,
+      "hit_rate": 0.5076505429417572,
+      "avg_edge": -0.28624197172375015,
+      "avg_abs_edge": 1.4784334355631503,
+      "avg_actual_minus_line": 0.004565646594274432,
+      "clv_corr": 0.06770830421577342,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
           "lower": null,
           "upper": -3.0,
-          "n": 291,
-          "hit_rate": 0.6116838487972509,
-          "avg_edge": -4.497068462426415,
-          "avg_actual_minus_line": -1.4243986254295533
+          "n": 340,
+          "hit_rate": 0.6352941176470588,
+          "avg_edge": -4.720995423383219,
+          "avg_actual_minus_line": -1.7610294117647058
         },
         {
           "label": "UNDER 2-3",
           "lower": -3.0,
           "upper": -2.0,
-          "n": 293,
-          "hit_rate": 0.5426621160409556,
-          "avg_edge": -2.4599884553157016,
-          "avg_actual_minus_line": -0.1476109215017065
+          "n": 304,
+          "hit_rate": 0.5328947368421053,
+          "avg_edge": -2.454194905083794,
+          "avg_actual_minus_line": -0.028782894736842105
         },
         {
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 517,
-          "hit_rate": 0.4796905222437137,
-          "avg_edge": -1.4433308485260277,
-          "avg_actual_minus_line": 0.6948742746615088
+          "n": 556,
+          "hit_rate": 0.4892086330935252,
+          "avg_edge": -1.4546629067348873,
+          "avg_actual_minus_line": 0.6465827338129496
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 893,
-          "hit_rate": 0.5453527435610303,
-          "avg_edge": -0.4739044230375326,
-          "avg_actual_minus_line": -0.16489361702127658
+          "n": 870,
+          "hit_rate": 0.5264367816091954,
+          "avg_edge": -0.47727138381941997,
+          "avg_actual_minus_line": -0.0764367816091954
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 1008,
-          "hit_rate": 0.4771825396825397,
-          "avg_edge": 0.4972830707333789,
-          "avg_actual_minus_line": -0.020337301587301588
+          "n": 1017,
+          "hit_rate": 0.4611602753195674,
+          "avg_edge": 0.4788167554549088,
+          "avg_actual_minus_line": -0.07940019665683383
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 602,
-          "hit_rate": 0.49169435215946844,
-          "avg_edge": 1.4402334459361026,
-          "avg_actual_minus_line": 0.3658637873754153
+          "n": 611,
+          "hit_rate": 0.4909983633387889,
+          "avg_edge": 1.4460467955737433,
+          "avg_actual_minus_line": 0.21522094926350246
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
-          "n": 225,
-          "hit_rate": 0.4888888888888889,
-          "avg_edge": 2.3903050345513353,
-          "avg_actual_minus_line": 0.5111111111111111
+          "n": 233,
+          "hit_rate": 0.49356223175965663,
+          "avg_edge": 2.400620622061847,
+          "avg_actual_minus_line": 0.6137339055793991
         },
         {
           "label": "OVER  >=3",
           "lower": 3.0,
           "upper": null,
-          "n": 111,
-          "hit_rate": 0.5135135135135135,
-          "avg_edge": 3.9018102429605865,
-          "avg_actual_minus_line": 0.6373873873873874
+          "n": 121,
+          "hit_rate": 0.5371900826446281,
+          "avg_edge": 4.0127608959092145,
+          "avg_actual_minus_line": 1.1508264462809918
         }
       ],
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 1994,
-          "hit_rate": 0.5376128385155466,
-          "avg_edge": -1.6042237905887962,
-          "avg_actual_minus_line": -0.12324473420260783
+          "n": 2070,
+          "hit_rate": 0.5352657004830917,
+          "avg_edge": -1.7271653986295945,
+          "avg_actual_minus_line": -0.15193236714975844
         },
         {
           "label": "over_edges",
-          "n": 1946,
-          "hit_rate": 0.4850976361767729,
-          "avg_edge": 1.2020562381785485,
-          "avg_actual_minus_line": 0.19809866392600206
+          "n": 1982,
+          "hit_rate": 0.4788092835519677,
+          "avg_edge": 1.2186578737329083,
+          "avg_actual_minus_line": 0.16801210898082744
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 920,
-          "hit_rate": 0.5478260869565217,
-          "avg_edge": -1.1505477937292514,
-          "avg_actual_minus_line": -0.2956521739130435
+          "n": 998,
+          "hit_rate": 0.5591182364729459,
+          "avg_edge": -1.3089429075654733,
+          "avg_actual_minus_line": -0.32590180360721444
         },
         {
           "label": "strong_edges_abs_ge_3",
-          "n": 402,
-          "hit_rate": 0.5845771144278606,
-          "avg_edge": -2.1779750885508995,
-          "avg_actual_minus_line": -0.8550995024875622
+          "n": 461,
+          "hit_rate": 0.6095444685466378,
+          "avg_edge": -2.428621205087375,
+          "avg_actual_minus_line": -0.9967462039045553
         }
       ]
     },
     "market_edge_summary": {
-      "n_records": 3280,
-      "hit_rate": 0.49146341463414633,
-      "avg_edge": 0.1196474232505219,
-      "avg_abs_edge": 1.737871832259602,
-      "avg_actual_minus_line": 0.042301829268292686,
-      "clv_corr": 0.006320583033723321,
+      "n_records": 3375,
+      "hit_rate": 0.4945185185185185,
+      "avg_edge": 0.16689560409731888,
+      "avg_abs_edge": 1.6056944832883224,
+      "avg_actual_minus_line": 0.008888888888888889,
+      "clv_corr": -0.023503074656472757,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
           "lower": null,
           "upper": -3.0,
-          "n": 267,
-          "hit_rate": 0.50187265917603,
-          "avg_edge": -4.128935411181789,
-          "avg_actual_minus_line": 0.03932584269662921
+          "n": 188,
+          "hit_rate": 0.48404255319148937,
+          "avg_edge": -4.058737532889589,
+          "avg_actual_minus_line": 0.8550531914893617
         },
         {
           "label": "UNDER 2-3",
           "lower": -3.0,
           "upper": -2.0,
-          "n": 236,
-          "hit_rate": 0.5296610169491526,
-          "avg_edge": -2.48485422942598,
-          "avg_actual_minus_line": -0.4533898305084746
+          "n": 261,
+          "hit_rate": 0.48659003831417624,
+          "avg_edge": -2.4174630440971403,
+          "avg_actual_minus_line": 0.28448275862068967
         },
         {
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 451,
-          "hit_rate": 0.5121951219512195,
-          "avg_edge": -1.4787210506240438,
-          "avg_actual_minus_line": 0.20343680709534367
+          "n": 499,
+          "hit_rate": 0.5350701402805611,
+          "avg_edge": -1.4532000187164795,
+          "avg_actual_minus_line": -0.011523046092184368
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 632,
-          "hit_rate": 0.5284810126582279,
-          "avg_edge": -0.4717301962237003,
-          "avg_actual_minus_line": 0.1606012658227848
+          "n": 651,
+          "hit_rate": 0.5468509984639017,
+          "avg_edge": -0.47438677204715607,
+          "avg_actual_minus_line": -0.18970814132104455
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 614,
-          "hit_rate": 0.4609120521172638,
-          "avg_edge": 0.48405829713847076,
-          "avg_actual_minus_line": -0.20602605863192183
+          "n": 688,
+          "hit_rate": 0.4578488372093023,
+          "avg_edge": 0.5018114111194019,
+          "avg_actual_minus_line": -0.23473837209302326
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 479,
-          "hit_rate": 0.4572025052192067,
-          "avg_edge": 1.460158754738985,
-          "avg_actual_minus_line": 0.08298538622129437
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 303,
-          "hit_rate": 0.47854785478547857,
-          "avg_edge": 2.4703848346231796,
-          "avg_actual_minus_line": 0.39851485148514854
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 298,
-          "hit_rate": 0.47315436241610737,
-          "avg_edge": 4.366366228801292,
-          "avg_actual_minus_line": 0.026845637583892617
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 1586,
-          "hit_rate": 0.519546027742749,
-          "avg_edge": -1.6733215830863124,
-          "avg_actual_minus_line": 0.06100252206809584
-        },
-        {
-          "label": "over_edges",
-          "n": 1694,
-          "hit_rate": 0.4651711924439197,
-          "avg_edge": 1.7983067172589158,
-          "avg_actual_minus_line": 0.024793388429752067
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 1104,
-          "hit_rate": 0.4936594202898551,
-          "avg_edge": 0.32685904723146686,
-          "avg_actual_minus_line": 0.029211956521739132
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 565,
-          "hit_rate": 0.48672566371681414,
-          "avg_edge": 0.35177235645530497,
-          "avg_actual_minus_line": 0.03274336283185841
-        }
-      ]
-    },
-    "market_edge_sign_accuracy": 0.49146341463414633,
-    "meta_summary": {
-      "n_records": 2730,
-      "positive_rate": 0.436996336996337,
-      "auc": 0.4915193323011429,
-      "top_prob_threshold": 0.6,
-      "top_prob_n": 426,
-      "top_prob_hit_rate": 0.45774647887323944
-    },
-    "blend_summary": {
-      "base_models": [
-        "xgb",
-        "etr",
-        "bayes",
-        "fp"
-      ],
-      "coefficients": {
-        "xgb": 0.13929730622003417,
-        "etr": 0.5843332667664005,
-        "bayes": 0.280671345974475,
-        "fp": 0.0068813592495886675
-      },
-      "intercept": -0.16801749173934155,
-      "n_oof_rows": 49675
-    },
-    "probability_summary": {
-      "kind": "quantile_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 3940,
-      "pinball_loss": {
-        "q10": 1.060530042657266,
-        "q25": 1.6786449037945053,
-        "q50": 2.288188158487923,
-        "q75": 1.965033330766643,
-        "q90": 1.1625558735541226
-      },
-      "raw_probability_metrics": {
-        "n_records": 3940,
-        "positive_rate": 0.4736040609137056,
-        "brier": 0.257055842919349,
-        "log_loss": 0.7166823696700578,
-        "ece": 0.0727819465200154
-      }
-    }
-  },
-  "trb": {
-    "target": "trb",
-    "avg_mae": 1.911836583774381,
-    "avg_rmse": 2.506243109955224,
-    "avg_bet_accuracy": 0.5796310730059756,
-    "avg_proxy_bet_accuracy": 0.5336226722301424,
-    "avg_all_line_bet_accuracy": 0.5363529609125985,
-    "n_features_original": 153,
-    "n_features_selected": 152,
-    "n_samples": 71535,
-    "n_real_lines": 3849,
-    "n_proxy_lines": 67686,
-    "n_cal_records": 3849,
-    "oof_bias": 0.009133634960841446,
-    "real_line_summary": {
-      "n_records": 3849,
-      "hit_rate": 0.5796310730059756,
-      "avg_edge": -0.2601081121889875,
-      "avg_abs_edge": 0.6461307391606355,
-      "avg_actual_minus_line": -0.2746817355157184,
-      "clv_corr": 0.17580903967315722,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 24,
-          "hit_rate": 0.7916666666666666,
-          "avg_edge": -3.865890406379284,
-          "avg_actual_minus_line": -1.8645833333333333
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 65,
-          "hit_rate": 0.7538461538461538,
-          "avg_edge": -2.3821677232949257,
-          "avg_actual_minus_line": -1.9384615384615385
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 519,
-          "hit_rate": 0.6666666666666666,
-          "avg_edge": -1.3558124630383592,
-          "avg_actual_minus_line": -0.8053949903660886
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 1734,
-          "hit_rate": 0.6286043829296425,
-          "avg_edge": -0.45719015532766333,
-          "avg_actual_minus_line": -0.47015570934256057
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 1336,
-          "hit_rate": 0.469311377245509,
-          "avg_edge": 0.38222907888640706,
-          "avg_actual_minus_line": 0.16261227544910178
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 160,
-          "hit_rate": 0.5875,
-          "avg_edge": 1.2783250600929343,
-          "avg_actual_minus_line": 0.6875
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 9,
-          "hit_rate": 0.5555555555555556,
-          "avg_edge": 2.2589852404759565,
-          "avg_actual_minus_line": 1.2777777777777777
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 2,
-          "hit_rate": 0.5,
-          "avg_edge": 3.68980971777195,
-          "avg_actual_minus_line": 4.0
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 2342,
-          "hit_rate": 0.6421861656703672,
-          "avg_edge": -0.7446868784894746,
-          "avg_actual_minus_line": -0.5994876174210076
-        },
-        {
-          "label": "over_edges",
-          "n": 1507,
-          "hit_rate": 0.48241539482415396,
-          "avg_edge": 0.4929665199780602,
-          "avg_actual_minus_line": 0.230092899800929
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 100,
-          "hit_rate": 0.74,
-          "avg_edge": -2.1991178516744547,
-          "avg_actual_minus_line": -1.5125
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 26,
-          "hit_rate": 0.7692307692307693,
-          "avg_edge": -3.2846827045214964,
-          "avg_actual_minus_line": -1.4134615384615385
-        }
-      ]
-    },
-    "market_edge_summary": {
-      "n_records": 3205,
-      "hit_rate": 0.5188767550702028,
-      "avg_edge": -0.019450239528078794,
-      "avg_abs_edge": 0.7613430335477188,
-      "avg_actual_minus_line": -0.35046801872074884,
-      "clv_corr": 0.04273491653454587,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 8,
-          "hit_rate": 0.5,
-          "avg_edge": -3.4338502883911133,
-          "avg_actual_minus_line": -0.625
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 48,
-          "hit_rate": 0.6041666666666666,
-          "avg_edge": -2.3318800379832587,
-          "avg_actual_minus_line": -0.5052083333333334
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 393,
-          "hit_rate": 0.6615776081424937,
-          "avg_edge": -1.3689048454051709,
-          "avg_actual_minus_line": -0.8225190839694656
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 1225,
-          "hit_rate": 0.6089795918367347,
-          "avg_edge": -0.4684412830444148,
-          "avg_actual_minus_line": -0.3195918367346939
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 1102,
-          "hit_rate": 0.4101633393829401,
-          "avg_edge": 0.4254100392882107,
-          "avg_actual_minus_line": -0.2309437386569873
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 337,
-          "hit_rate": 0.3887240356083086,
-          "avg_edge": 1.4078447189104664,
-          "avg_actual_minus_line": -0.2952522255192878
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 69,
-          "hit_rate": 0.42028985507246375,
-          "avg_edge": 2.3823438554570293,
-          "avg_actual_minus_line": -0.5181159420289855
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 23,
-          "hit_rate": 0.5217391304347826,
-          "avg_edge": 3.532867079195769,
-          "avg_actual_minus_line": 0.45652173913043476
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 1674,
-          "hit_rate": 0.6206690561529271,
-          "avg_edge": -0.7474439785567297,
-          "avg_actual_minus_line": -0.4444444444444444
-        },
-        {
-          "label": "over_edges",
-          "n": 1531,
-          "hit_rate": 0.4075767472240366,
-          "avg_edge": 0.7765403020355801,
-          "avg_actual_minus_line": -0.2477139124755062
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 148,
-          "hit_rate": 0.5,
-          "avg_edge": 0.7178150318764351,
-          "avg_actual_minus_line": -0.36824324324324326
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 31,
-          "hit_rate": 0.5161290322580645,
-          "avg_edge": 1.7350045327217347,
-          "avg_actual_minus_line": 0.1774193548387097
-        }
-      ]
-    },
-    "market_edge_sign_accuracy": 0.5188767550702028,
-    "meta_summary": {
-      "n_records": 2670,
-      "positive_rate": 0.398876404494382,
-      "auc": 0.5553712722858438,
-      "top_prob_threshold": 0.6,
-      "top_prob_n": 102,
-      "top_prob_hit_rate": 0.47058823529411764
-    },
-    "blend_summary": {
-      "base_models": [
-        "xgb",
-        "etr",
-        "bayes",
-        "fp"
-      ],
-      "coefficients": {
-        "xgb": 0.2065940013526733,
-        "etr": 0.0349680214564899,
-        "bayes": 0.723961282980189,
-        "fp": 0.03630641507309899
-      },
-      "intercept": 0.01698486494736251,
-      "n_oof_rows": 49675
-    },
-    "probability_summary": {
-      "kind": "quantile_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 3849,
-      "pinball_loss": {
-        "q10": 0.33924840382968935,
-        "q25": 0.6826205561378459,
-        "q50": 0.9458472112366231,
-        "q75": 0.8278059858176735,
-        "q90": 0.49555149911857616
-      },
-      "raw_probability_metrics": {
-        "n_records": 3849,
-        "positive_rate": 0.40659911665367626,
-        "brier": 0.23899521097059387,
-        "log_loss": 0.6767647238281647,
-        "ece": 0.03620837243876421
-      }
-    }
-  },
-  "ast": {
-    "target": "ast",
-    "avg_mae": 1.3513465932746833,
-    "avg_rmse": 1.8250839678372253,
-    "avg_bet_accuracy": 0.5981873111782477,
-    "avg_proxy_bet_accuracy": 0.5319332745988732,
-    "avg_all_line_bet_accuracy": 0.5356316054353296,
-    "n_features_original": 153,
-    "n_features_selected": 152,
-    "n_samples": 71535,
-    "n_real_lines": 3310,
-    "n_proxy_lines": 68225,
-    "n_cal_records": 3310,
-    "oof_bias": -0.042176505727326424,
-    "real_line_summary": {
-      "n_records": 3310,
-      "hit_rate": 0.5981873111782477,
-      "avg_edge": -0.3394754669745188,
-      "avg_abs_edge": 0.6109090341035808,
-      "avg_actual_minus_line": -0.28157099697885196,
-      "clv_corr": 0.14790085096262803,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 12,
-          "hit_rate": 0.75,
-          "avg_edge": -3.585038017542807,
-          "avg_actual_minus_line": -1.1458333333333333
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 62,
-          "hit_rate": 0.6129032258064516,
-          "avg_edge": -2.328697928584603,
-          "avg_actual_minus_line": -0.6290322580645161
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 456,
-          "hit_rate": 0.7171052631578947,
-          "avg_edge": -1.33346720303892,
-          "avg_actual_minus_line": -0.8212719298245614
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 1703,
-          "hit_rate": 0.6465061655901351,
-          "avg_edge": -0.45650356835921796,
-          "avg_actual_minus_line": -0.36788021139166177
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 1009,
-          "hit_rate": 0.46878097125867196,
-          "avg_edge": 0.3534353448119355,
-          "avg_actual_minus_line": 0.1057978196233895
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 63,
-          "hit_rate": 0.4444444444444444,
-          "avg_edge": 1.2570301311311267,
-          "avg_actual_minus_line": 0.1349206349206349
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 3,
-          "hit_rate": 0.6666666666666666,
-          "avg_edge": 2.4186145059466413,
-          "avg_actual_minus_line": 0.5
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 2,
-          "hit_rate": 1.0,
-          "avg_edge": 3.078774452126822,
-          "avg_actual_minus_line": 2.5
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 2233,
-          "hit_rate": 0.6605463502015226,
-          "avg_edge": -0.7043826015603469,
-          "avg_actual_minus_line": -0.4718987908643081
-        },
-        {
-          "label": "over_edges",
-          "n": 1077,
-          "hit_rate": 0.4688950789229341,
-          "avg_edge": 0.41710543509619086,
-          "avg_actual_minus_line": 0.11304549675023212
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 79,
-          "hit_rate": 0.6455696202531646,
-          "avg_edge": -2.2023586754514626,
-          "avg_actual_minus_line": -0.5854430379746836
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 14,
-          "hit_rate": 0.7857142857142857,
-          "avg_edge": -2.6330648075900034,
-          "avg_actual_minus_line": -0.625
-        }
-      ]
-    },
-    "market_edge_summary": {
-      "n_records": 2755,
-      "hit_rate": 0.5194192377495462,
-      "avg_edge": -0.012667169387652175,
-      "avg_abs_edge": 0.614311441618342,
-      "avg_actual_minus_line": -0.33811252268602543,
-      "clv_corr": -0.016744317029022723,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 4,
-          "hit_rate": 0.5,
-          "avg_edge": -3.573387324810028,
-          "avg_actual_minus_line": 2.1875
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 16,
-          "hit_rate": 0.6875,
-          "avg_edge": -2.365543708205223,
-          "avg_actual_minus_line": -0.296875
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 208,
-          "hit_rate": 0.625,
-          "avg_edge": -1.328050896525383,
-          "avg_actual_minus_line": -0.2127403846153846
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 1294,
-          "hit_rate": 0.6414219474497682,
-          "avg_edge": -0.4136678528229935,
-          "avg_actual_minus_line": -0.37287480680061824
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 947,
-          "hit_rate": 0.3812038014783527,
-          "avg_edge": 0.40468936954307666,
-          "avg_actual_minus_line": -0.28880675818373813
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 236,
-          "hit_rate": 0.3177966101694915,
-          "avg_edge": 1.3628921246124526,
-          "avg_actual_minus_line": -0.5455508474576272
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 44,
-          "hit_rate": 0.4772727272727273,
-          "avg_edge": 2.3587335564873437,
-          "avg_actual_minus_line": -0.011363636363636364
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 6,
-          "hit_rate": 0.16666666666666666,
-          "avg_edge": 3.3495556910832724,
-          "avg_actual_minus_line": -1.0
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 1522,
-          "hit_rate": 0.6392904073587385,
-          "avg_edge": -0.5674527179111412,
-          "avg_actual_minus_line": -0.34346254927726677
-        },
-        {
-          "label": "over_edges",
-          "n": 1233,
-          "hit_rate": 0.37145174371451745,
-          "avg_edge": 0.6721532725042784,
-          "avg_actual_minus_line": -0.33150851581508517
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 70,
-          "hit_rate": 0.5,
-          "avg_edge": 1.024848028591701,
-          "avg_actual_minus_line": -0.03571428571428571
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 10,
-          "hit_rate": 0.3,
-          "avg_edge": 0.5803784847259521,
-          "avg_actual_minus_line": 0.275
-        }
-      ]
-    },
-    "market_edge_sign_accuracy": 0.5194192377495462,
-    "meta_summary": {
-      "n_records": 2295,
-      "positive_rate": 0.375599128540305,
-      "auc": 0.5707106114895333,
-      "top_prob_threshold": 0.6,
-      "top_prob_n": 140,
-      "top_prob_hit_rate": 0.45714285714285713
-    },
-    "blend_summary": {
-      "base_models": [
-        "xgb",
-        "etr",
-        "bayes",
-        "fp"
-      ],
-      "coefficients": {
-        "xgb": 0.17767922349835105,
-        "etr": 0.1269374204531812,
-        "bayes": 0.614233918457334,
-        "fp": 0.08895151545241896
-      },
-      "intercept": -0.03328017748452128,
-      "n_oof_rows": 49675
-    },
-    "probability_summary": {
-      "kind": "quantile_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 3310,
-      "pinball_loss": {
-        "q10": 0.25208543646927567,
-        "q25": 0.4627079362867774,
-        "q50": 0.6633234618743531,
-        "q75": 0.5892270187879032,
-        "q90": 0.3580072639707352
-      },
-      "raw_probability_metrics": {
-        "n_records": 3310,
-        "positive_rate": 0.38157099697885194,
-        "brier": 0.2341176741766225,
-        "log_loss": 0.6688919892125105,
-        "ece": 0.035883265134404284
-      }
-    }
-  },
-  "pra": {
-    "target": "pra",
-    "avg_mae": 6.1892578125,
-    "avg_rmse": 7.917322398035665,
-    "avg_bet_accuracy": 0.5075545607162842,
-    "avg_proxy_bet_accuracy": 0.533163068329383,
-    "avg_all_line_bet_accuracy": 0.531202818319074,
-    "n_features_original": 153,
-    "n_features_selected": 151,
-    "n_samples": 71535,
-    "n_real_lines": 3574,
-    "n_proxy_lines": 67961,
-    "n_cal_records": 3574,
-    "oof_bias": 0.2545860122482442,
-    "real_line_summary": {
-      "n_records": 3574,
-      "hit_rate": 0.5075545607162842,
-      "avg_edge": -0.3187430650746282,
-      "avg_abs_edge": 2.3572541881554874,
-      "avg_actual_minus_line": -0.2709848908785674,
-      "clv_corr": 0.042334712076868695,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 605,
-          "hit_rate": 0.5570247933884298,
-          "avg_edge": -5.198015897136089,
-          "avg_actual_minus_line": -1.0475206611570247
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 302,
-          "hit_rate": 0.5662251655629139,
-          "avg_edge": -2.477988792571011,
-          "avg_actual_minus_line": -0.6705298013245033
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 429,
-          "hit_rate": 0.5081585081585082,
-          "avg_edge": -1.4773958535183283,
-          "avg_actual_minus_line": 0.5134032634032634
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 519,
-          "hit_rate": 0.5279383429672447,
-          "avg_edge": -0.4914297441986025,
-          "avg_actual_minus_line": -0.11127167630057803
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 519,
-          "hit_rate": 0.45664739884393063,
-          "avg_edge": 0.5026649758076163,
-          "avg_actual_minus_line": -0.319364161849711
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 459,
-          "hit_rate": 0.4662309368191721,
-          "avg_edge": 1.4933371678936196,
-          "avg_actual_minus_line": -0.3622004357298475
+          "n": 528,
+          "hit_rate": 0.49242424242424243,
+          "avg_edge": 1.4541019501559662,
+          "avg_actual_minus_line": 0.3806818181818182
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
           "n": 300,
-          "hit_rate": 0.48333333333333334,
-          "avg_edge": 2.460021670659383,
-          "avg_actual_minus_line": -0.015
+          "hit_rate": 0.44666666666666666,
+          "avg_edge": 2.462475003401438,
+          "avg_actual_minus_line": -0.165
         },
         {
           "label": "OVER  >=3",
           "lower": 3.0,
           "upper": null,
-          "n": 441,
-          "hit_rate": 0.4943310657596372,
-          "avg_edge": 4.4410158576878835,
-          "avg_actual_minus_line": 0.09467120181405896
+          "n": 260,
+          "hit_rate": 0.4576923076923077,
+          "avg_edge": 4.382658426578228,
+          "avg_actual_minus_line": -0.2528846153846154
         }
       ],
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 1855,
-          "hit_rate": 0.5390835579514824,
-          "avg_edge": -2.5779013970470173,
-          "avg_actual_minus_line": -0.3632075471698113
+          "n": 1599,
+          "hit_rate": 0.5259537210756723,
+          "avg_edge": -1.518432213029905,
+          "avg_actual_minus_line": 0.06613508442776736
         },
         {
           "label": "over_edges",
-          "n": 1719,
-          "hit_rate": 0.4735311227457824,
-          "avg_edge": 2.1191503065418824,
-          "avg_actual_minus_line": -0.17146596858638743
+          "n": 1776,
+          "hit_rate": 0.46621621621621623,
+          "avg_edge": 1.6842600070176068,
+          "avg_actual_minus_line": -0.04265202702702703
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 1648,
-          "hit_rate": 0.5285194174757282,
-          "avg_edge": -0.7261272686199077,
-          "avg_actual_minus_line": -0.4848300970873786
+          "n": 1009,
+          "hit_rate": 0.466798810703667,
+          "avg_edge": 0.4799139556374375,
+          "avg_actual_minus_line": 0.11868186323092171
         },
         {
           "label": "strong_edges_abs_ge_3",
-          "n": 1046,
-          "hit_rate": 0.5305927342256214,
-          "avg_edge": -1.134141132434969,
-          "avg_actual_minus_line": -0.5659655831739961
+          "n": 448,
+          "hit_rate": 0.46875,
+          "avg_edge": 0.8402869078729834,
+          "avg_actual_minus_line": 0.21205357142857142
         }
       ]
     },
-    "market_edge_summary": {
-      "n_records": 2975,
-      "hit_rate": 0.5122689075630252,
-      "avg_edge": 0.04379677521675324,
-      "avg_abs_edge": 2.196630485513944,
-      "avg_actual_minus_line": -0.2850420168067227,
-      "clv_corr": 0.013755903524814872,
+    "market_edge_sign_accuracy": 0.4945185185185185,
+    "meta_summary": {
+      "n_records": 2810,
+      "positive_rate": 0.4864768683274021,
+      "auc": 0.49751493094580146,
+      "top_prob_threshold": 0.6,
+      "top_prob_n": 571,
+      "top_prob_hit_rate": 0.46234676007005254
+    },
+    "blend_summary": {
+      "base_models": [
+        "xgb",
+        "etr",
+        "bayes",
+        "fp"
+      ],
+      "coefficients": {
+        "xgb": 3.0711707897706915e-05,
+        "etr": 0.2907916574972641,
+        "bayes": 0.6350580825646592,
+        "fp": 0.07396124546947462
+      },
+      "intercept": 0.06310113330159517,
+      "n_oof_rows": 49875
+    },
+    "probability_summary": {
+      "kind": "quantile_probability_sidecar",
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 4052,
+      "pinball_loss": {
+        "q10": 1.0588567616472029,
+        "q25": 1.6918295852860268,
+        "q50": 2.307899718216734,
+        "q75": 1.9793870840613097,
+        "q90": 1.172151665031453
+      },
+      "raw_probability_metrics": {
+        "n_records": 4052,
+        "positive_rate": 0.4716189536031589,
+        "brier": 0.2566198350967326,
+        "log_loss": 0.714561557942156,
+        "ece": 0.06740180440767198
+      }
+    }
+  },
+  "trb": {
+    "target": "trb",
+    "avg_mae": 1.9195469211771374,
+    "avg_rmse": 2.5161159815511995,
+    "avg_bet_accuracy": 0.5753597576369603,
+    "avg_proxy_bet_accuracy": 0.5126522428349978,
+    "avg_all_line_bet_accuracy": 0.516858813700919,
+    "n_features_original": 180,
+    "n_features_selected": 8,
+    "n_samples": 71824,
+    "n_real_lines": 3961,
+    "n_proxy_lines": 67863,
+    "n_cal_records": 3961,
+    "oof_bias": 0.012543337455045035,
+    "real_line_summary": {
+      "n_records": 3961,
+      "hit_rate": 0.5753597576369603,
+      "avg_edge": -0.3131627723504806,
+      "avg_abs_edge": 0.7025055316043651,
+      "avg_actual_minus_line": -0.28117899520323153,
+      "clv_corr": 0.15969299782985116,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
           "lower": null,
           "upper": -3.0,
-          "n": 393,
-          "hit_rate": 0.5216284987277354,
-          "avg_edge": -4.678365045528072,
-          "avg_actual_minus_line": 0.2741730279898219
+          "n": 39,
+          "hit_rate": 0.6923076923076923,
+          "avg_edge": -4.107325025446995,
+          "avg_actual_minus_line": -0.6410256410256411
         },
         {
           "label": "UNDER 2-3",
           "lower": -3.0,
           "upper": -2.0,
-          "n": 241,
-          "hit_rate": 0.5643153526970954,
-          "avg_edge": -2.493697815416265,
-          "avg_actual_minus_line": -1.2883817427385893
+          "n": 114,
+          "hit_rate": 0.7719298245614035,
+          "avg_edge": -2.362897762773734,
+          "avg_actual_minus_line": -1.8333333333333333
         },
         {
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 356,
-          "hit_rate": 0.5842696629213483,
-          "avg_edge": -1.498881857381778,
-          "avg_actual_minus_line": -0.9571629213483146
+          "n": 585,
+          "hit_rate": 0.6649572649572649,
+          "avg_edge": -1.375397132327929,
+          "avg_actual_minus_line": -0.7888888888888889
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 467,
-          "hit_rate": 0.5417558886509636,
-          "avg_edge": -0.49070570970301136,
-          "avg_actual_minus_line": -0.25963597430406854
+          "n": 1663,
+          "hit_rate": 0.6217678893565844,
+          "avg_edge": -0.46744902743361094,
+          "avg_actual_minus_line": -0.40859891761876127
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 435,
-          "hit_rate": 0.4896551724137931,
-          "avg_edge": 0.48826460910682706,
-          "avg_actual_minus_line": -0.011494252873563218
+          "n": 1382,
+          "hit_rate": 0.4630969609261939,
+          "avg_edge": 0.3823384562109885,
+          "avg_actual_minus_line": 0.11541244573082489
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 386,
-          "hit_rate": 0.45595854922279794,
-          "avg_edge": 1.4388786350507192,
-          "avg_actual_minus_line": -0.3957253886010363
+          "n": 166,
+          "hit_rate": 0.5783132530120482,
+          "avg_edge": 1.2737485244736682,
+          "avg_actual_minus_line": 0.5948795180722891
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
-          "n": 282,
-          "hit_rate": 0.46808510638297873,
-          "avg_edge": 2.4512277596385768,
-          "avg_actual_minus_line": -0.7109929078014184
+          "n": 10,
+          "hit_rate": 0.4,
+          "avg_edge": 2.3236470493209125,
+          "avg_actual_minus_line": -0.5
         },
         {
           "label": "OVER  >=3",
           "lower": 3.0,
           "upper": null,
-          "n": 415,
-          "hit_rate": 0.4843373493975904,
-          "avg_edge": 4.514667624163341,
-          "avg_actual_minus_line": 0.42168674698795183
+          "n": 2,
+          "hit_rate": 0.5,
+          "avg_edge": 4.011431331447149,
+          "avg_actual_minus_line": 4.0
         }
       ],
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 1457,
-          "hit_rate": 0.55044612216884,
-          "avg_edge": -2.1978998929767135,
-          "avg_actual_minus_line": -0.45624571036376116
+          "n": 2401,
+          "hit_rate": 0.6405664306538942,
+          "avg_edge": -0.8377888696303923,
+          "avg_actual_minus_line": -0.5726780508121616
         },
         {
           "label": "over_edges",
-          "n": 1518,
-          "hit_rate": 0.4756258234519104,
-          "avg_edge": 2.19541208849599,
-          "avg_actual_minus_line": -0.12071805006587616
+          "n": 1560,
+          "hit_rate": 0.475,
+          "avg_edge": 0.49429059916815293,
+          "avg_actual_minus_line": 0.1674679487179487
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 1331,
-          "hit_rate": 0.5063861758076634,
-          "avg_edge": 0.09410567681293215,
-          "avg_actual_minus_line": -0.17148760330578514
+          "n": 165,
+          "hit_rate": 0.7272727272727273,
+          "avg_edge": -2.413919319954758,
+          "avg_actual_minus_line": -1.4
         },
         {
           "label": "strong_edges_abs_ge_3",
-          "n": 808,
-          "hit_rate": 0.5024752475247525,
-          "avg_edge": 0.04330396180105681,
-          "avg_actual_minus_line": 0.3499381188118812
+          "n": 41,
+          "hit_rate": 0.6829268292682927,
+          "avg_edge": -3.711288129988744,
+          "avg_actual_minus_line": -0.4146341463414634
         }
       ]
     },
-    "market_edge_sign_accuracy": 0.5122689075630252,
+    "market_edge_summary": {
+      "n_records": 3300,
+      "hit_rate": 0.5257575757575758,
+      "avg_edge": -0.053881529945082905,
+      "avg_abs_edge": 0.7139841139777634,
+      "avg_actual_minus_line": -0.3621969696969697,
+      "clv_corr": 0.03381334156113591,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 6,
+          "hit_rate": 0.6666666666666666,
+          "avg_edge": -3.6345030864079795,
+          "avg_actual_minus_line": -1.375
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 45,
+          "hit_rate": 0.6666666666666666,
+          "avg_edge": -2.403035518858168,
+          "avg_actual_minus_line": -0.7333333333333333
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 402,
+          "hit_rate": 0.5945273631840796,
+          "avg_edge": -1.3510144999371239,
+          "avg_actual_minus_line": -0.22761194029850745
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 1330,
+          "hit_rate": 0.6338345864661654,
+          "avg_edge": -0.4465615538578249,
+          "avg_actual_minus_line": -0.4766917293233083
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 1123,
+          "hit_rate": 0.40516473731077474,
+          "avg_edge": 0.4212894565425813,
+          "avg_actual_minus_line": -0.31233303650934996
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 327,
+          "hit_rate": 0.40672782874617736,
+          "avg_edge": 1.3597561751666054,
+          "avg_actual_minus_line": -0.2423547400611621
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 57,
+          "hit_rate": 0.42105263157894735,
+          "avg_edge": 2.3900913062848543,
+          "avg_actual_minus_line": -0.21929824561403508
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 10,
+          "hit_rate": 0.7,
+          "avg_edge": 3.518573021888733,
+          "avg_actual_minus_line": 1.4
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 1783,
+          "hit_rate": 0.6259113853056646,
+          "avg_edge": -0.7105879486666834,
+          "avg_actual_minus_line": -0.4300336511497476
+        },
+        {
+          "label": "over_edges",
+          "n": 1517,
+          "hit_rate": 0.4080421885299934,
+          "avg_edge": 0.7179757835556512,
+          "avg_actual_minus_line": -0.2824653922214898
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 118,
+          "hit_rate": 0.5508474576271186,
+          "avg_edge": 0.3515026933055813,
+          "avg_actual_minus_line": -0.336864406779661
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 16,
+          "hit_rate": 0.6875,
+          "avg_edge": 0.8361694812774658,
+          "avg_actual_minus_line": 0.359375
+        }
+      ]
+    },
+    "market_edge_sign_accuracy": 0.5257575757575758,
     "meta_summary": {
-      "n_records": 2475,
-      "positive_rate": 0.47878787878787876,
-      "auc": 0.5083740555392013,
+      "n_records": 2750,
+      "positive_rate": 0.5272727272727272,
+      "auc": 0.5681862068965517,
       "top_prob_threshold": 0.6,
-      "top_prob_n": 392,
-      "top_prob_hit_rate": 0.5025510204081632
+      "top_prob_n": 1009,
+      "top_prob_hit_rate": 0.5877106045589693
+    },
+    "blend_summary": {
+      "base_models": [
+        "xgb",
+        "etr",
+        "bayes",
+        "fp"
+      ],
+      "coefficients": {
+        "xgb": 0.02622733935660164,
+        "etr": 0.26565647076167037,
+        "bayes": 0.6719152935774009,
+        "fp": 0.029101403093437662
+      },
+      "intercept": 0.030542236326529526,
+      "n_oof_rows": 49875
+    },
+    "probability_summary": {
+      "kind": "quantile_probability_sidecar",
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 3961,
+      "pinball_loss": {
+        "q10": 0.4063448901052033,
+        "q25": 0.6854127494818645,
+        "q50": 0.9503543392203544,
+        "q75": 0.833001766418877,
+        "q90": 0.5011266094345102
+      },
+      "raw_probability_metrics": {
+        "n_records": 3961,
+        "positive_rate": 0.4049482453925776,
+        "brier": 0.2397630371881035,
+        "log_loss": 0.6850614898437397,
+        "ece": 0.040982203677224154
+      }
+    }
+  },
+  "ast": {
+    "target": "ast",
+    "avg_mae": 1.3617720738542094,
+    "avg_rmse": 1.8382605475300164,
+    "avg_bet_accuracy": 0.6043249561659848,
+    "avg_proxy_bet_accuracy": 0.5018074315409489,
+    "avg_all_line_bet_accuracy": 0.5082873851294905,
+    "n_features_original": 180,
+    "n_features_selected": 8,
+    "n_samples": 71824,
+    "n_real_lines": 3422,
+    "n_proxy_lines": 68402,
+    "n_cal_records": 3422,
+    "oof_bias": -0.029532998026557816,
+    "real_line_summary": {
+      "n_records": 3422,
+      "hit_rate": 0.6043249561659848,
+      "avg_edge": -0.3719835384210602,
+      "avg_abs_edge": 0.6588205685746426,
+      "avg_actual_minus_line": -0.2976329631794272,
+      "clv_corr": 0.15097413485392921,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 20,
+          "hit_rate": 0.7,
+          "avg_edge": -3.903849394938266,
+          "avg_actual_minus_line": -1.05
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 88,
+          "hit_rate": 0.6136363636363636,
+          "avg_edge": -2.356136683836512,
+          "avg_actual_minus_line": -0.39488636363636365
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 534,
+          "hit_rate": 0.7134831460674157,
+          "avg_edge": -1.3381844164312657,
+          "avg_actual_minus_line": -0.8206928838951311
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 1679,
+          "hit_rate": 0.6545562835020846,
+          "avg_edge": -0.45485308672958485,
+          "avg_actual_minus_line": -0.3981536628945801
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 1016,
+          "hit_rate": 0.4714566929133858,
+          "avg_edge": 0.36711023684649197,
+          "avg_actual_minus_line": 0.1186023622047244
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 79,
+          "hit_rate": 0.46835443037974683,
+          "avg_edge": 1.2770607693083875,
+          "avg_actual_minus_line": 0.2468354430379747
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 3,
+          "hit_rate": 0.3333333333333333,
+          "avg_edge": 2.375772043748564,
+          "avg_actual_minus_line": -1.1666666666666667
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 3,
+          "hit_rate": 1.0,
+          "avg_edge": 3.2596803500450626,
+          "avg_actual_minus_line": 2.5
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 2321,
+          "hit_rate": 0.6669538991813874,
+          "avg_edge": -0.7598904899050613,
+          "avg_actual_minus_line": -0.500861697544162
+        },
+        {
+          "label": "over_edges",
+          "n": 1101,
+          "hit_rate": 0.47229791099000906,
+          "avg_edge": 0.445756728967102,
+          "avg_actual_minus_line": 0.1307901907356948
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 114,
+          "hit_rate": 0.631578947368421,
+          "avg_edge": -2.355356656973663,
+          "avg_actual_minus_line": -0.45394736842105265
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 23,
+          "hit_rate": 0.7391304347826086,
+          "avg_edge": -2.9694759499404406,
+          "avg_actual_minus_line": -0.5869565217391305
+        }
+      ]
+    },
+    "market_edge_summary": {
+      "n_records": 2850,
+      "hit_rate": 0.5287719298245614,
+      "avg_edge": -0.15337552225380613,
+      "avg_abs_edge": 0.5829290390396981,
+      "avg_actual_minus_line": -0.3587719298245614,
+      "clv_corr": -0.0040303281622245096,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 9,
+          "hit_rate": 0.5555555555555556,
+          "avg_edge": -4.500830968221028,
+          "avg_actual_minus_line": -0.08333333333333333
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 25,
+          "hit_rate": 0.6,
+          "avg_edge": -2.297301368713379,
+          "avg_actual_minus_line": -0.13
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 275,
+          "hit_rate": 0.6290909090909091,
+          "avg_edge": -1.3182542168010365,
+          "avg_actual_minus_line": -0.35363636363636364
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 1380,
+          "hit_rate": 0.644927536231884,
+          "avg_edge": -0.4266478820950252,
+          "avg_actual_minus_line": -0.36141304347826086
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 994,
+          "hit_rate": 0.358148893360161,
+          "avg_edge": 0.38108520032378884,
+          "avg_actual_minus_line": -0.38028169014084506
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 154,
+          "hit_rate": 0.4155844155844156,
+          "avg_edge": 1.3285944167669717,
+          "avg_actual_minus_line": -0.24512987012987014
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 13,
+          "hit_rate": 0.3076923076923077,
+          "avg_edge": 2.20857939353356,
+          "avg_actual_minus_line": -0.5192307692307693
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 1689,
+          "hit_rate": 0.6412078152753108,
+          "avg_edge": -0.6212161041108606,
+          "avg_actual_minus_line": -0.3552397868561279
+        },
+        {
+          "label": "over_edges",
+          "n": 1161,
+          "hit_rate": 0.3652024117140396,
+          "avg_edge": 0.5272297686648545,
+          "avg_actual_minus_line": -0.36391042204995694
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 47,
+          "hit_rate": 0.5106382978723404,
+          "avg_edge": -1.4729464003380308,
+          "avg_actual_minus_line": -0.22872340425531915
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 9,
+          "hit_rate": 0.5555555555555556,
+          "avg_edge": -4.500830968221028,
+          "avg_actual_minus_line": -0.08333333333333333
+        }
+      ]
+    },
+    "market_edge_sign_accuracy": 0.5287719298245614,
+    "meta_summary": {
+      "n_records": 2375,
+      "positive_rate": 0.5136842105263157,
+      "auc": 0.6051039670711802,
+      "top_prob_threshold": 0.6,
+      "top_prob_n": 867,
+      "top_prob_hit_rate": 0.6170703575547867
+    },
+    "blend_summary": {
+      "base_models": [
+        "xgb",
+        "etr",
+        "bayes",
+        "fp"
+      ],
+      "coefficients": {
+        "xgb": 0.0,
+        "etr": 0.2904353218056404,
+        "bayes": 0.6948482713375473,
+        "fp": 0.0248821543267117
+      },
+      "intercept": -0.010124596962779009,
+      "n_oof_rows": 49875
+    },
+    "probability_summary": {
+      "kind": "quantile_probability_sidecar",
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 3422,
+      "pinball_loss": {
+        "q10": 0.25172002412981703,
+        "q25": 0.4644827709273417,
+        "q50": 0.6701773395483548,
+        "q75": 0.5952227130123374,
+        "q90": 0.36294758979130715
+      },
+      "raw_probability_metrics": {
+        "n_records": 3422,
+        "positive_rate": 0.3778492109877265,
+        "brier": 0.23267186863025732,
+        "log_loss": 0.6654063655813179,
+        "ece": 0.03437352602996558
+      }
+    }
+  },
+  "pra": {
+    "target": "pra",
+    "avg_mae": 6.22939395904541,
+    "avg_rmse": 7.9593724298316015,
+    "avg_bet_accuracy": 0.5150856210926882,
+    "avg_proxy_bet_accuracy": 0.5309322012464925,
+    "avg_all_line_bet_accuracy": 0.5296908939014202,
+    "n_features_original": 180,
+    "n_features_selected": 11,
+    "n_samples": 71824,
+    "n_real_lines": 3679,
+    "n_proxy_lines": 68145,
+    "n_cal_records": 3679,
+    "oof_bias": 0.2661027140849415,
+    "real_line_summary": {
+      "n_records": 3679,
+      "hit_rate": 0.5150856210926882,
+      "avg_edge": -0.4015618631715974,
+      "avg_abs_edge": 2.4086201986109117,
+      "avg_actual_minus_line": -0.2885294917097037,
+      "clv_corr": 0.05463432716326773,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 647,
+          "hit_rate": 0.5486862442040186,
+          "avg_edge": -5.399335946697724,
+          "avg_actual_minus_line": -0.9416537867078826
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 315,
+          "hit_rate": 0.5968253968253968,
+          "avg_edge": -2.4580496712336464,
+          "avg_actual_minus_line": -0.830952380952381
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 424,
+          "hit_rate": 0.535377358490566,
+          "avg_edge": -1.5097113487855442,
+          "avg_actual_minus_line": -0.4982311320754717
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 543,
+          "hit_rate": 0.5248618784530387,
+          "avg_edge": -0.4816874526921337,
+          "avg_actual_minus_line": 0.2292817679558011
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 498,
+          "hit_rate": 0.4738955823293173,
+          "avg_edge": 0.4761943252211115,
+          "avg_actual_minus_line": -0.11947791164658635
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 490,
+          "hit_rate": 0.45102040816326533,
+          "avg_edge": 1.4794751206222845,
+          "avg_actual_minus_line": -0.050510204081632655
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 351,
+          "hit_rate": 0.4928774928774929,
+          "avg_edge": 2.457570709054626,
+          "avg_actual_minus_line": -0.36253561253561256
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 411,
+          "hit_rate": 0.5109489051094891,
+          "avg_edge": 4.5432820099693725,
+          "avg_actual_minus_line": 0.2621654501216545
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 1929,
+          "hit_rate": 0.5469155002592017,
+          "avg_edge": -2.6797977722389454,
+          "avg_actual_minus_line": -0.4965007776049767
+        },
+        {
+          "label": "over_edges",
+          "n": 1750,
+          "hit_rate": 0.48,
+          "avg_edge": 2.109705033166068,
+          "avg_actual_minus_line": -0.05928571428571429
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 1724,
+          "hit_rate": 0.537122969837587,
+          "avg_edge": -0.8919720295687009,
+          "avg_actual_minus_line": -0.5165313225058005
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 1058,
+          "hit_rate": 0.5340264650283554,
+          "avg_edge": -1.536938989996234,
+          "avg_actual_minus_line": -0.47400756143667294
+        }
+      ]
+    },
+    "market_edge_summary": {
+      "n_records": 3065,
+      "hit_rate": 0.49592169657422513,
+      "avg_edge": -0.23322517242659413,
+      "avg_abs_edge": 2.0979792911152173,
+      "avg_actual_minus_line": -0.2859706362153344,
+      "clv_corr": -0.03738127324725692,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 443,
+          "hit_rate": 0.5124153498871332,
+          "avg_edge": -4.363845050738574,
+          "avg_actual_minus_line": 0.007336343115124154
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 327,
+          "hit_rate": 0.5015290519877675,
+          "avg_edge": -2.499707905888922,
+          "avg_actual_minus_line": 0.4694189602446483
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 407,
+          "hit_rate": 0.5331695331695332,
+          "avg_edge": -1.4655218106815797,
+          "avg_actual_minus_line": -0.23157248157248156
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 445,
+          "hit_rate": 0.5685393258426966,
+          "avg_edge": -0.5067766757922645,
+          "avg_actual_minus_line": -0.7595505617977528
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 502,
+          "hit_rate": 0.45617529880478086,
+          "avg_edge": 0.4987664875598528,
+          "avg_actual_minus_line": -0.50199203187251
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 369,
+          "hit_rate": 0.4823848238482385,
+          "avg_edge": 1.4850094544532175,
+          "avg_actual_minus_line": -0.16260162601626016
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 249,
+          "hit_rate": 0.4497991967871486,
+          "avg_edge": 2.4616704370123315,
+          "avg_actual_minus_line": 0.12650602409638553
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 323,
+          "hit_rate": 0.43343653250773995,
+          "avg_edge": 4.478112949306381,
+          "avg_actual_minus_line": -0.9922600619195047
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 1622,
+          "hit_rate": 0.530826140567201,
+          "avg_edge": -2.202571418235405,
+          "avg_actual_minus_line": -0.16985203452527745
+        },
+        {
+          "label": "over_edges",
+          "n": 1443,
+          "hit_rate": 0.4566874566874567,
+          "avg_edge": 1.9804128114278,
+          "avg_actual_minus_line": -0.4164934164934165
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 1342,
+          "hit_rate": 0.4791356184798808,
+          "avg_edge": -0.5150532200155244,
+          "avg_actual_minus_line": -0.09854694485842026
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 766,
+          "hit_rate": 0.47911227154047,
+          "avg_edge": -0.6354476172992517,
+          "avg_actual_minus_line": -0.4141644908616188
+        }
+      ]
+    },
+    "market_edge_sign_accuracy": 0.49592169657422513,
+    "meta_summary": {
+      "n_records": 2550,
+      "positive_rate": 0.48196078431372547,
+      "auc": 0.508358130444611,
+      "top_prob_threshold": 0.6,
+      "top_prob_n": 604,
+      "top_prob_hit_rate": 0.48013245033112584
     },
     "blend_summary": null,
     "probability_summary": {
       "kind": "quantile_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 3574,
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 3679,
       "pinball_loss": {
-        "q10": 1.1714892242619053,
-        "q25": 2.258009437506774,
-        "q50": 3.0096426127387943,
-        "q75": 2.5551262185856927,
-        "q90": 1.4931936849790926
+        "q10": 1.1855500209663534,
+        "q25": 2.2915451307694963,
+        "q50": 3.0682570020974103,
+        "q75": 2.605432871218929,
+        "q90": 1.5261260527094194
       },
       "raw_probability_metrics": {
-        "n_records": 3574,
-        "positive_rate": 0.46698377168438726,
-        "brier": 0.25838214687716704,
-        "log_loss": 0.7234678193943921,
-        "ece": 0.08304166141013491
+        "n_records": 3679,
+        "positive_rate": 0.4658874694210383,
+        "brier": 0.26361347671912916,
+        "log_loss": 0.7553599887608451,
+        "ece": 0.10019453431760483
       }
     }
   },
   "pr": {
     "target": "pr",
-    "avg_mae": 5.685870838165283,
-    "avg_rmse": 7.293958730261285,
-    "avg_bet_accuracy": 0.517774762550882,
-    "avg_proxy_bet_accuracy": 0.527096533358946,
-    "avg_all_line_bet_accuracy": 0.5266230498238551,
-    "n_features_original": 153,
-    "n_features_selected": 153,
-    "n_samples": 71535,
-    "n_real_lines": 3685,
-    "n_proxy_lines": 67850,
-    "n_cal_records": 3685,
-    "oof_bias": 0.1971099137999911,
+    "avg_mae": 5.702943992614746,
+    "avg_rmse": 7.316241880056556,
+    "avg_bet_accuracy": 0.5228896533474464,
+    "avg_proxy_bet_accuracy": 0.5319437628784859,
+    "avg_all_line_bet_accuracy": 0.5312113617376776,
+    "n_features_original": 180,
+    "n_features_selected": 14,
+    "n_samples": 71824,
+    "n_real_lines": 3779,
+    "n_proxy_lines": 68045,
+    "n_cal_records": 3779,
+    "oof_bias": 0.18517969191522526,
     "real_line_summary": {
-      "n_records": 3685,
-      "hit_rate": 0.517774762550882,
-      "avg_edge": -0.1624395980602042,
-      "avg_abs_edge": 2.2644608187707824,
-      "avg_actual_minus_line": -0.23195386702849388,
-      "clv_corr": 0.08467296655575779,
+      "n_records": 3779,
+      "hit_rate": 0.5228896533474464,
+      "avg_edge": -0.41152389821125485,
+      "avg_abs_edge": 2.2843684049850106,
+      "avg_actual_minus_line": -0.27295580841492456,
+      "clv_corr": 0.09646517439771182,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
           "lower": null,
           "upper": -3.0,
-          "n": 541,
-          "hit_rate": 0.5841035120147874,
-          "avg_edge": -5.191756733684575,
-          "avg_actual_minus_line": -1.8350277264325323
+          "n": 627,
+          "hit_rate": 0.6172248803827751,
+          "avg_edge": -5.246892271239601,
+          "avg_actual_minus_line": -1.972488038277512
         },
         {
           "label": "UNDER 2-3",
           "lower": -3.0,
           "upper": -2.0,
-          "n": 334,
-          "hit_rate": 0.5688622754491018,
-          "avg_edge": -2.449335595090946,
-          "avg_actual_minus_line": -0.5808383233532934
+          "n": 351,
+          "hit_rate": 0.5213675213675214,
+          "avg_edge": -2.4767177084572296,
+          "avg_actual_minus_line": -0.23005698005698005
         },
         {
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 408,
-          "hit_rate": 0.5588235294117647,
-          "avg_edge": -1.4813827498286378,
-          "avg_actual_minus_line": -0.4411764705882353
+          "n": 470,
+          "hit_rate": 0.5212765957446809,
+          "avg_edge": -1.4564095700040776,
+          "avg_actual_minus_line": -0.20851063829787234
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 498,
-          "hit_rate": 0.5020080321285141,
-          "avg_edge": -0.4826132016009595,
-          "avg_actual_minus_line": 0.2063253012048193
+          "n": 515,
+          "hit_rate": 0.5339805825242718,
+          "avg_edge": -0.48591580437225046,
+          "avg_actual_minus_line": -0.10922330097087378
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 567,
-          "hit_rate": 0.48148148148148145,
-          "avg_edge": 0.5114540019363323,
-          "avg_actual_minus_line": 0.15432098765432098
+          "n": 573,
+          "hit_rate": 0.4816753926701571,
+          "avg_edge": 0.5037822190795685,
+          "avg_actual_minus_line": 0.2962478184991274
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 546,
-          "hit_rate": 0.5,
-          "avg_edge": 1.4910266547849327,
-          "avg_actual_minus_line": 0.5673076923076923
+          "n": 501,
+          "hit_rate": 0.4870259481037924,
+          "avg_edge": 1.4925599850104478,
+          "avg_actual_minus_line": 0.4600798403193613
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
-          "n": 359,
-          "hit_rate": 0.49025069637883006,
-          "avg_edge": 2.4769663452105934,
-          "avg_actual_minus_line": 0.24094707520891365
+          "n": 373,
+          "hit_rate": 0.5067024128686327,
+          "avg_edge": 2.4464012815869207,
+          "avg_actual_minus_line": 0.18096514745308312
         },
         {
           "label": "OVER  >=3",
           "lower": 3.0,
           "upper": null,
-          "n": 432,
-          "hit_rate": 0.4675925925925926,
-          "avg_edge": 4.351037519949454,
-          "avg_actual_minus_line": -0.1724537037037037
+          "n": 369,
+          "hit_rate": 0.4796747967479675,
+          "avg_edge": 4.30838009077036,
+          "avg_actual_minus_line": -0.07452574525745258
         }
       ],
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 1781,
-          "hit_rate": 0.5524985962942167,
-          "avg_edge": -2.5107041089337976,
-          "avg_actual_minus_line": -0.7097136440202133
+          "n": 1963,
+          "hit_rate": 0.5552725420275089,
+          "avg_edge": -2.5949508440597775,
+          "avg_actual_minus_line": -0.749745287824758
         },
         {
           "label": "over_edges",
-          "n": 1904,
-          "hit_rate": 0.4852941176470588,
-          "avg_edge": 2.034125052079433,
-          "avg_actual_minus_line": 0.21494222689075632
+          "n": 1816,
+          "hit_rate": 0.4878854625550661,
+          "avg_edge": 1.9486452068001163,
+          "avg_actual_minus_line": 0.2424284140969163
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 1666,
-          "hit_rate": 0.5306122448979592,
-          "avg_edge": -0.5149696009213469,
-          "avg_actual_minus_line": -0.7051320528211285
+          "n": 1720,
+          "hit_rate": 0.5441860465116279,
+          "avg_edge": -0.9632729291915894,
+          "avg_actual_minus_line": -0.7427325581395349
         },
         {
           "label": "strong_edges_abs_ge_3",
-          "n": 973,
-          "hit_rate": 0.5323741007194245,
-          "avg_edge": -0.9548737762643279,
-          "avg_actual_minus_line": -1.0968653648509763
+          "n": 996,
+          "hit_rate": 0.5662650602409639,
+          "avg_edge": -1.7068365467600075,
+          "avg_actual_minus_line": -1.2693273092369477
         }
       ]
     },
     "market_edge_summary": {
-      "n_records": 3070,
-      "hit_rate": 0.4938110749185668,
-      "avg_edge": -0.07461182516847861,
-      "avg_abs_edge": 1.9934753285136972,
-      "avg_actual_minus_line": -0.2777687296416938,
-      "clv_corr": 0.04681443250582011,
+      "n_records": 3145,
+      "hit_rate": 0.49348171701112875,
+      "avg_edge": -0.19815024172366022,
+      "avg_abs_edge": 1.8443476760749584,
+      "avg_actual_minus_line": -0.3138314785373609,
+      "clv_corr": -0.031043916067384606,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
           "lower": null,
           "upper": -3.0,
-          "n": 351,
-          "hit_rate": 0.5584045584045584,
-          "avg_edge": -4.5433951076279335,
-          "avg_actual_minus_line": -1.3247863247863247
+          "n": 349,
+          "hit_rate": 0.5358166189111748,
+          "avg_edge": -4.397250670758223,
+          "avg_actual_minus_line": 0.33954154727793695
         },
         {
           "label": "UNDER 2-3",
           "lower": -3.0,
           "upper": -2.0,
-          "n": 287,
-          "hit_rate": 0.5296167247386759,
-          "avg_edge": -2.4529697762133766,
-          "avg_actual_minus_line": -0.156794425087108
+          "n": 283,
+          "hit_rate": 0.5759717314487632,
+          "avg_edge": -2.453368406834956,
+          "avg_actual_minus_line": -1.1413427561837455
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 477,
+          "hit_rate": 0.5324947589098532,
+          "avg_edge": -1.4754590770733431,
+          "avg_actual_minus_line": -0.06970649895178196
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 560,
+          "hit_rate": 0.5,
+          "avg_edge": -0.49837545133112665,
+          "avg_actual_minus_line": -0.011607142857142858
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 508,
+          "hit_rate": 0.4645669291338583,
+          "avg_edge": 0.4909074074647382,
+          "avg_actual_minus_line": -0.2706692913385827
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 421,
+          "hit_rate": 0.43705463182897863,
+          "avg_edge": 1.4193776044596402,
+          "avg_actual_minus_line": -0.7030878859857482
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 299,
+          "hit_rate": 0.45819397993311034,
+          "avg_edge": 2.4329548527963185,
+          "avg_actual_minus_line": -0.2048494983277592
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 248,
+          "hit_rate": 0.4475806451612903,
+          "avg_edge": 4.089729959926298,
+          "avg_actual_minus_line": -1.0
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 1669,
+          "hit_rate": 0.5296584781306172,
+          "avg_edge": -1.9244026217725152,
+          "avg_actual_minus_line": -0.146345116836429
+        },
+        {
+          "label": "over_edges",
+          "n": 1476,
+          "hit_rate": 0.45257452574525747,
+          "avg_edge": 1.7538248411364612,
+          "avg_actual_minus_line": -0.5032181571815718
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 1179,
+          "hit_rate": 0.5072094995759118,
+          "avg_edge": -0.41326311465741417,
+          "avg_actual_minus_line": -0.4357506361323155
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 597,
+          "hit_rate": 0.4991624790619765,
+          "avg_edge": -0.8716707772745359,
+          "avg_actual_minus_line": -0.2169179229480737
+        }
+      ]
+    },
+    "market_edge_sign_accuracy": 0.49348171701112875,
+    "meta_summary": {
+      "n_records": 2620,
+      "positive_rate": 0.49809160305343514,
+      "auc": 0.4945081071631485,
+      "top_prob_threshold": 0.6,
+      "top_prob_n": 668,
+      "top_prob_hit_rate": 0.5029940119760479
+    },
+    "blend_summary": null,
+    "probability_summary": {
+      "kind": "quantile_probability_sidecar",
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 3779,
+      "pinball_loss": {
+        "q10": 1.0600719023049445,
+        "q25": 2.0657803755323343,
+        "q50": 2.7838769152790572,
+        "q75": 2.374986147416704,
+        "q90": 1.4011035089914856
+      },
+      "raw_probability_metrics": {
+        "n_records": 3779,
+        "positive_rate": 0.4654670547763959,
+        "brier": 0.2578294627815692,
+        "log_loss": 0.7343160282958884,
+        "ece": 0.07718827145430691
+      }
+    }
+  },
+  "pa": {
+    "target": "pa",
+    "avg_mae": 5.203106212615967,
+    "avg_rmse": 6.711180057439911,
+    "avg_bet_accuracy": 0.5254131587153102,
+    "avg_proxy_bet_accuracy": 0.53032365233522,
+    "avg_all_line_bet_accuracy": 0.5295238095238095,
+    "n_features_original": 180,
+    "n_features_selected": 12,
+    "n_samples": 71824,
+    "n_real_lines": 3207,
+    "n_proxy_lines": 68617,
+    "n_cal_records": 3207,
+    "oof_bias": 0.29452752080703204,
+    "real_line_summary": {
+      "n_records": 3207,
+      "hit_rate": 0.5254131587153102,
+      "avg_edge": -0.4866816241457933,
+      "avg_abs_edge": 2.1742468715866368,
+      "avg_actual_minus_line": -0.3066729030246336,
+      "clv_corr": 0.08375601168029294,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 532,
+          "hit_rate": 0.6165413533834586,
+          "avg_edge": -5.150437884760978,
+          "avg_actual_minus_line": -1.7763157894736843
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 279,
+          "hit_rate": 0.5232974910394266,
+          "avg_edge": -2.4759482687946717,
+          "avg_actual_minus_line": 0.17293906810035842
         },
         {
           "label": "UNDER 1-2",
@@ -1274,405 +1430,249 @@
           "upper": -1.0,
           "n": 404,
           "hit_rate": 0.5420792079207921,
-          "avg_edge": -1.4853651228517588,
-          "avg_actual_minus_line": -0.5408415841584159
+          "avg_edge": -1.4653875863198007,
+          "avg_actual_minus_line": -0.12623762376237624
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 554,
-          "hit_rate": 0.5018050541516246,
-          "avg_edge": -0.4976394633923923,
-          "avg_actual_minus_line": 0.37093862815884476
+          "n": 495,
+          "hit_rate": 0.5313131313131313,
+          "avg_edge": -0.4928479522165626,
+          "avg_actual_minus_line": -0.3414141414141414
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 503,
-          "hit_rate": 0.4433399602385686,
-          "avg_edge": 0.4955269392944546,
-          "avg_actual_minus_line": -0.4070576540755467
+          "n": 505,
+          "hit_rate": 0.4594059405940594,
+          "avg_edge": 0.4778311323411394,
+          "avg_actual_minus_line": -0.5341584158415842
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 376,
-          "hit_rate": 0.4308510638297872,
-          "avg_edge": 1.4613234933386459,
-          "avg_actual_minus_line": -0.42154255319148937
+          "n": 473,
+          "hit_rate": 0.4989429175475687,
+          "avg_edge": 1.4551652692589145,
+          "avg_actual_minus_line": 0.3276955602536998
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
-          "n": 265,
-          "hit_rate": 0.43018867924528303,
-          "avg_edge": 2.489505906374949,
-          "avg_actual_minus_line": -0.7
+          "n": 248,
+          "hit_rate": 0.5161290322580645,
+          "avg_edge": 2.477481888186547,
+          "avg_actual_minus_line": 0.655241935483871
         },
         {
           "label": "OVER  >=3",
           "lower": 3.0,
           "upper": null,
-          "n": 330,
-          "hit_rate": 0.5212121212121212,
-          "avg_edge": 4.506147662076083,
-          "avg_actual_minus_line": 0.6636363636363637
+          "n": 271,
+          "hit_rate": 0.4907749077490775,
+          "avg_edge": 4.28781354911213,
+          "avg_actual_minus_line": 0.3154981549815498
         }
       ],
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 1596,
-          "hit_rate": 0.5294486215538847,
-          "avg_edge": -1.989043722369762,
-          "avg_actual_minus_line": -0.3276942355889724
+          "n": 1710,
+          "hit_rate": 0.5590643274853802,
+          "avg_edge": -2.495204001699972,
+          "avg_actual_minus_line": -0.6530701754385965
         },
         {
           "label": "over_edges",
-          "n": 1474,
-          "hit_rate": 0.4552238805970149,
-          "avg_edge": 1.9982737297387452,
-          "avg_actual_minus_line": -0.22371099050203527
+          "n": 1497,
+          "hit_rate": 0.48697394789579157,
+          "avg_edge": 1.8076224945032684,
+          "avg_actual_minus_line": 0.08901135604542418
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 1233,
-          "hit_rate": 0.5141930251419302,
-          "avg_edge": -0.12326538108367796,
-          "avg_actual_minus_line": -0.386455798864558
+          "n": 1330,
+          "hit_rate": 0.5526315789473685,
+          "avg_edge": -1.2439169485766188,
+          "avg_actual_minus_line": -0.48778195488721804
         },
         {
           "label": "strong_edges_abs_ge_3",
-          "n": 681,
-          "hit_rate": 0.540381791483113,
-          "avg_edge": -0.15815411790352035,
-          "avg_actual_minus_line": -0.36123348017621143
-        }
-      ]
-    },
-    "market_edge_sign_accuracy": 0.4938110749185668,
-    "meta_summary": {
-      "n_records": 2555,
-      "positive_rate": 0.4512720156555773,
-      "auc": 0.5003408586172894,
-      "top_prob_threshold": 0.6,
-      "top_prob_n": 394,
-      "top_prob_hit_rate": 0.4365482233502538
-    },
-    "blend_summary": null,
-    "probability_summary": {
-      "kind": "quantile_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 3685,
-      "pinball_loss": {
-        "q10": 1.0570446142083167,
-        "q25": 2.057931821245421,
-        "q50": 2.7665985682779293,
-        "q75": 2.3573856162968405,
-        "q90": 1.3857393020852924
-      },
-      "raw_probability_metrics": {
-        "n_records": 3685,
-        "positive_rate": 0.4670284938941655,
-        "brier": 0.25669717224363203,
-        "log_loss": 0.7158082882914539,
-        "ece": 0.07087201363128989
-      }
-    }
-  },
-  "pa": {
-    "target": "pa",
-    "avg_mae": 5.180701065063476,
-    "avg_rmse": 6.68660341374941,
-    "avg_bet_accuracy": 0.5200128081972463,
-    "avg_proxy_bet_accuracy": 0.5285293491682754,
-    "avg_all_line_bet_accuracy": 0.528116087904714,
-    "n_features_original": 153,
-    "n_features_selected": 148,
-    "n_samples": 71535,
-    "n_real_lines": 3123,
-    "n_proxy_lines": 68412,
-    "n_cal_records": 3123,
-    "oof_bias": 0.2660863513135406,
-    "real_line_summary": {
-      "n_records": 3123,
-      "hit_rate": 0.5200128081972463,
-      "avg_edge": -0.2969427310309653,
-      "avg_abs_edge": 2.14815804013983,
-      "avg_actual_minus_line": -0.25248158821645855,
-      "clv_corr": 0.06119609345279996,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 475,
-          "hit_rate": 0.6021052631578947,
-          "avg_edge": -4.968147356133712,
-          "avg_actual_minus_line": -1.414736842105263
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 260,
-          "hit_rate": 0.5269230769230769,
-          "avg_edge": -2.4940868414365327,
-          "avg_actual_minus_line": -0.4028846153846154
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 404,
-          "hit_rate": 0.5544554455445545,
-          "avg_edge": -1.4848130315837293,
-          "avg_actual_minus_line": -0.3069306930693069
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 441,
-          "hit_rate": 0.5215419501133787,
-          "avg_edge": -0.4758000373840332,
-          "avg_actual_minus_line": -0.031746031746031744
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 536,
-          "hit_rate": 0.4906716417910448,
-          "avg_edge": 0.48650478605014175,
-          "avg_actual_minus_line": -0.21688432835820895
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 419,
-          "hit_rate": 0.5107398568019093,
-          "avg_edge": 1.500001407750751,
-          "avg_actual_minus_line": 0.652744630071599
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 295,
-          "hit_rate": 0.43389830508474575,
-          "avg_edge": 2.426453583927478,
-          "avg_actual_minus_line": -0.33728813559322035
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 293,
-          "hit_rate": 0.48464163822525597,
-          "avg_edge": 4.387719258513467,
-          "avg_actual_minus_line": 0.23378839590443687
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 1580,
-          "hit_rate": 0.5550632911392405,
-          "avg_edge": -2.416471426698226,
-          "avg_actual_minus_line": -0.5789556962025316
-        },
-        {
-          "label": "over_edges",
-          "n": 1543,
-          "hit_rate": 0.48412184057031754,
-          "avg_edge": 1.8734106968071889,
-          "avg_actual_minus_line": 0.08182112767336358
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 1323,
-          "hit_rate": 0.5238095238095238,
-          "avg_edge": -0.7610937437142554,
-          "avg_actual_minus_line": -0.6105442176870748
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 768,
-          "hit_rate": 0.5572916666666666,
-          "avg_edge": -1.3987867857019107,
-          "avg_actual_minus_line": -0.7858072916666666
+          "n": 803,
+          "hit_rate": 0.5740971357409713,
+          "avg_edge": -1.9651749475510005,
+          "avg_actual_minus_line": -1.0703611457036115
         }
       ]
     },
     "market_edge_summary": {
-      "n_records": 2600,
-      "hit_rate": 0.525,
-      "avg_edge": -0.09235747601263798,
-      "avg_abs_edge": 2.1461842328317178,
-      "avg_actual_minus_line": -0.26326923076923076,
-      "clv_corr": 0.017868132149550124,
+      "n_records": 2670,
+      "hit_rate": 0.5179775280898876,
+      "avg_edge": -0.11467509234868241,
+      "avg_abs_edge": 1.9890062127806498,
+      "avg_actual_minus_line": -0.34737827715355807,
+      "clv_corr": 0.04717546673497665,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
           "lower": null,
           "upper": -3.0,
-          "n": 329,
-          "hit_rate": 0.5319148936170213,
-          "avg_edge": -4.653311895382078,
-          "avg_actual_minus_line": -0.5349544072948328
+          "n": 306,
+          "hit_rate": 0.5392156862745098,
+          "avg_edge": -4.595592708369486,
+          "avg_actual_minus_line": -0.5383986928104575
         },
         {
           "label": "UNDER 2-3",
           "lower": -3.0,
           "upper": -2.0,
-          "n": 248,
-          "hit_rate": 0.5846774193548387,
-          "avg_edge": -2.4674339794343516,
-          "avg_actual_minus_line": -0.6834677419354839
+          "n": 262,
+          "hit_rate": 0.5534351145038168,
+          "avg_edge": -2.465412666779438,
+          "avg_actual_minus_line": -0.5152671755725191
         },
         {
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 373,
-          "hit_rate": 0.5924932975871313,
-          "avg_edge": -1.4924237568320922,
-          "avg_actual_minus_line": -1.14343163538874
+          "n": 377,
+          "hit_rate": 0.5915119363395226,
+          "avg_edge": -1.4608270635023042,
+          "avg_actual_minus_line": -1.459549071618037
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 433,
-          "hit_rate": 0.5288683602771362,
-          "avg_edge": -0.48629773607129106,
-          "avg_actual_minus_line": 0.0687066974595843
+          "n": 424,
+          "hit_rate": 0.535377358490566,
+          "avg_edge": -0.4846538961085245,
+          "avg_actual_minus_line": -0.23349056603773585
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 379,
-          "hit_rate": 0.5013192612137203,
-          "avg_edge": 0.4930941545008866,
-          "avg_actual_minus_line": 0.5771767810026385
+          "n": 442,
+          "hit_rate": 0.4411764705882353,
+          "avg_edge": 0.5027676003709082,
+          "avg_actual_minus_line": -0.7279411764705882
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 327,
-          "hit_rate": 0.48623853211009177,
-          "avg_edge": 1.4653717476293582,
-          "avg_actual_minus_line": 0.06039755351681957
+          "n": 346,
+          "hit_rate": 0.523121387283237,
+          "avg_edge": 1.4842630245782047,
+          "avg_actual_minus_line": 0.7716763005780347
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
-          "n": 189,
-          "hit_rate": 0.4708994708994709,
-          "avg_edge": 2.4508183380914113,
-          "avg_actual_minus_line": -0.44312169312169314
+          "n": 235,
+          "hit_rate": 0.502127659574468,
+          "avg_edge": 2.466337898944287,
+          "avg_actual_minus_line": 0.39680851063829786
         },
         {
           "label": "OVER  >=3",
           "lower": 3.0,
           "upper": null,
-          "n": 322,
-          "hit_rate": 0.48757763975155277,
-          "avg_edge": 4.784816372468605,
-          "avg_actual_minus_line": -0.30124223602484473
+          "n": 278,
+          "hit_rate": 0.46402877697841727,
+          "avg_edge": 4.269296236175427,
+          "avg_actual_minus_line": -0.06115107913669065
         }
       ],
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 1383,
-          "hit_rate": 0.556760665220535,
-          "avg_edge": -2.104196834054709,
-          "avg_actual_minus_line": -0.5366955892986262
+          "n": 1369,
+          "hit_rate": 0.5551497443389335,
+          "avg_edge": -2.051435019976376,
+          "avg_actual_minus_line": -0.6932067202337473
         },
         {
           "label": "over_edges",
-          "n": 1217,
-          "hit_rate": 0.48890714872637636,
-          "avg_edge": 2.1938987542027966,
-          "avg_actual_minus_line": 0.04745275267050123
+          "n": 1301,
+          "hit_rate": 0.47886241352805536,
+          "avg_edge": 1.9233144087445628,
+          "avg_actual_minus_line": 0.016525749423520367
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 1088,
-          "hit_rate": 0.5202205882352942,
-          "avg_edge": -0.1277092855204554,
-          "avg_actual_minus_line": -0.4836856617647059
+          "n": 1081,
+          "hit_rate": 0.515263644773358,
+          "avg_edge": -0.26432537238538323,
+          "avg_actual_minus_line": -0.20675300647548567
         },
         {
           "label": "strong_edges_abs_ge_3",
-          "n": 651,
-          "hit_rate": 0.5099846390168971,
-          "avg_edge": 0.015009613447291877,
-          "avg_actual_minus_line": -0.41935483870967744
+          "n": 584,
+          "hit_rate": 0.5034246575342466,
+          "avg_edge": -0.37566269709639355,
+          "avg_actual_minus_line": -0.3112157534246575
         }
       ]
     },
-    "market_edge_sign_accuracy": 0.525,
+    "market_edge_sign_accuracy": 0.5179775280898876,
     "meta_summary": {
-      "n_records": 2165,
-      "positive_rate": 0.4697459584295612,
-      "auc": 0.5178113190739998,
+      "n_records": 2225,
+      "positive_rate": 0.5155056179775281,
+      "auc": 0.5111737807590342,
       "top_prob_threshold": 0.6,
-      "top_prob_n": 477,
-      "top_prob_hit_rate": 0.480083857442348
+      "top_prob_n": 594,
+      "top_prob_hit_rate": 0.5218855218855218
     },
     "blend_summary": null,
     "probability_summary": {
       "kind": "quantile_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 3123,
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 3207,
       "pinball_loss": {
-        "q10": 0.9581437142868279,
-        "q25": 1.8718952437795235,
-        "q50": 2.521678650451985,
-        "q75": 2.1473255804487787,
-        "q90": 1.2657801613226538
+        "q10": 0.9604157952253406,
+        "q25": 1.8818885880719667,
+        "q50": 2.5434052669809475,
+        "q75": 2.1679757142702827,
+        "q90": 1.2774426179787692
       },
       "raw_probability_metrics": {
-        "n_records": 3123,
-        "positive_rate": 0.4642971501761127,
-        "brier": 0.25654435151395655,
-        "log_loss": 0.7178733236962997,
-        "ece": 0.07838238128267633
+        "n_records": 3207,
+        "positive_rate": 0.4624259432491425,
+        "brier": 0.25868167673370474,
+        "log_loss": 0.728512179685937,
+        "ece": 0.08454614616997629
       }
     }
   },
   "stl": {
     "target": "stl",
-    "avg_mae": 0.7234665155410767,
-    "avg_rmse": 0.9352617365050675,
-    "avg_bet_accuracy": 0.7280701754385965,
-    "avg_proxy_bet_accuracy": 0.518529892548819,
-    "avg_all_line_bet_accuracy": 0.527126321087066,
-    "n_features_original": 153,
-    "n_features_selected": 150,
-    "n_samples": 71535,
-    "n_real_lines": 2280,
-    "n_proxy_lines": 69255,
-    "n_cal_records": 2280,
-    "oof_bias": -0.008833580839715935,
+    "avg_mae": 0.7230567097663879,
+    "avg_rmse": 0.936208098175441,
+    "avg_bet_accuracy": 0.7368200836820084,
+    "avg_proxy_bet_accuracy": 0.5180822445815304,
+    "avg_all_line_bet_accuracy": 0.5273182957393484,
+    "n_features_original": 180,
+    "n_features_selected": 40,
+    "n_samples": 71824,
+    "n_real_lines": 2390,
+    "n_proxy_lines": 69434,
+    "n_cal_records": 2390,
+    "oof_bias": -0.022335439476004817,
     "real_line_summary": {
-      "n_records": 2280,
-      "hit_rate": 0.7280701754385965,
-      "avg_edge": -0.4246484908749137,
-      "avg_abs_edge": 0.45948275355132,
-      "avg_actual_minus_line": -0.3543859649122807,
-      "clv_corr": 0.30957409033952626,
+      "n_records": 2390,
+      "hit_rate": 0.7368200836820084,
+      "avg_edge": -0.4467828954986947,
+      "avg_abs_edge": 0.47974778936248447,
+      "avg_actual_minus_line": -0.36548117154811716,
+      "clv_corr": 0.32442659528071444,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
@@ -1687,37 +1687,37 @@
           "label": "UNDER 2-3",
           "lower": -3.0,
           "upper": -2.0,
-          "n": 2,
+          "n": 3,
           "hit_rate": 1.0,
-          "avg_edge": -2.082127958536148,
+          "avg_edge": -2.100514054298401,
           "avg_actual_minus_line": -3.0
         },
         {
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 128,
-          "hit_rate": 0.8515625,
-          "avg_edge": -1.261811546748504,
-          "avg_actual_minus_line": -0.98828125
+          "n": 134,
+          "hit_rate": 0.8805970149253731,
+          "avg_edge": -1.2811533721970088,
+          "avg_actual_minus_line": -1.078358208955224
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 1993,
-          "hit_rate": 0.7340692423482188,
-          "avg_edge": -0.4225958277697068,
-          "avg_actual_minus_line": -0.3647767185148018
+          "n": 2107,
+          "hit_rate": 0.7361177028951116,
+          "avg_edge": -0.44101949424386083,
+          "avg_actual_minus_line": -0.3713811105837684
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 157,
-          "hit_rate": 0.5477707006369427,
-          "avg_edge": 0.2529366844019313,
-          "avg_actual_minus_line": 0.32802547770700635
+          "n": 146,
+          "hit_rate": 0.6095890410958904,
+          "avg_edge": 0.26981539840567603,
+          "avg_actual_minus_line": 0.4280821917808219
         },
         {
           "label": "OVER  1-2",
@@ -1750,23 +1750,23 @@
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 2123,
-          "hit_rate": 0.7414036740461611,
-          "avg_edge": -0.47475723911724277,
-          "avg_actual_minus_line": -0.40485162505887895
+          "n": 2244,
+          "hit_rate": 0.7450980392156863,
+          "avg_edge": -0.4934064921609221,
+          "avg_actual_minus_line": -0.41711229946524064
         },
         {
           "label": "over_edges",
-          "n": 157,
-          "hit_rate": 0.5477707006369427,
-          "avg_edge": 0.2529366844019313,
-          "avg_actual_minus_line": 0.32802547770700635
+          "n": 146,
+          "hit_rate": 0.6095890410958904,
+          "avg_edge": 0.26981539840567603,
+          "avg_actual_minus_line": 0.4280821917808219
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 2,
+          "n": 3,
           "hit_rate": 1.0,
-          "avg_edge": -2.082127958536148,
+          "avg_edge": -2.100514054298401,
           "avg_actual_minus_line": -3.0
         },
         {
@@ -1779,12 +1779,278 @@
       ]
     },
     "market_edge_summary": {
-      "n_records": 1900,
-      "hit_rate": 0.6547368421052632,
-      "avg_edge": -0.2618519446752524,
-      "avg_abs_edge": 0.4132640207849296,
-      "avg_actual_minus_line": -0.43157894736842106,
-      "clv_corr": 0.08989631908108635,
+      "n_records": 1990,
+      "hit_rate": 0.6728643216080402,
+      "avg_edge": -0.3170571762573965,
+      "avg_abs_edge": 0.4126726522040934,
+      "avg_actual_minus_line": -0.44597989949748745,
+      "clv_corr": 0.11159629148777549,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 106,
+          "hit_rate": 0.8584905660377359,
+          "avg_edge": -1.2434637895170249,
+          "avg_actual_minus_line": -0.9905660377358491
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 1502,
+          "hit_rate": 0.7609853528628495,
+          "avg_edge": -0.3956551382359373,
+          "avg_actual_minus_line": -0.4420772303595206
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 381,
+          "hit_rate": 0.27296587926509186,
+          "avg_edge": 0.24693511124296064,
+          "avg_actual_minus_line": -0.3123359580052493
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 1,
+          "hit_rate": 1.0,
+          "avg_edge": 1.0551211833953857,
+          "avg_actual_minus_line": 0.5
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 1608,
+          "hit_rate": 0.7674129353233831,
+          "avg_edge": -0.45154302196466567,
+          "avg_actual_minus_line": -0.47823383084577115
+        },
+        {
+          "label": "over_edges",
+          "n": 382,
+          "hit_rate": 0.27486910994764396,
+          "avg_edge": 0.2490507815889094,
+          "avg_actual_minus_line": -0.3102094240837696
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        }
+      ]
+    },
+    "market_edge_sign_accuracy": 0.6728643216080402,
+    "meta_summary": {
+      "n_records": 1655,
+      "positive_rate": 0.7166163141993958,
+      "auc": 0.6007867192584415,
+      "top_prob_threshold": 0.6,
+      "top_prob_n": 1384,
+      "top_prob_hit_rate": 0.7666184971098265
+    },
+    "blend_summary": null,
+    "probability_summary": {
+      "kind": "ordinal_tail_probability_sidecar",
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 2390,
+      "thresholds": [
+        1,
+        2,
+        3
+      ],
+      "raw_probability_metrics": {
+        "n_records": 2390,
+        "positive_rate": 0.27656903765690377,
+        "brier": 0.18370041666335174,
+        "log_loss": 0.5503738845184293,
+        "ece": 0.023408373845078698
+      }
+    }
+  },
+  "blk": {
+    "target": "blk",
+    "avg_mae": 0.5354924082756043,
+    "avg_rmse": 0.742108929436079,
+    "avg_bet_accuracy": 0.7444444444444445,
+    "avg_proxy_bet_accuracy": 0.4271458462670437,
+    "avg_all_line_bet_accuracy": 0.43919799498746864,
+    "n_features_original": 180,
+    "n_features_selected": 40,
+    "n_samples": 71824,
+    "n_real_lines": 2160,
+    "n_proxy_lines": 69664,
+    "n_cal_records": 2160,
+    "oof_bias": 0.012067081314965198,
+    "real_line_summary": {
+      "n_records": 2160,
+      "hit_rate": 0.7444444444444445,
+      "avg_edge": -0.2998009859239338,
+      "avg_abs_edge": 0.33570192349660727,
+      "avg_actual_minus_line": -0.31296296296296294,
+      "clv_corr": 0.24275420094170458,
+      "bucket_summary": [
+        {
+          "label": "UNDER >=3",
+          "lower": null,
+          "upper": -3.0,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        },
+        {
+          "label": "UNDER 2-3",
+          "lower": -3.0,
+          "upper": -2.0,
+          "n": 2,
+          "hit_rate": 0.5,
+          "avg_edge": -2.0759775936603546,
+          "avg_actual_minus_line": -0.75
+        },
+        {
+          "label": "UNDER 1-2",
+          "lower": -2.0,
+          "upper": -1.0,
+          "n": 66,
+          "hit_rate": 0.803030303030303,
+          "avg_edge": -1.2323234582489186,
+          "avg_actual_minus_line": -0.9393939393939394
+        },
+        {
+          "label": "UNDER 0-1",
+          "lower": -1.0,
+          "upper": 0.0,
+          "n": 1870,
+          "hit_rate": 0.7914438502673797,
+          "avg_edge": -0.3213143522686818,
+          "avg_actual_minus_line": -0.32486631016042783
+        },
+        {
+          "label": "OVER  0-1",
+          "lower": 0.0,
+          "upper": 1.0,
+          "n": 222,
+          "hit_rate": 0.3333333333333333,
+          "avg_edge": 0.17465320981300628,
+          "avg_actual_minus_line": -0.02252252252252252
+        },
+        {
+          "label": "OVER  1-2",
+          "lower": 1.0,
+          "upper": 2.0,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        },
+        {
+          "label": "OVER  2-3",
+          "lower": 2.0,
+          "upper": 3.0,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        },
+        {
+          "label": "OVER  >=3",
+          "lower": 3.0,
+          "upper": null,
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        }
+      ],
+      "direction_summary": [
+        {
+          "label": "under_edges",
+          "n": 1938,
+          "hit_rate": 0.7915376676986584,
+          "avg_edge": -0.3541502281600538,
+          "avg_actual_minus_line": -0.3462332301341589
+        },
+        {
+          "label": "over_edges",
+          "n": 222,
+          "hit_rate": 0.3333333333333333,
+          "avg_edge": 0.17465320981300628,
+          "avg_actual_minus_line": -0.02252252252252252
+        },
+        {
+          "label": "strong_edges_abs_ge_2",
+          "n": 2,
+          "hit_rate": 0.5,
+          "avg_edge": -2.0759775936603546,
+          "avg_actual_minus_line": -0.75
+        },
+        {
+          "label": "strong_edges_abs_ge_3",
+          "n": 0,
+          "hit_rate": null,
+          "avg_edge": null,
+          "avg_actual_minus_line": null
+        }
+      ]
+    },
+    "market_edge_summary": {
+      "n_records": 1800,
+      "hit_rate": 0.7088888888888889,
+      "avg_edge": -0.2786470476150539,
+      "avg_abs_edge": 0.3351184588495461,
+      "avg_actual_minus_line": -0.3522222222222222,
+      "clv_corr": 0.04205457881018396,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
@@ -1800,310 +2066,44 @@
           "lower": -3.0,
           "upper": -2.0,
           "n": 1,
-          "hit_rate": 1.0,
-          "avg_edge": -2.0203614234924316,
-          "avg_actual_minus_line": -1.5
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 85,
-          "hit_rate": 0.8470588235294118,
-          "avg_edge": -1.309163881750668,
-          "avg_actual_minus_line": -0.9941176470588236
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 1416,
-          "hit_rate": 0.7549435028248588,
-          "avg_edge": -0.37292434732688823,
-          "avg_actual_minus_line": -0.4067796610169492
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 373,
-          "hit_rate": 0.257372654155496,
-          "avg_edge": 0.2783774029801852,
-          "avg_actual_minus_line": -0.39544235924932974
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 20,
-          "hit_rate": 0.3,
-          "avg_edge": 1.4743717432022094,
-          "avg_actual_minus_line": -0.3
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 5,
           "hit_rate": 0.0,
-          "avg_edge": 2.103853225708008,
-          "avg_actual_minus_line": -0.9
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 1502,
-          "hit_rate": 0.7603195739014648,
-          "avg_edge": -0.42700410598347066,
-          "avg_actual_minus_line": -0.440745672436751
-        },
-        {
-          "label": "over_edges",
-          "n": 398,
-          "hit_rate": 0.2562814070351759,
-          "avg_edge": 0.3614107344326465,
-          "avg_actual_minus_line": -0.3969849246231156
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 6,
-          "hit_rate": 0.16666666666666666,
-          "avg_edge": 1.4164841175079346,
-          "avg_actual_minus_line": -1.0
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        }
-      ]
-    },
-    "market_edge_sign_accuracy": 0.6547368421052632,
-    "meta_summary": {
-      "n_records": 1580,
-      "positive_rate": 0.40189873417721517,
-      "auc": 0.60936382952131,
-      "top_prob_threshold": 0.6,
-      "top_prob_n": 195,
-      "top_prob_hit_rate": 0.49230769230769234
-    },
-    "blend_summary": null,
-    "probability_summary": {
-      "kind": "ordinal_tail_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 2280,
-      "thresholds": [
-        1,
-        2,
-        3
-      ],
-      "raw_probability_metrics": {
-        "n_records": 2280,
-        "positive_rate": 0.27850877192982454,
-        "brier": 0.18440593040561568,
-        "log_loss": 0.5521485651989437,
-        "ece": 0.0212580363560272
-      }
-    }
-  },
-  "blk": {
-    "target": "blk",
-    "avg_mae": 0.5359869956970215,
-    "avg_rmse": 0.7412290162531068,
-    "avg_bet_accuracy": 0.7520741825280625,
-    "avg_proxy_bet_accuracy": 0.4256720593102609,
-    "avg_all_line_bet_accuracy": 0.43724207347760446,
-    "n_features_original": 153,
-    "n_features_selected": 151,
-    "n_samples": 71535,
-    "n_real_lines": 2049,
-    "n_proxy_lines": 69486,
-    "n_cal_records": 2049,
-    "oof_bias": 0.015064477800855479,
-    "real_line_summary": {
-      "n_records": 2049,
-      "hit_rate": 0.7520741825280625,
-      "avg_edge": -0.30167629501408283,
-      "avg_abs_edge": 0.33798501172942497,
-      "avg_actual_minus_line": -0.3096632503660322,
-      "clv_corr": 0.23583748024097925,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 2,
-          "hit_rate": 0.5,
-          "avg_edge": -2.0496129989624023,
-          "avg_actual_minus_line": -1.5
-        },
-        {
-          "label": "UNDER 1-2",
-          "lower": -2.0,
-          "upper": -1.0,
-          "n": 54,
-          "hit_rate": 0.7962962962962963,
-          "avg_edge": -1.2024364681155593,
-          "avg_actual_minus_line": -0.8888888888888888
-        },
-        {
-          "label": "UNDER 0-1",
-          "lower": -1.0,
-          "upper": 0.0,
-          "n": 1787,
-          "hit_rate": 0.7946278679350868,
-          "avg_edge": -0.32809301258117446,
-          "avg_actual_minus_line": -0.3293228875209849
-        },
-        {
-          "label": "OVER  0-1",
-          "lower": 0.0,
-          "upper": 1.0,
-          "n": 206,
-          "hit_rate": 0.3737864077669903,
-          "avg_edge": 0.1805741760915923,
-          "avg_actual_minus_line": 0.024271844660194174
-        },
-        {
-          "label": "OVER  1-2",
-          "lower": 1.0,
-          "upper": 2.0,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        },
-        {
-          "label": "OVER  2-3",
-          "lower": 2.0,
-          "upper": 3.0,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        },
-        {
-          "label": "OVER  >=3",
-          "lower": 3.0,
-          "upper": null,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        }
-      ],
-      "direction_summary": [
-        {
-          "label": "under_edges",
-          "n": 1843,
-          "hit_rate": 0.7943570265870863,
-          "avg_edge": -0.3555794947144459,
-          "avg_actual_minus_line": -0.3469886055344547
-        },
-        {
-          "label": "over_edges",
-          "n": 206,
-          "hit_rate": 0.3737864077669903,
-          "avg_edge": 0.1805741760915923,
-          "avg_actual_minus_line": 0.024271844660194174
-        },
-        {
-          "label": "strong_edges_abs_ge_2",
-          "n": 2,
-          "hit_rate": 0.5,
-          "avg_edge": -2.0496129989624023,
-          "avg_actual_minus_line": -1.5
-        },
-        {
-          "label": "strong_edges_abs_ge_3",
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        }
-      ]
-    },
-    "market_edge_summary": {
-      "n_records": 1705,
-      "hit_rate": 0.7126099706744868,
-      "avg_edge": -0.2642721966849203,
-      "avg_abs_edge": 0.3179090817663081,
-      "avg_actual_minus_line": -0.3498533724340176,
-      "clv_corr": -0.0069176573284726,
-      "bucket_summary": [
-        {
-          "label": "UNDER >=3",
-          "lower": null,
-          "upper": -3.0,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
-        },
-        {
-          "label": "UNDER 2-3",
-          "lower": -3.0,
-          "upper": -2.0,
-          "n": 3,
-          "hit_rate": 0.3333333333333333,
-          "avg_edge": -2.039344390233358,
-          "avg_actual_minus_line": 1.5
+          "avg_edge": -2.3722786903381348,
+          "avg_actual_minus_line": 0.5
         },
         {
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
           "n": 28,
-          "hit_rate": 0.7142857142857143,
-          "avg_edge": -1.256660840341023,
-          "avg_actual_minus_line": -0.5178571428571429
+          "hit_rate": 0.6785714285714286,
+          "avg_edge": -1.2665220839636666,
+          "avg_actual_minus_line": -0.3392857142857143
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 1439,
-          "hit_rate": 0.7984711605281446,
-          "avg_edge": -0.31619527670564523,
-          "avg_actual_minus_line": -0.33981931897150797
+          "n": 1549,
+          "hit_rate": 0.7908327953518399,
+          "avg_edge": -0.3321846731935566,
+          "avg_actual_minus_line": -0.3486120077469335
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 232,
-          "hit_rate": 0.1939655172413793,
-          "avg_edge": 0.18200148220910642,
-          "avg_actual_minus_line": -0.4073275862068966
+          "n": 218,
+          "hit_rate": 0.14678899082568808,
+          "avg_edge": 0.21200985583015333,
+          "avg_actual_minus_line": -0.37155963302752293
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 3,
+          "n": 4,
           "hit_rate": 0.0,
-          "avg_edge": 1.1670335531234741,
+          "avg_edge": 1.151530385017395,
           "avg_actual_minus_line": -1.0
         },
         {
@@ -2128,24 +2128,24 @@
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 1470,
-          "hit_rate": 0.7959183673469388,
-          "avg_edge": -0.33762553733311035,
-          "avg_actual_minus_line": -0.33945578231292517
+          "n": 1578,
+          "hit_rate": 0.788339670468948,
+          "avg_edge": -0.35005637250832694,
+          "avg_actual_minus_line": -0.34790874524714827
         },
         {
           "label": "over_edges",
-          "n": 235,
-          "hit_rate": 0.19148936170212766,
-          "avg_edge": 0.1945763597101409,
-          "avg_actual_minus_line": -0.4148936170212766
+          "n": 222,
+          "hit_rate": 0.14414414414414414,
+          "avg_edge": 0.22893815365334688,
+          "avg_actual_minus_line": -0.38288288288288286
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 3,
-          "hit_rate": 0.3333333333333333,
-          "avg_edge": -2.039344390233358,
-          "avg_actual_minus_line": 1.5
+          "n": 1,
+          "hit_rate": 0.0,
+          "avg_edge": -2.3722786903381348,
+          "avg_actual_minus_line": 0.5
         },
         {
           "label": "strong_edges_abs_ge_3",
@@ -2156,55 +2156,55 @@
         }
       ]
     },
-    "market_edge_sign_accuracy": 0.7126099706744868,
+    "market_edge_sign_accuracy": 0.7088888888888889,
     "meta_summary": {
-      "n_records": 1420,
-      "positive_rate": 0.22816901408450704,
-      "auc": 0.8432290258628459,
+      "n_records": 1500,
+      "positive_rate": 0.6886666666666666,
+      "auc": 0.7037982135564902,
       "top_prob_threshold": 0.6,
-      "top_prob_n": 119,
-      "top_prob_hit_rate": 0.48739495798319327
+      "top_prob_n": 1161,
+      "top_prob_hit_rate": 0.7941429801894918
     },
     "blend_summary": null,
     "probability_summary": {
       "kind": "ordinal_tail_probability_sidecar",
-      "n_oof_rows": 59610,
-      "n_real_line_rows": 2049,
+      "n_oof_rows": 59850,
+      "n_real_line_rows": 2160,
       "thresholds": [
         1,
         2,
         3
       ],
       "raw_probability_metrics": {
-        "n_records": 2049,
-        "positive_rate": 0.2225475841874085,
-        "brier": 0.16702238842620518,
-        "log_loss": 0.5114991768516579,
-        "ece": 0.03188191327003224
+        "n_records": 2160,
+        "positive_rate": 0.2212962962962963,
+        "brier": 0.16630682782457817,
+        "log_loss": 0.5114530293017363,
+        "ece": 0.026013740817843783
       }
     }
   },
   "tov": {
     "target": "tov",
-    "avg_mae": 0.8949616909027099,
-    "avg_rmse": 1.175857074276278,
-    "avg_bet_accuracy": 0.5655629139072847,
-    "avg_proxy_bet_accuracy": 0.543520683778663,
-    "avg_all_line_bet_accuracy": 0.5439188055695354,
-    "n_features_original": 153,
-    "n_features_selected": 151,
-    "n_samples": 71535,
+    "avg_mae": 0.8954661726951599,
+    "avg_rmse": 1.1769231602930195,
+    "avg_bet_accuracy": 0.5562913907284768,
+    "avg_proxy_bet_accuracy": 0.5426591175197395,
+    "avg_all_line_bet_accuracy": 0.5429239766081871,
+    "n_features_original": 180,
+    "n_features_selected": 29,
+    "n_samples": 71824,
     "n_real_lines": 1510,
-    "n_proxy_lines": 70025,
+    "n_proxy_lines": 70314,
     "n_cal_records": 1510,
-    "oof_bias": -0.013733538571727034,
+    "oof_bias": -0.011301717568272935,
     "real_line_summary": {
       "n_records": 1510,
-      "hit_rate": 0.5655629139072847,
-      "avg_edge": -0.021430689471446916,
-      "avg_abs_edge": 0.3691377796282042,
+      "hit_rate": 0.5562913907284768,
+      "avg_edge": -0.0011186095065628455,
+      "avg_abs_edge": 0.37297452938872455,
       "avg_actual_minus_line": 0.09867549668874172,
-      "clv_corr": 0.15774034457718447,
+      "clv_corr": 0.14699750256254246,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
@@ -2228,46 +2228,46 @@
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 27,
-          "hit_rate": 0.5925925925925926,
-          "avg_edge": -1.280872603257497,
-          "avg_actual_minus_line": -0.09259259259259259
+          "n": 24,
+          "hit_rate": 0.5833333333333334,
+          "avg_edge": -1.3107702011863391,
+          "avg_actual_minus_line": 0.08333333333333333
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 724,
-          "hit_rate": 0.5911602209944752,
-          "avg_edge": -0.3595243561910002,
-          "avg_actual_minus_line": -0.1042817679558011
+          "n": 703,
+          "hit_rate": 0.5846372688477952,
+          "avg_edge": -0.3570154125710809,
+          "avg_actual_minus_line": -0.10455192034139403
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 745,
-          "hit_rate": 0.5395973154362416,
-          "avg_edge": 0.3282812672173417,
-          "avg_actual_minus_line": 0.2966442953020134
+          "n": 764,
+          "hit_rate": 0.5274869109947644,
+          "avg_edge": 0.3345632019467379,
+          "avg_actual_minus_line": 0.28534031413612565
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 14,
-          "hit_rate": 0.5714285714285714,
-          "avg_edge": 1.2820934993880135,
-          "avg_actual_minus_line": 0.42857142857142855
+          "n": 17,
+          "hit_rate": 0.7058823529411765,
+          "avg_edge": 1.220034262713264,
+          "avg_actual_minus_line": 0.3235294117647059
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
+          "n": 2,
+          "hit_rate": 0.0,
+          "avg_edge": 2.2021753787994385,
+          "avg_actual_minus_line": -1.5
         },
         {
           "label": "OVER  >=3",
@@ -2282,24 +2282,24 @@
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 751,
-          "hit_rate": 0.5912117177097204,
-          "avg_edge": -0.3926487272573057,
-          "avg_actual_minus_line": -0.10386151797603196
+          "n": 727,
+          "hit_rate": 0.5845942228335625,
+          "avg_edge": -0.3885011277385722,
+          "avg_actual_minus_line": -0.09834938101788171
         },
         {
           "label": "over_edges",
-          "n": 759,
-          "hit_rate": 0.5401844532279315,
-          "avg_edge": 0.34587464172378357,
-          "avg_actual_minus_line": 0.29907773386034253
+          "n": 783,
+          "hit_rate": 0.5300127713920817,
+          "avg_edge": 0.35855839018011765,
+          "avg_actual_minus_line": 0.28160919540229884
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
+          "n": 2,
+          "hit_rate": 0.0,
+          "avg_edge": 2.2021753787994385,
+          "avg_actual_minus_line": -1.5
         },
         {
           "label": "strong_edges_abs_ge_3",
@@ -2313,10 +2313,10 @@
     "market_edge_summary": {
       "n_records": 1004,
       "hit_rate": 0.50199203187251,
-      "avg_edge": 0.13854654060803775,
-      "avg_abs_edge": 0.3573291526091159,
-      "avg_actual_minus_line": 0.08565737051792828,
-      "clv_corr": 0.04387352718110739,
+      "avg_edge": 0.13266959342575887,
+      "avg_abs_edge": 0.35630112557984567,
+      "avg_actual_minus_line": 0.07071713147410359,
+      "clv_corr": 0.023136987353751103,
       "bucket_summary": [
         {
           "label": "UNDER >=3",
@@ -2340,46 +2340,46 @@
           "label": "UNDER 1-2",
           "lower": -2.0,
           "upper": -1.0,
-          "n": 6,
-          "hit_rate": 0.3333333333333333,
-          "avg_edge": -1.1341437300046284,
-          "avg_actual_minus_line": 0.6666666666666666
+          "n": 7,
+          "hit_rate": 0.42857142857142855,
+          "avg_edge": -1.2018629482814245,
+          "avg_actual_minus_line": 0.9285714285714286
         },
         {
           "label": "UNDER 0-1",
           "lower": -1.0,
           "upper": 0.0,
-          "n": 362,
-          "hit_rate": 0.5552486187845304,
-          "avg_edge": -0.28459670951523053,
-          "avg_actual_minus_line": -0.0055248618784530384
+          "n": 385,
+          "hit_rate": 0.5584415584415584,
+          "avg_edge": -0.2697402298789133,
+          "avg_actual_minus_line": -0.003896103896103896
         },
         {
           "label": "OVER  0-1",
           "lower": 0.0,
           "upper": 1.0,
-          "n": 602,
-          "hit_rate": 0.4684385382059801,
-          "avg_edge": 0.3451939180003714,
-          "avg_actual_minus_line": 0.11794019933554817
+          "n": 572,
+          "hit_rate": 0.4597902097902098,
+          "avg_edge": 0.3374288353008231,
+          "avg_actual_minus_line": 0.0944055944055944
         },
         {
           "label": "OVER  1-2",
           "lower": 1.0,
           "upper": 2.0,
-          "n": 34,
-          "hit_rate": 0.5588235294117647,
-          "avg_edge": 1.2094958634937512,
-          "avg_actual_minus_line": 0.38235294117647056
+          "n": 38,
+          "hit_rate": 0.6052631578947368,
+          "avg_edge": 1.2523237717779059,
+          "avg_actual_minus_line": 0.34210526315789475
         },
         {
           "label": "OVER  2-3",
           "lower": 2.0,
           "upper": 3.0,
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
+          "n": 2,
+          "hit_rate": 0.0,
+          "avg_edge": 2.4328519105911255,
+          "avg_actual_minus_line": -0.5
         },
         {
           "label": "OVER  >=3",
@@ -2394,24 +2394,24 @@
       "direction_summary": [
         {
           "label": "under_edges",
-          "n": 368,
-          "hit_rate": 0.5516304347826086,
-          "avg_edge": -0.2984480196319055,
-          "avg_actual_minus_line": 0.005434782608695652
+          "n": 392,
+          "hit_rate": 0.5561224489795918,
+          "avg_edge": -0.28638527842181527,
+          "avg_actual_minus_line": 0.012755102040816327
         },
         {
           "label": "over_edges",
-          "n": 636,
-          "hit_rate": 0.47327044025157233,
-          "avg_edge": 0.3913987389858666,
-          "avg_actual_minus_line": 0.1320754716981132
+          "n": 612,
+          "hit_rate": 0.4673202614379085,
+          "avg_edge": 0.4010838250666887,
+          "avg_actual_minus_line": 0.10784313725490197
         },
         {
           "label": "strong_edges_abs_ge_2",
-          "n": 0,
-          "hit_rate": null,
-          "avg_edge": null,
-          "avg_actual_minus_line": null
+          "n": 2,
+          "hit_rate": 0.0,
+          "avg_edge": 2.4328519105911255,
+          "avg_actual_minus_line": -0.5
         },
         {
           "label": "strong_edges_abs_ge_3",
@@ -2425,23 +2425,23 @@
     "market_edge_sign_accuracy": 0.50199203187251,
     "meta_summary": {
       "n_records": 753,
-      "positive_rate": 0.22177954847277556,
-      "auc": 0.5261388485826981,
+      "positive_rate": 0.5166002656042497,
+      "auc": 0.4805220486454419,
       "top_prob_threshold": 0.6,
-      "top_prob_n": 36,
-      "top_prob_hit_rate": 0.3333333333333333
+      "top_prob_n": 264,
+      "top_prob_hit_rate": 0.5151515151515151
     },
     "blend_summary": null,
     "probability_summary": {
       "kind": "poisson_probability_sidecar",
-      "n_oof_rows": 59610,
+      "n_oof_rows": 59850,
       "n_real_line_rows": 1510,
       "raw_probability_metrics": {
         "n_records": 1510,
         "positive_rate": 0.47483443708609274,
-        "brier": 0.24918268471121874,
-        "log_loss": 0.6938053629003783,
-        "ece": 0.04744843717393222
+        "brier": 0.24992460267593028,
+        "log_loss": 0.695795899200419,
+        "ece": 0.04870289697014327
       }
     }
   }
