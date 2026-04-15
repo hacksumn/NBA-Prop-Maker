@@ -58,6 +58,8 @@ LOG_DIR       = SCRIPT_DIR / "logs"
 
 GAME_LOG_CSV  = DATA_DIR / "nba_data.csv"
 LINES_CSV     = DATA_DIR / "historical_lines.csv"
+PICKS_LATEST  = OUTPUT_DIR / "picks_latest.csv"
+BETSLIPS_LATEST = OUTPUT_DIR / "betslips_latest.csv"
 LOG_FILE      = LOG_DIR / f"run_{datetime.now().strftime('%Y%m%d')}.log"
 
 # Layer output files (all written to data/)
@@ -224,6 +226,70 @@ def _summarise_csv(path: Path, label: str):
         logger.warning(f"Could not summarise {path}: {exc}")
 
 
+def _summarise_live_pick_outputs():
+    """Summarise the live-card artifacts produced by Step 9."""
+    import pandas as pd
+
+    if not PICKS_LATEST.exists():
+        _warn(f"Live picks file not found at {PICKS_LATEST}")
+        return
+
+    try:
+        picks = pd.read_csv(PICKS_LATEST, low_memory=False)
+    except Exception as exc:
+        _warn(f"Could not read {PICKS_LATEST.name}: {exc}")
+        return
+
+    if len(picks) == 0:
+        _warn("Live card is empty after Step 9")
+    else:
+        _ok(f"Live card: {len(picks)} picks -> {PICKS_LATEST.name}")
+        if "publish_tier" in picks.columns:
+            tier_counts = picks["publish_tier"].fillna("missing").astype(str).value_counts().to_dict()
+            logger.info(f"  Publish tiers: {tier_counts}")
+        if "pick_source" in picks.columns:
+            source_counts = picks["pick_source"].fillna("missing").astype(str).value_counts().to_dict()
+            logger.info(f"  Pick sources: {source_counts}")
+
+        # Print a clean fixed-width summary (avoids mangled wide-DataFrame log output)
+        logger.info("  ── Live card ─────────────────────────────────────────────────────")
+        logger.info(f"  {'PLAYER':<22} {'PROP':<5} {'DIR':<6} {'LINE':>5} {'CONF':>5} {'HIT%':>5}  TIER")
+        logger.info("  " + "-" * 63)
+        for _, r in picks.iterrows():
+            player = str(r.get("player", ""))[:22]
+            prop   = str(r.get("prop",   ""))
+            dirn   = str(r.get("direction", ""))
+            line   = r.get("line", "")
+            conf   = r.get("confidence", "")
+            hit    = r.get("estimated_hit_rate", "")
+            tier   = str(r.get("publish_tier", r.get("pick_source", "")))[:16]
+            try:
+                line_s = f"{float(line):>5.1f}"
+                conf_s = f"{float(conf):>4.0f}%"
+                hit_s  = f"{float(hit)*100:>4.0f}%" if hit is not None and str(hit) not in ("", "nan") else "  -- "
+            except Exception:
+                line_s = conf_s = hit_s = "  ?  "
+            logger.info(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {conf_s} {hit_s}  {tier}")
+        logger.info("  " + "-" * 63)
+
+    if not BETSLIPS_LATEST.exists():
+        _warn(f"Live betslips file not found at {BETSLIPS_LATEST}")
+        return
+
+    try:
+        slips = pd.read_csv(BETSLIPS_LATEST, low_memory=False)
+    except Exception as exc:
+        _warn(f"Could not read {BETSLIPS_LATEST.name}: {exc}")
+        return
+
+    if len(slips) == 0:
+        _warn("No betslips were generated from the current live card")
+    else:
+        _ok(f"Live betslips: {len(slips)} slips -> {BETSLIPS_LATEST.name}")
+        if "slip_type" in slips.columns:
+            logger.info(f"  Slip types: {slips['slip_type'].fillna('missing').astype(str).value_counts().to_dict()}")
+
+
 def _step_header(n: int, title: str):
     logger.info(f"\n{'─'*65}")
     logger.info(f"  STEP {n} — {title}")
@@ -240,6 +306,30 @@ def _warn(msg: str):
 
 def _fail(msg: str):
     logger.error(f"  [FAIL] {msg}")
+
+
+def _file_age_hours(path: Path) -> Optional[float]:
+    """Return the file age in hours, or None when the file does not exist."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    return (time.time() - path.stat().st_mtime) / 3600.0
+
+
+def _retry_step_call(label: str, fn, attempts: int = 2, delay_s: float = 10.0):
+    """Retry transient network-bound steps before falling back to cached outputs."""
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                raise
+            wait_s = delay_s * attempt
+            _warn(f"{label} attempt {attempt}/{attempts} failed: {exc}. Retrying in {wait_s:.0f}s")
+            time.sleep(wait_s)
+    raise last_exc
 
 
 def _archive_projection_snapshot(df, archive_dir: Path, stamp: str):
@@ -345,6 +435,71 @@ def step1_5_grade_picks(errors):
         if "direction" in hist.columns:
             hist["direction"] = hist["direction"].fillna("").astype(str).str.strip().str.upper()
 
+        # ── Archive-gap backfill ──────────────────────────────────────────────
+        # Scan output/archive/ for dated folders whose picks were never written
+        # to picks_history.csv (e.g. predict step crashed before the append).
+        # Backfill any missing dates so the normal grading loop below can grade them.
+        archive_root = OUTPUT_DIR / "archive"
+        today_str_pre = pd.Timestamp.now().strftime("%Y-%m-%d")
+        if archive_root.is_dir():
+            history_dates = set(hist["game_date"].dropna().unique())
+            backfilled_count = 0
+            for folder in sorted(archive_root.iterdir()):
+                if not folder.is_dir():
+                    continue
+                folder_date = folder.name
+                # Only process YYYY-MM-DD folders for past dates not in history
+                try:
+                    pd.Timestamp(folder_date)
+                except Exception:
+                    continue
+                if folder_date >= today_str_pre:
+                    continue
+                if folder_date in history_dates:
+                    continue
+                # Find all picks CSVs for this slate date (picks_<date>*.csv)
+                picks_files = sorted(folder.glob(f"picks_{folder_date}*.csv"))
+                if not picks_files:
+                    continue
+                # Use the latest file (highest sort = latest timestamp)
+                src = picks_files[-1]
+                try:
+                    bf = pd.read_csv(src, dtype=str, low_memory=False)
+                    if bf.empty:
+                        continue
+                    bf.insert(0, "game_date", folder_date)
+                    # Normalise columns to match history schema
+                    bf["game_date"] = _normalize_game_date_series(bf["game_date"])
+                    if "prop" in bf.columns:
+                        bf["prop"] = bf["prop"].fillna("").astype(str).str.strip().str.upper()
+                    if "direction" in bf.columns:
+                        bf["direction"] = bf["direction"].fillna("").astype(str).str.strip().str.upper()
+                    for col in ("result", "actual", "graded_at"):
+                        if col not in bf.columns:
+                            bf[col] = ""
+                    # Align columns to existing history (add missing cols as empty)
+                    for col in hist.columns:
+                        if col not in bf.columns:
+                            bf[col] = ""
+                    bf = bf[[c for c in hist.columns if c in bf.columns] +
+                             [c for c in bf.columns if c not in hist.columns]]
+                    hist = pd.concat([hist, bf], ignore_index=True)
+                    history_dates.add(folder_date)
+                    backfilled_count += len(bf)
+                    logger.warning(
+                        f"  !!! ARCHIVE BACKFILL: {folder_date} had {len(bf)} picks in archive "
+                        f"but was missing from picks_history.csv — restored from {src.name}"
+                    )
+                except Exception as e:
+                    logger.warning(f"  Archive backfill failed for {folder_date}: {e}")
+            if backfilled_count > 0:
+                _atomic_csv(hist, picks_history)
+                logger.warning(
+                    f"  !!! Backfilled {backfilled_count} missing pick rows into picks_history.csv — "
+                    f"they will now be graded below"
+                )
+        # ─────────────────────────────────────────────────────────────────────
+
         ungraded = hist[_blank_text_mask(hist["result"])]
         if len(ungraded) == 0:
             _ok("All picks already graded")
@@ -412,9 +567,24 @@ def step1_5_grade_picks(errors):
 
         wins = losses = pushes = graded_count = 0
         newly_graded_rows = []  # track only picks graded in this run
+        # Dates that are stale (>3 days old) and still have no box scores = no games that day → DNP
+        _stale_cutoff = (pd.Timestamp.now() - pd.Timedelta(days=3)).strftime("%Y-%m-%d")
         for date, group in gradeable.groupby("game_date"):
             if date not in available_dates:
-                logger.info(f"  No box score data for {date} yet — skipping")
+                if date <= _stale_cutoff:
+                    # No box scores found even from live API and date is old — mark all as DNP
+                    logger.warning(
+                        f"  No box scores found for {date} after live API check and date is >3 days old "
+                        f"— marking {len(group)} picks as DNP (no games that day)"
+                    )
+                    for idx in group.index:
+                        hist.at[idx, "result"]    = "DNP"
+                        hist.at[idx, "actual"]    = ""
+                        hist.at[idx, "graded_at"] = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                        graded_count += 1
+                        newly_graded_rows.append(idx)
+                else:
+                    logger.info(f"  No box score data for {date} yet — skipping")
                 continue
             day_box = box[box["game_date"] == date]
             for idx, pick in group.iterrows():
@@ -900,16 +1070,30 @@ def step6_usage_injury(errors):
         # Rebuild profiles only if stale (>12 hours old)
         rebuild = True
         if PLAYER_PROFILES.exists():
-            age_hours = (time.time() - PLAYER_PROFILES.stat().st_mtime) / 3600
+            age_hours = _file_age_hours(PLAYER_PROFILES) or 0.0
             if age_hours < 12:
                 rebuild = False
                 _ok(f"Player profiles are fresh ({age_hours:.1f}h old) — skipping rebuild")
 
         if rebuild:
             logger.info("  Building player usage profiles...")
-            profiles = build_player_profiles(season="2025-26")
-            profiles.to_csv(PLAYER_PROFILES, index=False)
-            _ok(f"Player profiles: {len(profiles)} players → {PLAYER_PROFILES.name}")
+            try:
+                profiles = _retry_step_call(
+                    "Player profile rebuild",
+                    lambda: build_player_profiles(season="2025-26"),
+                    attempts=2,
+                    delay_s=12.0,
+                )
+                _atomic_csv(profiles, PLAYER_PROFILES)
+                _ok(f"Player profiles: {len(profiles)} players → {PLAYER_PROFILES.name}")
+            except Exception as exc:
+                if not PLAYER_PROFILES.exists():
+                    raise
+                age_hours = _file_age_hours(PLAYER_PROFILES) or 0.0
+                _warn(
+                    f"Player profile rebuild failed ({exc}); "
+                    f"reusing cached {PLAYER_PROFILES.name} ({age_hours:.1f}h old)"
+                )
 
         # Always run absence detection — this catches today's injuries
         logger.info("  Detecting recent absences (potential injuries)...")
@@ -969,13 +1153,29 @@ def step6_usage_injury(errors):
 def step7_luck_model(errors):
     _step_header(7, "Layer 4 — Luck & Regression Model")
     try:
+        import pandas as pd
         from luck_regression_model import build_player_luck_scores
         # Layer 3 makes 30+ API calls — give the NBA API a cooldown before hitting it again
         logger.info("  Waiting 15s for API rate-limit cooldown after Layer 3...")
         time.sleep(15)
         logger.info("  Computing player luck scores (3PT%, eFG% vs xeFG%, FT%)...")
-        luck_df = build_player_luck_scores(season="2025-26")
-        luck_df.to_csv(PLAYER_LUCK, index=False)
+        try:
+            luck_df = _retry_step_call(
+                "Luck model rebuild",
+                lambda: build_player_luck_scores(season="2025-26"),
+                attempts=2,
+                delay_s=15.0,
+            )
+            _atomic_csv(luck_df, PLAYER_LUCK)
+        except Exception as exc:
+            if not PLAYER_LUCK.exists():
+                raise
+            age_hours = _file_age_hours(PLAYER_LUCK) or 0.0
+            _warn(
+                f"Luck model refresh failed ({exc}); "
+                f"reusing cached {PLAYER_LUCK.name} ({age_hours:.1f}h old)"
+            )
+            luck_df = pd.read_csv(PLAYER_LUCK)
 
         very_lucky = (luck_df["luck_label"] == "VERY LUCKY").sum()
         very_unlucky = (luck_df["luck_label"] == "VERY UNLUCKY").sum()
@@ -1385,7 +1585,7 @@ def step9_generate_picks(args, errors):
         logger.info("Skipping live pick generation (--skip-picks)")
         return
 
-    _run_python_step(
+    ok = _run_python_step(
         9,
         "Generate Today's Picks  (nba_props.py predict)",
         ["nba_props.py", "predict"],
@@ -1393,6 +1593,8 @@ def step9_generate_picks(args, errors):
         "Live pick generation",
         "Today's pick generation complete",
     )
+    if ok:
+        _summarise_live_pick_outputs()
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────

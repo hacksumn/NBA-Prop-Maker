@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-**[2026-04-12] Build enough true-labeled market history to audit standard-line edge cleanly.**
+**[2026-04-13] Build enough true-labeled market history to audit standard-line edge cleanly.**
 
 Shipped today:
 
@@ -19,13 +19,15 @@ Materialization status:
 
 - `python prizepicks_scraper.py` succeeded on 2026-04-12 at `20:15:39` and rewrote `data/historical_lines.csv` with `projection_type` and `is_promo`.
 - `python nba_props.py predict` then rewrote `output/picks_latest.csv` and `output/picks_history.csv` with `projection_type`, `is_promo`, `break_even_prob`, and `exceeds_ev_threshold`.
-- The remaining limitation is not schema materialization anymore; it is label depth. The fresh true-labeled PrizePicks snapshot is only `77` rows across `2026-04-14` and `2026-04-15`, while the active `2026-04-12` cached slate remains legacy-standard rows from earlier history.
+- `python prizepicks_scraper.py` succeeded again on 2026-04-13 at `09:02:26` and appended a much larger true-labeled PrizePicks snapshot: `655` validated rows across `2026-04-14`, `2026-04-15`, and `2026-04-18`.
+- The active slate is no longer legacy data: `_select_active_slate_lines()` now resolves to `2026-04-14` with `257` true-labeled rows (`234 demon`, `14 standard`, `9 goblin`, `0 promo`).
+- The remaining limitation is not schema materialization anymore; it is graded sample depth for a clean standard-line hit-rate audit.
 
 ## Current Branch / Working Scope
 - Branch: `master`
 - Scope: full pipeline, daily prediction, grading, and betslip construction
 - Owner: Jake
-- Last updated: 2026-04-12
+- Last updated: 2026-04-13
 
 ## What Is Working
 - Full daily pipeline was last confirmed end-to-end on `2026-04-11`; today's changes were verified with targeted tests, backtests, and live API smokes rather than a full rerun
@@ -66,10 +68,16 @@ Materialization status:
 - `data/historical_lines.csv` now materially contains `projection_type` and `is_promo`
 - `output/picks_latest.csv` and `output/picks_history.csv` now materially contain `projection_type`, `is_promo`, `break_even_prob`, and `exceeds_ev_threshold`
 - Latest successful PrizePicks snapshot summary:
-  - snapshot timestamp: `2026-04-12 20:15:39`
-  - rows: `77`
-  - slate dates: `2026-04-14`, `2026-04-15`
-  - market mix: `76 demon`, `1 standard`, `0 promo`
+  - snapshot timestamp: `2026-04-13 09:02:26`
+  - rows: `655`
+  - slate dates: `2026-04-14`, `2026-04-15`, `2026-04-18`
+  - market mix: `602 demon`, `35 standard`, `18 goblin`, `0 promo`
+- First truly labeled active slate summary:
+  - active slate date: `2026-04-14`
+  - active rows: `257`
+  - market mix: `234 demon`, `14 standard`, `9 goblin`, `0 promo`
+- `output/picks_history.csv` now verifies the `2026-04-12` card went `5W / 0L / 0P`
+- All-time graded pick record is now `712W / 597L / 21P` (`53.53%` win rate on graded picks)
 - Under-only slip backtest artifacts now exist:
   - `output/under_only_slip_backtest_detail.csv`
   - `output/under_only_slip_backtest_summary.json`
@@ -85,8 +93,8 @@ Materialization status:
 
 ## What Is Not Working / At Risk
 - End-to-end live verification of the new `team_pending` fallback is still outstanding on a real pending-team slate; today's saved projection artifact produced `0` fallback rows
-- Standard-line-only edge analysis is still open; most historical rows were backfilled to `projection_type='standard'`, so today's fresh live materialization is not enough by itself for a clean hit-rate audit
-- The active `2026-04-12` cached slate remains legacy-standard rows even though the newest true-labeled PrizePicks snapshot is for `2026-04-14` / `2026-04-15`
+- Standard-line-only edge analysis is still open; most older historical rows were backfilled to `projection_type='standard'`, so the newly verified `5/5` on `2026-04-12` is still not eligible as clean standard-line evidence
+- The first truly labeled active slate (`2026-04-14`) is heavily demon-skewed (`234/257` rows), so standard-line sample growth is still slow
 - PrizePicks `403/429` remains active most days
 - Correlation weights are still heuristic (`0.70` same player, `0.35` same team, `0.15` same game, `0.00` otherwise); they are not yet learned from graded slip history
 - `pra`, `pr`, and `pa` composite models remain disabled due to weak blended performance
@@ -125,6 +133,9 @@ Materialization status:
 
 ## Recent Changes
 
+- **[2026-04-13] Verified 5/5 card** - `output/picks_history.csv` now shows the full `2026-04-12` card graded `5W / 0L / 0P`: Max Christie `AST UNDER 3.0`, Julian Champagnie `TRB UNDER 7.5`, Max Christie `TRB UNDER 4.0`, Luguentz Dort `TRB UNDER 4.0`, and Davion Mitchell `AST UNDER 7.5`.
+- **[2026-04-13] First truly labeled active slate** - `python prizepicks_scraper.py` pulled `655` true-labeled rows across `2026-04-14` / `2026-04-15` / `2026-04-18`; `_select_active_slate_lines()` now resolves to a genuinely labeled `2026-04-14` slate (`234 demon`, `14 standard`, `9 goblin`).
+- **[2026-04-13] New live card from labeled board** - `python nba_props.py predict` used the labeled `2026-04-14` PrizePicks slate and wrote a `5`-pick card; all published picks are `demon` UNDERs and both logged betslips are 2-pick slips.
 - **[2026-04-12] PrizePicks fetch stabilization** - `prizepicks_scraper.py` now tries more direct API header/param variants, including the minimal `league_id` request shape that succeeded live today, and the Playwright profile fallback now returns a warning instead of crashing on `TargetClosedError`.
 - **[2026-04-12] PrizePicks market-type fix** - `prizepicks_scraper.py` now captures `is_promo` and uses `odds_type` (not raw `projection_type`) as the placeable market-side field, while `nba_props.py` carries that metadata through line normalization, vegas merge, pick filtering, and fill paths.
 - **[2026-04-12] Power Play EV-ranked betslips** - `filter_best_picks()` now emits `break_even_prob` and `exceeds_ev_threshold`; `log_betslips()` now writes true EV and correlation fields and ranks slips by correlation-adjusted EV instead of plain confidence order.
@@ -143,17 +154,17 @@ Materialization status:
 
 ## Current Blockers
 - **[CRITICAL] Standard-line strategy audit** - the plumbing fix is shipped and artifacts are now materialized, but the true OVER/UNDER edge on `projection_type='standard'` and `is_promo=False` lines is still unknown because almost all older rows were backfilled to standard.
-- **[CRITICAL] True-labeled sample depth** - the newest verified PrizePicks snapshot has only `77` true-labeled rows across `2026-04-14` / `2026-04-15`; that is not enough graded history to trust a full directional edge audit yet.
+- **[CRITICAL] True-labeled sample depth** - the newest verified PrizePicks snapshot now has `655` true-labeled rows, but only `35` of them are `standard` and none of those rows are graded yet. That is still not enough to trust a full directional standard-line audit.
 - PrizePicks `403/429`
 
 ## Next 3 Highest-Priority Steps
 
 1. **Accumulate more true-labeled PrizePicks history** - keep running the live save path so `historical_lines.csv` contains enough real `standard/goblin/demon` rows to support a meaningful edge audit.
 2. **Audit standard-line OVER/UNDER edge** - once enough true-labeled rows are graded, recompute hit rates on `projection_type='standard'` and `is_promo=False` only.
-3. **Monitor the next pending-team slate** - confirm `data/player_projections_today.csv` shows explicit `team_pending` rows on a real day with a pending official report.
+3. **Monitor demon-heavy board behavior** - the first labeled active slate is overwhelmingly `demon`; track whether the current UNDER-heavy policy remains robust when the live board is mostly less-only lines.
 
 ## Validation Snapshot
-Last verification performed: 2026-04-12
+Last verification performed: 2026-04-13
 - `python -c "import ast, pathlib; files=['prizepicks_scraper.py','injury_feed.py','run_daily.py','nba_props.py','scripts/backtest_under_only_slips.py','tests/test_slate_date_handling.py','tests/test_prizepicks_market_gating.py','tests/test_injury_feed_merge.py','tests/test_betslip_ev_selection.py','tests/test_pending_team_status_fallback.py']; [ast.parse(pathlib.Path(f).read_text(encoding='utf-8')) for f in files]; print('syntax ok')"` -> OK
 - `python -m unittest tests.test_slate_date_handling tests.test_prizepicks_market_gating tests.test_injury_feed_merge tests.test_betslip_ev_selection tests.test_pending_team_status_fallback` -> OK (`8` tests)
 - `python scripts/backtest_under_only_slips.py` -> OK; wrote `output/under_only_slip_backtest_detail.csv` and `output/under_only_slip_backtest_summary.json`
@@ -164,12 +175,17 @@ Last verification performed: 2026-04-12
 - `python -c "import pandas as pd; from pathlib import Path; hist=pd.read_csv(Path('data/historical_lines.csv')); picks=pd.read_csv(Path('output/picks_latest.csv')); print('historical_has', 'projection_type' in hist.columns, 'is_promo' in hist.columns); print('picks_has', [c for c in ['projection_type','is_promo','break_even_prob','exceeds_ev_threshold'] if c in picks.columns])"` -> OK (`historical_has True True`; `picks_has ['projection_type', 'is_promo', 'break_even_prob', 'exceeds_ev_threshold']`)
 - `python -c "import pandas as pd; from nba_props import _select_active_slate_lines; hist=pd.read_csv('data/historical_lines.csv'); active, slate=_select_active_slate_lines(hist); print('active_slate', slate); print(active['projection_type'].fillna('missing').value_counts().to_dict()); print(active['is_promo'].fillna(False).astype(bool).value_counts().to_dict())"` -> OK (`active_slate 2026-04-12`; `{'standard': 1015}`; `{False: 1015}`)
 - `python -c "import pandas as pd; hist=pd.read_csv('data/historical_lines.csv'); latest=hist[hist['source'].astype(str).eq('prizepicks_scraper')].copy(); latest['snapshot_ts']=pd.to_datetime(latest['snapshot_ts'], errors='coerce'); max_ts=latest['snapshot_ts'].max(); snap=latest[latest['snapshot_ts'].eq(max_ts)].copy(); print('projection_type_counts', snap['projection_type'].fillna('missing').value_counts().to_dict()); print('promo_counts', snap['is_promo'].fillna(False).astype(bool).value_counts().to_dict())"` -> OK (`{'demon': 76, 'standard': 1}`; `{False: 77}`)
+- `python -c "import pandas as pd; df=pd.read_csv('output/picks_history.csv'); sub=df[df['game_date'].astype(str).eq('2026-04-12')]; print(sub[['player','prop','direction','line','projection_type','is_promo','result','actual','line_source']].to_string(index=False)); print((sub['result']=='WIN').sum(), len(sub))"` -> OK (`5` wins out of `5`)
+- `python prizepicks_scraper.py` -> OK; direct API succeeded on `minimal-league-only / variant 0`, parsed `664` validated NBA lines across `2026-04-14`, `2026-04-15`, and `2026-04-18`, and rewrote `data/historical_lines.csv`
+- `python -c "import pandas as pd; from nba_props import _select_active_slate_lines; hist=pd.read_csv('data/historical_lines.csv'); active, slate=_select_active_slate_lines(hist); print('active_slate', slate); print('active_rows', len(active)); print(active['projection_type'].value_counts().to_dict()); print(active['is_promo'].fillna(False).astype(bool).value_counts().to_dict())"` -> OK (`active_slate 2026-04-14`; `active_rows 257`; `{'demon': 234, 'standard': 14, 'goblin': 9}`; `{False: 257}`)
+- `python nba_props.py predict` -> OK; used `257` cached PrizePicks lines on active slate `2026-04-14`, generated `5` live picks, and rewrote `output/picks_latest.csv`, `output/picks_history.csv`, `output/betslips_latest.csv`, and `output/betslips_history.csv`
+- `python -c "import pandas as pd; picks=pd.read_csv('output/picks_latest.csv'); print(picks[['player','prop','direction','projection_type','is_promo','confidence','pick_source','line_source']].to_string(index=False)); print(picks['projection_type'].value_counts().to_dict())"` -> OK; all `5` current picks are `demon`
 
 ---
 
 ## Session Handoff
-- Last completed task: stabilized the PrizePicks fetch path, successfully materialized market metadata into `historical_lines.csv`, and rewrote the picks artifacts under the new EV-aware schema
-- Current objective: accumulate enough true-labeled market history to run a trustworthy standard-line edge audit
+- Last completed task: verified the `2026-04-12` card went `5/5`, pulled the first truly labeled active slate, and generated a new live card from that labeled board
+- Current objective: accumulate enough graded true-labeled market history to run a trustworthy standard-line edge audit
 - Current branch: `master`
 - Files changed: `prizepicks_scraper.py`, `injury_feed.py`, `nba_props.py`, `run_daily.py`, `scripts/backtest_under_only_slips.py`, `tests/test_slate_date_handling.py`, `tests/test_prizepicks_market_gating.py`, `tests/test_injury_feed_merge.py`, `tests/test_betslip_ev_selection.py`, `tests/test_pending_team_status_fallback.py`, `output/STATUS.md`, `output/TASKS.md`, `output/DECISIONS.md`
 - Verification run:
@@ -181,8 +197,9 @@ Last verification performed: 2026-04-12
   - `python prizepicks_scraper.py`
   - `python nba_props.py predict`
   - on-disk artifact schema and slate-mix checks for `historical_lines.csv` and `picks_latest.csv`
-- Known issues: PrizePicks availability remains unstable; the active slate is still legacy-standard while the newest true-labeled snapshot is future-dated; the `team_pending` fallback still needs confirmation on the next real pending-team slate
-- Immediate next step: keep collecting true-labeled PrizePicks rows, then run the standard-line-only edge audit once enough of those rows are graded
+  - `python -c ...` verification of the `2026-04-12` `5/5` result set
+- Known issues: PrizePicks availability remains unstable; standard-line graded sample depth is still too small for a clean audit; the `team_pending` fallback still needs confirmation on the next real pending-team slate
+- Immediate next step: keep collecting and grading true-labeled PrizePicks rows, especially `standard` rows, then run the standard-line-only edge audit
 
 ## Resume Here
 When starting a new session:
@@ -190,3 +207,35 @@ When starting a new session:
 2. Confirm current objective and blockers from repo state, not chat memory.
 3. Keep changes scoped and verify exact commands before marking work complete.
 4. Update `output/STATUS.md`, `output/TASKS.md`, and `output/DECISIONS.md` before stopping.
+
+---
+
+## 2026-04-15 Update
+
+- **April 14 picks manually backfilled** — 4 picks (Camara TRB, Diabaté AST, Adebayo STL, Wiggins BLK) were archived but missing from `picks_history.csv` due to NBA API lag (latest game_date still showing 2026-04-12 on April 15 morning run). Actuals fetched via `nba_api` player game logs; all 4 graded WIN (4-0).
+- **picks_history.csv**: 1,405 rows total
+- **Known gap**: no auto-heal when archive picks exist but history rows are absent — see DECISIONS.md for recommended fix
+- **Current branch**: `master`
+
+---
+
+## 2026-04-15 — PTS Model Policy Hardened
+
+- **PTS OVER permanently blocked** in both fallback and dynamic policy (`allow_over=False` hard-set in code regardless of eval data)
+- **PTS UNDER auto-gate added** (`pts_under_tracking_allowed`): will enable when `under_hit ≥ 0.54` AND `market_hit ≥ 0.50` — currently NOT triggered (market_hit=0.491)
+- **Sigma NaN confirmed non-issue**: PTS sidecar produces valid sigma; NaN in history is because PTS stopped generating picks before sigma was added (Apr 2 vs Apr 12)
+- **Bias diagnosis**: +2.8 pt OVER bias and -2.6 pt UNDER bias are selection-induced (model trained unbiased at +0.13 overall); no change to bias_advanced.json needed
+- **Files changed**: `nba_props.py` (fallback policy, dynamic policy, policy dict)
+- **Syntax verified**: `ast.parse` clean
+- **Current branch**: `master`
+
+---
+
+## 2026-04-15 — Terminal Log Output Reformatted
+
+- **Problem**: `run_daily.py` pipes all nba_props.py stdout through `logger.info("  {line}")`, so the 26-column `DataFrame.to_string()` block produced unreadable wrapped garbage in the log
+- **Fix**: Replaced both wide-DataFrame prints with clean fixed-width tables
+  - `nba_props.py` "TODAY'S PICKS" block: shows PLAYER / PROP / DIR / LINE / PRED / EDGE / CONF / HIT% / TIER + optional mkt/σ/INJ extras per row
+  - `run_daily.py` `_summarise_live_pick_outputs`: shows same compact format via logger
+- **Files changed**: `nba_props.py`, `run_daily.py`
+- **Syntax verified**: both files `ast.parse` clean

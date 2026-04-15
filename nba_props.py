@@ -64,6 +64,12 @@ CONFIG = {
     'live_pick_min': 5,        # Minimum number of live picks to publish each day
     'live_pick_target': 5,     # Target size of the final live card
     'live_pick_candidate_pool': 25,  # Pull a deeper pool, then sanitize and diversify
+    'live_pick_meta_floor_min': 45.0,      # Final-card hard floor for meta_prob (%)
+    'live_pick_meta_floor_max': 60.0,      # Prevent over-tightening on thin slates
+    'live_pick_meta_floor_slack': 10.0,    # Allow some slack below prop policy floor
+    'live_pick_volatility_ceiling_mult': 1.0,  # 1.0 = use learned p75/high-vol reference directly
+    'live_pick_estimated_hit_rate_floor': 65.0,  # Publish only when learned hit rate clears this bar
+    'live_pick_market_model_only': True,   # Do not publish volume/emergency fill picks on the official card
 
     # Targets
     'targets': ['pts', 'trb', 'ast', 'pra', 'pr', 'pa'],
@@ -111,6 +117,202 @@ def _ensure_nba_season_columns(df: pd.DataFrame, date_col: str = 'game_date') ->
             out['season'] = out['season'].replace('', np.nan).fillna(inferred)
         out['season'] = out['season'].astype(str)
     return out
+
+
+def _infer_season_stage(slate_date: Optional[str] = None,
+                        history_df: Optional[pd.DataFrame] = None) -> Dict[str, object]:
+    """
+    Infer whether the active slate is regular season or postseason.
+
+    Historical game logs are regular-season only, so the first slate after the
+    last in-season `game_date` for a given season is treated as play-in /
+    postseason context.
+    """
+    slate_ts = pd.to_datetime(slate_date or datetime.now(), errors='coerce')
+    if pd.isna(slate_ts):
+        slate_ts = pd.Timestamp(datetime.now())
+    slate_ts = pd.Timestamp(slate_ts).normalize()
+    season = _season_from_game_date(slate_ts)
+
+    info: Dict[str, object] = {
+        'slate_date': slate_ts.strftime('%Y-%m-%d'),
+        'season': season,
+        'regular_season_end': None,
+        'days_after_regular_end': 0,
+        'season_stage': 'regular_season',
+        'postseason_context': False,
+    }
+    if history_df is None or len(history_df) == 0 or 'game_date' not in history_df.columns:
+        return info
+
+    hist = _ensure_nba_season_columns(history_df, date_col='game_date')
+    hist = hist[hist['season'].astype(str) == season].copy()
+    if len(hist) == 0:
+        return info
+
+    season_dates = pd.to_datetime(hist['game_date'], errors='coerce').dropna()
+    if season_dates.empty:
+        return info
+
+    regular_end = pd.Timestamp(season_dates.max()).normalize()
+    days_after = max(0, int((slate_ts - regular_end).days))
+    season_stage = 'regular_season'
+    if days_after > 0:
+        season_stage = 'play_in' if days_after <= 4 else 'playoffs'
+
+    info.update({
+        'regular_season_end': regular_end.strftime('%Y-%m-%d'),
+        'days_after_regular_end': days_after,
+        'season_stage': season_stage,
+        'postseason_context': season_stage != 'regular_season',
+    })
+    return info
+
+
+def _apply_postseason_context(picks_df: pd.DataFrame,
+                              slate_date: Optional[str] = None,
+                              history_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """
+    Add postseason-aware role stability scoring for live-card ranking.
+
+    In play-in and playoff slates, lean harder toward established minutes,
+    stable roles, and standard lines instead of fragile ceiling cases.
+    """
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+
+    working = picks_df.copy()
+    stage_info = _infer_season_stage(slate_date=slate_date, history_df=history_df)
+    season_stage = str(stage_info.get('season_stage', 'regular_season'))
+    postseason_context = bool(stage_info.get('postseason_context', False))
+    days_after_regular_end = int(stage_info.get('days_after_regular_end', 0) or 0)
+
+    working['season_stage'] = season_stage
+    working['postseason_context'] = postseason_context
+    working['days_after_regular_end'] = days_after_regular_end
+
+    if 'projection_type' not in working.columns:
+        working['projection_type'] = 'standard'
+    working['projection_type'] = working['projection_type'].apply(_normalize_projection_type)
+    projection_rank = working['projection_type'].apply(_projection_type_rank).astype(float)
+
+    estimated_vals = pd.to_numeric(
+        working.get('estimated_hit_rate', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(60.0)
+    meta_vals = pd.to_numeric(
+        working.get('meta_prob', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(55.0)
+    consistency_vals = pd.to_numeric(
+        working.get('consistency_score', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(0.50).clip(lower=0.0, upper=1.0)
+    volatility_vals = pd.to_numeric(
+        working.get('volatility_metric', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    )
+    volatility_ceiling_vals = pd.to_numeric(
+        working.get('volatility_ceiling', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    )
+    games_vals = pd.to_numeric(
+        working.get('games_played', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(60.0)
+    season_games_vals = pd.to_numeric(
+        working.get('season_games_played', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(games_vals.clip(lower=20.0, upper=82.0))
+    mp_expected = pd.to_numeric(
+        working.get(
+            'mp_predicted',
+            working.get('mp_expected', pd.Series(np.nan, index=working.index)),
+        ),
+        errors='coerce',
+    )
+    mp_l10 = pd.to_numeric(
+        working.get('mp_l10', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    )
+    minutes_base = mp_expected.fillna(mp_l10).fillna(28.0)
+    mp_baseline = mp_l10.fillna(minutes_base)
+    minutes_delta = (minutes_base - mp_baseline).abs()
+
+    top_lane_component = (
+        working.get('top_tier_lane_pass', pd.Series(False, index=working.index))
+        .fillna(False)
+        .astype(bool)
+        .astype(float)
+    )
+    market_model_component = (
+        working.get('pick_source', pd.Series('', index=working.index))
+        .astype(str)
+        .eq('market_model')
+        .astype(float)
+    )
+    injury_flag = (
+        working.get('injury_adj', pd.Series(False, index=working.index))
+        .fillna(False)
+        .astype(bool)
+        .astype(float)
+    )
+
+    projection_component = 1.0 - np.clip(projection_rank / 2.0, 0.0, 1.0)
+    minutes_component = np.clip((minutes_base - 20.0) / 16.0, 0.0, 1.0)
+    minutes_stability_component = 1.0 - np.clip(minutes_delta / 7.0, 0.0, 1.0)
+    season_games_component = np.clip(season_games_vals / 55.0, 0.0, 1.0)
+    career_depth_component = np.clip(np.log1p(games_vals) / np.log1p(250.0), 0.0, 1.0)
+
+    volatility_ratio = (volatility_vals / volatility_ceiling_vals.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    volatility_component = 1.0 - np.clip(volatility_ratio.fillna(0.70), 0.0, 1.25) / 1.25
+
+    postseason_role_score = (
+        0.34 * minutes_component +
+        0.24 * minutes_stability_component +
+        0.22 * season_games_component +
+        0.12 * career_depth_component +
+        0.08 * volatility_component
+    )
+    postseason_role_score = np.clip(postseason_role_score - (0.10 * injury_flag), 0.0, 1.0)
+
+    estimated_component = np.clip((estimated_vals - 55.0) / 15.0, 0.0, 1.0)
+    meta_component = np.clip((meta_vals - 45.0) / 20.0, 0.0, 1.0)
+
+    if season_stage == 'playoffs':
+        postseason_pick_score = (
+            0.30 * estimated_component +
+            0.26 * postseason_role_score +
+            0.12 * meta_component +
+            0.10 * consistency_vals +
+            0.10 * top_lane_component +
+            0.08 * projection_component +
+            0.04 * market_model_component
+        )
+    elif season_stage == 'play_in':
+        postseason_pick_score = (
+            0.31 * estimated_component +
+            0.24 * postseason_role_score +
+            0.14 * meta_component +
+            0.10 * consistency_vals +
+            0.09 * top_lane_component +
+            0.08 * projection_component +
+            0.04 * market_model_component
+        )
+    else:
+        postseason_pick_score = (
+            0.34 * estimated_component +
+            0.16 * meta_component +
+            0.16 * consistency_vals +
+            0.12 * top_lane_component +
+            0.10 * projection_component +
+            0.08 * postseason_role_score +
+            0.04 * market_model_component
+        )
+
+    working['postseason_role_score'] = np.round(postseason_role_score, 4)
+    working['postseason_pick_score'] = np.round(np.clip(postseason_pick_score, 0.0, 1.0), 4)
+    return working
 
 
 def _prop_component_cols(target: str, suffix: str) -> List[str]:
@@ -335,6 +537,573 @@ def _build_pick_probability_payload(
     }
 
 
+_PROP_VOLATILITY_BASELINES = {
+    'pts': 6.0,
+    'trb': 2.5,
+    'ast': 2.0,
+    'pra': 9.0,
+    'pr': 7.5,
+    'pa': 7.5,
+    'stl': 0.8,
+    'blk': 0.8,
+    'tov': 1.0,
+}
+
+
+def _prop_volatility_refs(prop: str,
+                          sigma_p25: Dict[str, float],
+                          sigma_p75: Dict[str, float]) -> Tuple[float, float]:
+    """Return low/high volatility references for consistency-first ranking."""
+    prop_key = str(prop or '').lower()
+    base = float(_PROP_VOLATILITY_BASELINES.get(prop_key, 4.0))
+    low = sigma_p25.get(prop_key)
+    high = sigma_p75.get(prop_key)
+    if low is None:
+        low = base * 0.85
+    if high is None or high <= low:
+        high = max(low + base * 0.35, base * 1.25)
+    return float(low), float(high)
+
+
+def _apply_consistency_scores(picks_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add a consistency-first score using the most stable live signals we have.
+
+    Priority is:
+    1. lower volatility (`sigma` when available, otherwise rolling std fallback)
+    2. stronger abstention-layer agreement (`meta_prob`)
+    3. broader support from anchor/L10/L5 agreement
+    4. lower regime / disagreement risk
+    """
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+
+    sigma_p25, sigma_p75 = _load_sigma_thresholds()
+    working = picks_df.copy()
+
+    def _norm_pct(val: object, floor: float, span: float) -> float:
+        num = _safe_float(val, np.nan)
+        if pd.isna(num):
+            return 0.5
+        return float(np.clip((num - floor) / max(span, 1e-6), 0.0, 1.0))
+
+    def _vol_score(row: pd.Series) -> float:
+        metric = _safe_float(row.get('volatility_metric'), np.nan)
+        if pd.isna(metric):
+            return 0.5
+        low_ref, high_ref = _prop_volatility_refs(str(row.get('prop', '')), sigma_p25, sigma_p75)
+        if metric <= low_ref:
+            return 1.0
+        if metric >= high_ref:
+            return 0.0
+        span = max(high_ref - low_ref, 1e-6)
+        return float(np.clip(1.0 - ((metric - low_ref) / span), 0.0, 1.0))
+
+    working['support_agreement_count'] = pd.to_numeric(
+        working.get('support_agreement_count'),
+        errors='coerce',
+    ).fillna(0.0)
+    working['support_agreement_score'] = (
+        working['support_agreement_count'].clip(lower=0.0, upper=3.0) / 3.0
+    )
+    working['volatility_score'] = working.apply(_vol_score, axis=1)
+    working['meta_score'] = working.get('meta_prob', pd.Series(np.nan, index=working.index)).apply(
+        lambda v: _norm_pct(v, floor=50.0, span=20.0)
+    )
+    working['dir_prob_score'] = working.get('dir_prob', pd.Series(np.nan, index=working.index)).apply(
+        lambda v: _norm_pct(v, floor=55.0, span=20.0)
+    )
+    working['selection_priority_score'] = (
+        pd.to_numeric(working.get('selection_priority'), errors='coerce')
+        .fillna(0.0)
+        .clip(lower=0.0, upper=1.5) / 1.5
+    )
+    working['regime_safety_score'] = 1.0 - (
+        pd.to_numeric(working.get('regime_score'), errors='coerce')
+        .fillna(0.0)
+        .clip(lower=0.0, upper=0.60) / 0.60
+    )
+    edge_disagreement = pd.to_numeric(working.get('edge_disagreement'), errors='coerce').fillna(0.0)
+    min_edge_req = pd.to_numeric(working.get('min_edge_req'), errors='coerce').fillna(1.0).clip(lower=0.5)
+    working['agreement_safety_score'] = 1.0 - np.clip(
+        edge_disagreement / (min_edge_req * 1.5),
+        0.0,
+        1.0,
+    )
+    working['consistency_score'] = (
+        working['volatility_score'] * 0.35 +
+        working['meta_score'] * 0.25 +
+        working['support_agreement_score'] * 0.15 +
+        working['agreement_safety_score'] * 0.10 +
+        working['dir_prob_score'] * 0.10 +
+        working['selection_priority_score'] * 0.03 +
+        working['regime_safety_score'] * 0.02
+    ).round(4)
+    return working
+
+
+def _smoothed_hit_rate(wins: float,
+                       total: int,
+                       prior_rate: float,
+                       prior_strength: float) -> float:
+    """Return a Bayesian-smoothed win rate."""
+    total = int(max(total, 0))
+    if total <= 0:
+        return float(prior_rate)
+    return float((float(wins) + float(prior_rate) * float(prior_strength)) / (total + float(prior_strength)))
+
+
+def _build_quantile_hit_rate_model(values: pd.Series,
+                                   wins: pd.Series,
+                                   prior_rate: float,
+                                   *,
+                                   q: int = 5,
+                                   prior_strength: float = 8.0,
+                                   min_rows: int = 12) -> Dict[str, object]:
+    """Learn smoothed win rates over quantile buckets for a numeric feature."""
+    numeric = pd.to_numeric(values, errors='coerce')
+    win_numeric = pd.to_numeric(wins, errors='coerce')
+    mask = numeric.notna() & win_numeric.notna()
+    if int(mask.sum()) < max(min_rows, q):
+        return {}
+
+    unique_count = int(numeric[mask].nunique())
+    if unique_count < 2:
+        return {}
+
+    q = max(2, min(int(q), unique_count))
+    try:
+        _, raw_bins = pd.qcut(numeric[mask], q=q, retbins=True, duplicates='drop')
+    except ValueError:
+        return {}
+    if raw_bins is None or len(raw_bins) < 2:
+        return {}
+
+    bins = np.asarray(raw_bins, dtype=float)
+    if len(np.unique(bins)) < 2:
+        return {}
+    if len(bins) <= 2:
+        bins = np.asarray([-np.inf, np.inf], dtype=float)
+    else:
+        bins[0] = -np.inf
+        bins[-1] = np.inf
+
+    bucket_ids = pd.cut(
+        numeric[mask],
+        bins=bins,
+        labels=False,
+        include_lowest=True,
+        duplicates='drop',
+    )
+    bucket_df = pd.DataFrame({
+        'bucket': bucket_ids,
+        'win': win_numeric[mask].astype(float),
+    }).dropna(subset=['bucket'])
+    if len(bucket_df) == 0:
+        return {}
+
+    rates: Dict[int, float] = {}
+    counts: Dict[int, int] = {}
+    for bucket, group in bucket_df.groupby('bucket', sort=True):
+        bucket_idx = int(bucket)
+        counts[bucket_idx] = int(len(group))
+        rates[bucket_idx] = _smoothed_hit_rate(
+            group['win'].sum(),
+            len(group),
+            prior_rate,
+            prior_strength,
+        )
+
+    return {
+        'bins': bins.tolist(),
+        'rates': rates,
+        'counts': counts,
+    }
+
+
+def _lookup_quantile_hit_rate(model: Dict[str, object],
+                              value: object,
+                              default_rate: float) -> Tuple[float, int]:
+    """Return the learned bucket rate and sample count for a numeric value."""
+    numeric = _safe_float(value, np.nan)
+    if not model or pd.isna(numeric):
+        return float(default_rate), 0
+
+    bins = np.asarray(model.get('bins', []), dtype=float)
+    if bins.size < 2:
+        return float(default_rate), 0
+
+    bucket = pd.cut(
+        pd.Series([numeric]),
+        bins=bins,
+        labels=False,
+        include_lowest=True,
+        duplicates='drop',
+    ).iloc[0]
+    if pd.isna(bucket):
+        return float(default_rate), 0
+
+    bucket_idx = int(bucket)
+    rates = model.get('rates', {})
+    counts = model.get('counts', {})
+    return (
+        float(rates.get(bucket_idx, default_rate)),
+        int(counts.get(bucket_idx, 0)),
+    )
+
+
+def _build_exact_hit_rate_model(values: pd.Series,
+                                wins: pd.Series,
+                                prior_rate: float,
+                                *,
+                                prior_strength: float = 6.0,
+                                min_rows: int = 4) -> Dict[float, Dict[str, float]]:
+    """Learn smoothed win rates for exact discrete numeric values."""
+    numeric = pd.to_numeric(values, errors='coerce').round(2)
+    win_numeric = pd.to_numeric(wins, errors='coerce')
+    mask = numeric.notna() & win_numeric.notna()
+    if int(mask.sum()) < min_rows:
+        return {}
+
+    model: Dict[float, Dict[str, float]] = {}
+    for value, group in pd.DataFrame({
+        'value': numeric[mask],
+        'win': win_numeric[mask].astype(float),
+    }).groupby('value', sort=True):
+        n = int(len(group))
+        if n <= 0:
+            continue
+        key = float(value)
+        model[key] = {
+            'rate': _smoothed_hit_rate(group['win'].sum(), n, prior_rate, prior_strength),
+            'count': n,
+        }
+    return model
+
+
+def _lookup_exact_hit_rate(model: Dict[float, Dict[str, float]],
+                           value: object,
+                           default_rate: float) -> Tuple[float, int]:
+    """Return the learned rate and sample count for an exact discrete value."""
+    numeric = _safe_float(value, np.nan)
+    if not model or pd.isna(numeric):
+        return float(default_rate), 0
+
+    entry = model.get(round(float(numeric), 2))
+    if not entry:
+        return float(default_rate), 0
+    return float(entry.get('rate', default_rate)), int(entry.get('count', 0))
+
+
+def _learn_pick_accuracy_model(history_df: Optional[pd.DataFrame] = None) -> Dict[str, object]:
+    """
+    Learn a smoothed pick hit-rate model from graded picks_history rows.
+
+    The model intentionally leans on variables that have real forward history:
+    prop/direction base rates, meta_prob buckets, dir_prob buckets, and
+    selection_priority tiers.
+    """
+    default_rate = 0.55
+    if history_df is None:
+        history_path = CONFIG['output_dir'] / 'picks_history.csv'
+        if not history_path.exists():
+            return {
+                'overall_rate': default_rate,
+                'prop_direction_rates': {},
+                'meta_prob_buckets': {},
+                'dir_prob_buckets': {},
+                'selection_priority_rates': {},
+            }
+        history_df = pd.read_csv(history_path, low_memory=False)
+
+    if history_df is None or len(history_df) == 0:
+        return {
+            'overall_rate': default_rate,
+            'prop_direction_rates': {},
+            'meta_prob_buckets': {},
+            'dir_prob_buckets': {},
+            'selection_priority_rates': {},
+        }
+
+    graded = history_df.copy()
+    if 'result' not in graded.columns:
+        return {
+            'overall_rate': default_rate,
+            'prop_direction_rates': {},
+            'meta_prob_buckets': {},
+            'dir_prob_buckets': {},
+            'selection_priority_rates': {},
+        }
+
+    graded['result'] = graded['result'].astype(str).str.upper()
+    graded = graded[graded['result'].isin(['WIN', 'LOSS'])].copy()
+    if len(graded) == 0:
+        return {
+            'overall_rate': default_rate,
+            'prop_direction_rates': {},
+            'meta_prob_buckets': {},
+            'dir_prob_buckets': {},
+            'selection_priority_rates': {},
+        }
+
+    graded['win'] = (graded['result'] == 'WIN').astype(int)
+    if 'prop' not in graded.columns:
+        graded['prop'] = ''
+    if 'direction' not in graded.columns:
+        graded['direction'] = ''
+    graded['prop'] = graded['prop'].astype(str).str.upper()
+    graded['direction'] = graded['direction'].astype(str).str.upper()
+    overall_rate = float(graded['win'].mean()) if len(graded) > 0 else default_rate
+
+    prop_direction_rates: Dict[Tuple[str, str], Dict[str, float]] = {}
+    for (prop, direction), group in graded.groupby(['prop', 'direction'], sort=True):
+        n = int(len(group))
+        prop_direction_rates[(str(prop).upper(), str(direction).upper())] = {
+            'rate': _smoothed_hit_rate(group['win'].sum(), n, overall_rate, 25.0),
+            'count': n,
+        }
+
+    meta_prob_buckets = _build_quantile_hit_rate_model(
+        graded.get('meta_prob', pd.Series(np.nan, index=graded.index)),
+        graded['win'],
+        overall_rate,
+        q=5,
+        prior_strength=6.0,
+        min_rows=15,
+    )
+    dir_prob_buckets = _build_quantile_hit_rate_model(
+        graded.get('dir_prob', pd.Series(np.nan, index=graded.index)),
+        graded['win'],
+        overall_rate,
+        q=5,
+        prior_strength=8.0,
+        min_rows=20,
+    )
+    selection_priority_rates = _build_exact_hit_rate_model(
+        graded.get('selection_priority', pd.Series(np.nan, index=graded.index)),
+        graded['win'],
+        overall_rate,
+        prior_strength=5.0,
+        min_rows=4,
+    )
+
+    return {
+        'overall_rate': overall_rate,
+        'prop_direction_rates': prop_direction_rates,
+        'meta_prob_buckets': meta_prob_buckets,
+        'dir_prob_buckets': dir_prob_buckets,
+        'selection_priority_rates': selection_priority_rates,
+    }
+
+
+def _learn_top_tier_lanes(history_df: Optional[pd.DataFrame] = None) -> Dict[Tuple[str, str], Dict[str, float]]:
+    """
+    Identify historically strong prop/direction lanes for official-card preference.
+
+    We only treat a lane as top-tier when it has both enough sample size and a
+    materially better win rate than the global average.
+    """
+    accuracy_model = _learn_pick_accuracy_model(history_df)
+    overall_rate = float(accuracy_model.get('overall_rate', 0.55))
+    prop_direction_rates = accuracy_model.get('prop_direction_rates', {})
+
+    top_lanes: Dict[Tuple[str, str], Dict[str, float]] = {}
+    for (prop, direction), info in prop_direction_rates.items():
+        lane_rate = float(info.get('rate', overall_rate))
+        lane_n = int(info.get('count', 0))
+        if lane_n < 10:
+            continue
+        if lane_rate < max(0.62, overall_rate + 0.06):
+            continue
+        top_lanes[(str(prop).upper(), str(direction).upper())] = {
+            'rate': lane_rate,
+            'count': lane_n,
+        }
+    return top_lanes
+
+
+def _apply_estimated_hit_rates(picks_df: pd.DataFrame,
+                               history_df: Optional[pd.DataFrame] = None,
+                               accuracy_model: Optional[Dict[str, object]] = None) -> pd.DataFrame:
+    """Attach a history-learned estimated hit rate to live picks."""
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+
+    model = accuracy_model or _learn_pick_accuracy_model(history_df)
+    overall_rate = float(model.get('overall_rate', 0.55))
+    prop_direction_rates = model.get('prop_direction_rates', {})
+    meta_prob_buckets = model.get('meta_prob_buckets', {})
+    dir_prob_buckets = model.get('dir_prob_buckets', {})
+    selection_priority_rates = model.get('selection_priority_rates', {})
+
+    working = picks_df.copy()
+    estimated_rates: List[float] = []
+    prop_dir_rates: List[float] = []
+    prop_dir_counts: List[int] = []
+    meta_rates: List[float] = []
+    meta_counts: List[int] = []
+    dir_rates: List[float] = []
+    dir_counts: List[int] = []
+    priority_rates: List[float] = []
+    priority_counts: List[int] = []
+
+    for _, row in working.iterrows():
+        prop_key = str(row.get('prop', '')).upper()
+        direction_key = str(row.get('direction', '')).upper()
+        prop_dir_entry = prop_direction_rates.get((prop_key, direction_key), {})
+        prop_dir_rate = float(prop_dir_entry.get('rate', overall_rate))
+        prop_dir_n = int(prop_dir_entry.get('count', 0))
+
+        meta_rate, meta_n = _lookup_quantile_hit_rate(
+            meta_prob_buckets,
+            row.get('meta_prob'),
+            prop_dir_rate,
+        )
+        dir_rate, dir_n = _lookup_quantile_hit_rate(
+            dir_prob_buckets,
+            row.get('dir_prob'),
+            prop_dir_rate,
+        )
+        priority_rate, priority_n = _lookup_exact_hit_rate(
+            selection_priority_rates,
+            row.get('selection_priority'),
+            prop_dir_rate,
+        )
+
+        weights = [0.15]
+        rates = [overall_rate]
+
+        prop_weight = 0.40 * min(1.0, prop_dir_n / 40.0)
+        if prop_weight > 0:
+            weights.append(prop_weight)
+            rates.append(prop_dir_rate)
+
+        meta_weight = 0.30 * min(1.0, meta_n / 8.0)
+        if meta_weight > 0:
+            weights.append(meta_weight)
+            rates.append(meta_rate)
+
+        dir_weight = 0.20 * min(1.0, dir_n / 12.0)
+        if dir_weight > 0:
+            weights.append(dir_weight)
+            rates.append(dir_rate)
+
+        priority_weight = 0.10 * min(1.0, priority_n / 8.0)
+        if priority_weight > 0:
+            weights.append(priority_weight)
+            rates.append(priority_rate)
+
+        est_rate = float(np.average(rates, weights=weights))
+        estimated_rates.append(round(est_rate * 100.0, 1))
+        prop_dir_rates.append(round(prop_dir_rate * 100.0, 1))
+        prop_dir_counts.append(prop_dir_n)
+        meta_rates.append(round(meta_rate * 100.0, 1))
+        meta_counts.append(meta_n)
+        dir_rates.append(round(dir_rate * 100.0, 1))
+        dir_counts.append(dir_n)
+        priority_rates.append(round(priority_rate * 100.0, 1))
+        priority_counts.append(priority_n)
+
+    working['estimated_hit_rate'] = estimated_rates
+    working['prop_direction_hit_rate'] = prop_dir_rates
+    working['prop_direction_history_n'] = prop_dir_counts
+    working['meta_bucket_hit_rate'] = meta_rates
+    working['meta_bucket_history_n'] = meta_counts
+    working['dir_prob_bucket_hit_rate'] = dir_rates
+    working['dir_prob_bucket_history_n'] = dir_counts
+    working['selection_priority_hit_rate'] = priority_rates
+    working['selection_priority_history_n'] = priority_counts
+    return working
+
+
+def _apply_top_tier_lane_flags(picks_df: pd.DataFrame,
+                               history_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """Mark picks that belong to historically strong prop/direction lanes."""
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+
+    top_lanes = _learn_top_tier_lanes(history_df)
+    working = picks_df.copy()
+    lane_pass = []
+    lane_rates = []
+    lane_counts = []
+    for _, row in working.iterrows():
+        key = (str(row.get('prop', '')).upper(), str(row.get('direction', '')).upper())
+        info = top_lanes.get(key, {})
+        lane_pass.append(bool(info))
+        lane_rates.append(round(float(info.get('rate', np.nan)) * 100.0, 1) if info else np.nan)
+        lane_counts.append(int(info.get('count', 0)) if info else 0)
+    working['top_tier_lane_pass'] = lane_pass
+    working['top_tier_lane_rate'] = lane_rates
+    working['top_tier_lane_history_n'] = lane_counts
+    return working
+
+
+def _live_card_meta_floor(prop: str,
+                          quality_policy: Optional[Dict[str, Dict]] = None) -> float:
+    """Return the hard meta_prob floor for the final live card."""
+    quality = quality_policy or _load_target_quality_policy()
+    prop_key = str(prop or '').lower()
+    policy = quality.get(prop_key, {})
+    base_floor = float(policy.get('min_meta_prob', 0.55)) * 100.0
+    floor = base_floor - float(CONFIG.get('live_pick_meta_floor_slack', 10.0))
+    floor = max(float(CONFIG.get('live_pick_meta_floor_min', 45.0)), floor)
+    floor = min(float(CONFIG.get('live_pick_meta_floor_max', 60.0)), floor)
+    return round(float(floor), 1)
+
+
+def _live_card_volatility_ceiling(prop: str) -> float:
+    """Return the hard volatility ceiling for the final live card."""
+    sigma_p25, sigma_p75 = _load_sigma_thresholds()
+    _, high_ref = _prop_volatility_refs(str(prop or ''), sigma_p25, sigma_p75)
+    ceiling = float(high_ref) * float(CONFIG.get('live_pick_volatility_ceiling_mult', 1.0))
+    return round(float(ceiling), 3)
+
+
+def _apply_live_accuracy_gates(picks_df: pd.DataFrame,
+                               quality_policy: Optional[Dict[str, Dict]] = None,
+                               history_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """Attach final-card hard gate thresholds and pass/fail flags."""
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+
+    quality = quality_policy or _load_target_quality_policy()
+    working = picks_df.copy()
+    if 'top_tier_lane_pass' not in working.columns:
+        working = _apply_top_tier_lane_flags(working, history_df=history_df)
+    working['meta_floor'] = working.get('prop', pd.Series('', index=working.index)).apply(
+        lambda prop: _live_card_meta_floor(str(prop), quality)
+    )
+    working['volatility_ceiling'] = working.get('prop', pd.Series('', index=working.index)).apply(
+        lambda prop: _live_card_volatility_ceiling(str(prop))
+    )
+    meta_vals = pd.to_numeric(working.get('meta_prob', pd.Series(np.nan, index=working.index)), errors='coerce')
+    vol_vals = pd.to_numeric(working.get('volatility_metric', pd.Series(np.nan, index=working.index)), errors='coerce')
+    estimated_vals = pd.to_numeric(
+        working.get('estimated_hit_rate', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    )
+    working['estimated_hit_rate_floor'] = float(CONFIG.get('live_pick_estimated_hit_rate_floor', 65.0))
+    working['meta_gate_pass'] = meta_vals.notna() & (meta_vals >= working['meta_floor'])
+    working['volatility_gate_pass'] = vol_vals.notna() & (vol_vals <= working['volatility_ceiling'])
+    working['estimated_hit_rate_pass'] = (
+        estimated_vals.notna() &
+        (estimated_vals >= working['estimated_hit_rate_floor'])
+    )
+    if bool(CONFIG.get('live_pick_market_model_only', True)):
+        pick_sources = working.get('pick_source', pd.Series('', index=working.index)).astype(str)
+        working['pick_source_gate_pass'] = pick_sources.eq('market_model')
+    else:
+        working['pick_source_gate_pass'] = True
+    working['accuracy_gate_pass'] = (
+        working['meta_gate_pass'] &
+        working['volatility_gate_pass'] &
+        working['estimated_hit_rate_pass'] &
+        working['pick_source_gate_pass']
+    )
+    return working
+
+
 def _load_probability_sidecars():
     sidecars = {}
     for target in ['pts', 'trb', 'ast', 'stl', 'blk', 'tov']:
@@ -463,6 +1232,18 @@ def _get_line_archive_dir(day_str: str) -> Path:
 def _normalize_projection_type(value: object) -> str:
     projection_type = str(value or 'standard').strip().lower()
     return projection_type if projection_type in {'standard', 'goblin', 'demon'} else 'standard'
+
+
+def _projection_type_rank(value: object) -> int:
+    """Lower is better for official-card quality ordering."""
+    projection_type = _normalize_projection_type(value)
+    if projection_type == 'standard':
+        return 0
+    if projection_type == 'goblin':
+        return 1
+    if projection_type == 'demon':
+        return 2
+    return 3
 
 
 def _normalize_historical_lines_frame(df: pd.DataFrame,
@@ -949,6 +1730,26 @@ def _resolve_active_slate_date(lines_df: pd.DataFrame,
     upcoming = [d for d in unique_dates if d >= as_of_ts]
     chosen = upcoming[0] if upcoming else unique_dates[-1]
     return pd.Timestamp(chosen).strftime('%Y-%m-%d')
+
+
+def _select_lines_for_exact_slate_date(lines_df: pd.DataFrame,
+                                       slate_date: Optional[str]) -> Tuple[pd.DataFrame, Optional[str]]:
+    if lines_df is None or len(lines_df) == 0 or not slate_date:
+        return pd.DataFrame(), None
+
+    working = lines_df.copy()
+    if 'game_date' not in working.columns:
+        return pd.DataFrame(), None
+
+    working['game_date'] = pd.to_datetime(working['game_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+    working = working.dropna(subset=['game_date']).copy()
+    target_date = pd.to_datetime(slate_date, errors='coerce')
+    if pd.isna(target_date):
+        return pd.DataFrame(), None
+
+    target_str = pd.Timestamp(target_date).strftime('%Y-%m-%d')
+    exact = working[working['game_date'] == target_str].copy()
+    return exact.reset_index(drop=True), (target_str if len(exact) > 0 else None)
 
 
 def _select_active_slate_lines(lines_df: pd.DataFrame,
@@ -2063,6 +2864,42 @@ def create_features(df: pd.DataFrame, stats_cutoff=None) -> pd.DataFrame:
         )
         df = df.drop(columns=['ts_raw'])
 
+    for window in [5, 10, 20]:
+        pts_col = f'pts_l{window}'
+        fga_col = f'fga_l{window}'
+        fta_col = f'fta_l{window}'
+        fg_pct_col = f'fg_pct_l{window}'
+        if pts_col in df.columns and fga_col in df.columns:
+            df[f'points_per_fga_l{window}'] = (
+                pd.to_numeric(df[pts_col], errors='coerce') /
+                pd.to_numeric(df[fga_col], errors='coerce').replace(0, np.nan)
+            )
+        if fga_col in df.columns and fta_col in df.columns:
+            df[f'scoring_opps_l{window}'] = (
+                pd.to_numeric(df[fga_col], errors='coerce') +
+                0.44 * pd.to_numeric(df[fta_col], errors='coerce')
+            )
+        if fga_col in df.columns:
+            fg_proxy = pd.to_numeric(
+                df.get(fg_pct_col, pd.Series(np.nan, index=df.index)),
+                errors='coerce',
+            )
+            df[f'shot_volume_quality_l{window}'] = (
+                pd.to_numeric(df[fga_col], errors='coerce') * fg_proxy
+            )
+    if {'points_per_fga_l5', 'points_per_fga_l20'}.issubset(df.columns):
+        df['points_per_fga_trend'] = (
+            df['points_per_fga_l5'] / df['points_per_fga_l20'].replace(0, np.nan)
+        ).fillna(1.0)
+    if {'scoring_opps_l5', 'scoring_opps_l20'}.issubset(df.columns):
+        df['scoring_opps_trend'] = (
+            df['scoring_opps_l5'] / df['scoring_opps_l20'].replace(0, np.nan)
+        ).fillna(1.0)
+    if {'shot_volume_quality_l5', 'shot_volume_quality_l20'}.issubset(df.columns):
+        df['shot_volume_quality_trend'] = (
+            df['shot_volume_quality_l5'] / df['shot_volume_quality_l20'].replace(0, np.nan)
+        ).fillna(1.0)
+
     # -------------------------------------------------------------------------
     # 9. Player vs Specific Opponent History (Bayesian shrinkage)
     # -------------------------------------------------------------------------
@@ -2234,6 +3071,11 @@ def create_features(df: pd.DataFrame, stats_cutoff=None) -> pd.DataFrame:
         df['usage_trend'] = df['usage_l5'] / df['usage_l10'].replace(0, np.nan)
         # Spike: recent usage ≥15% above baseline — signals teammate absence
         df['usage_spike'] = (df['usage_l5'] >= df['usage_l10'] * 1.15).astype(int)
+        if 'fga_l10' in df.columns:
+            df['usage_fga_interaction_l10'] = (
+                pd.to_numeric(df['usage_l10'], errors='coerce').fillna(0.0) *
+                pd.to_numeric(df['fga_l10'], errors='coerce').fillna(0.0)
+            )
 
         # Drop intermediates — they are current-game data, not valid features
         df = df.drop(columns=['_player_poss', '_team_poss_game', 'usage_rate'], errors='ignore')
@@ -2558,6 +3400,11 @@ def _build_advanced_features(df: pd.DataFrame) -> pd.DataFrame:
     if 'fga_l3' not in df.columns and 'fga' in df.columns:
         df['fga_l3'] = df.groupby('player')['fga'].transform(lambda x: x.shift(1).rolling(3, min_periods=1).mean())
         df['fga_trend'] = (df['fga_l3'] / df['fga_l10'].replace(0, np.nan)).fillna(1.0) if 'fga_l10' in df.columns else 1.0
+    if {'usage_l10', 'fga_l10'}.issubset(df.columns) and 'usage_fga_interaction_l10' not in df.columns:
+        df['usage_fga_interaction_l10'] = (
+            pd.to_numeric(df['usage_l10'], errors='coerce').fillna(0.0) *
+            pd.to_numeric(df['fga_l10'], errors='coerce').fillna(0.0)
+        )
 
     # --- Game environment score ---
     if 'game_environment_score' not in df.columns:
@@ -2571,12 +3418,72 @@ def _build_advanced_features(df: pd.DataFrame) -> pd.DataFrame:
         trend = df['team_scoring_trend'] if 'team_scoring_trend' in df.columns else pd.Series(1.0, index=df.index)
         df['high_scoring_game'] = (trend > 1.05).astype(int)
 
-    # --- L20 for shooting pcts ---
-    for stat in ['3p_pct', 'ft_pct']:
-        if stat in df.columns and f'{stat}_l20' not in df.columns:
-            df[f'{stat}_l20'] = df.groupby('player')[stat].transform(
-                lambda x: x.shift(1).rolling(20, min_periods=5).mean()
+    # --- Rolling shot-quality / efficiency features ---
+    for stat in ['fg_pct', '3p_pct', 'ft_pct']:
+        if stat not in df.columns:
+            continue
+        for window, min_periods in [(5, 2), (10, 3), (20, 5)]:
+            col = f'{stat}_l{window}'
+            if col not in df.columns:
+                df[col] = df.groupby('player')[stat].transform(
+                    lambda x: x.shift(1).rolling(window, min_periods=min_periods).mean()
+                )
+        luck_col = f'{stat}_luck'
+        if luck_col not in df.columns and f'{stat}_l5' in df.columns and f'{stat}_l20' in df.columns:
+            df[luck_col] = df[f'{stat}_l5'] - df[f'{stat}_l20']
+
+    if {'pts', 'fga', 'fta'}.issubset(df.columns) and 'ts_pct_l10' not in df.columns:
+        df['_ts_raw_adv'] = pd.to_numeric(df['pts'], errors='coerce') / (
+            2.0 * (
+                pd.to_numeric(df['fga'], errors='coerce') +
+                0.44 * pd.to_numeric(df['fta'], errors='coerce') +
+                1e-6
             )
+        ).clip(lower=0.01)
+        df['ts_pct_l10'] = df.groupby('player')['_ts_raw_adv'].transform(
+            lambda x: x.shift(1).rolling(10, min_periods=3).mean()
+        )
+        ts_pct_l5 = df.groupby('player')['_ts_raw_adv'].transform(
+            lambda x: x.shift(1).rolling(5, min_periods=2).mean()
+        )
+        df['ts_pct_trend'] = (ts_pct_l5 / df['ts_pct_l10'].replace(0, np.nan)).fillna(1.0)
+        df = df.drop(columns=['_ts_raw_adv'], errors='ignore')
+
+    for window in [5, 10, 20]:
+        pts_col = f'pts_l{window}'
+        fga_col = f'fga_l{window}'
+        fta_col = f'fta_l{window}'
+        fg_pct_col = f'fg_pct_l{window}'
+        if pts_col in df.columns and fga_col in df.columns and f'points_per_fga_l{window}' not in df.columns:
+            df[f'points_per_fga_l{window}'] = (
+                pd.to_numeric(df[pts_col], errors='coerce') /
+                pd.to_numeric(df[fga_col], errors='coerce').replace(0, np.nan)
+            )
+        if fga_col in df.columns and fta_col in df.columns and f'scoring_opps_l{window}' not in df.columns:
+            df[f'scoring_opps_l{window}'] = (
+                pd.to_numeric(df[fga_col], errors='coerce') +
+                0.44 * pd.to_numeric(df[fta_col], errors='coerce')
+            )
+        if fga_col in df.columns and f'shot_volume_quality_l{window}' not in df.columns:
+            fg_proxy = pd.to_numeric(
+                df.get(fg_pct_col, pd.Series(np.nan, index=df.index)),
+                errors='coerce',
+            )
+            df[f'shot_volume_quality_l{window}'] = (
+                pd.to_numeric(df[fga_col], errors='coerce') * fg_proxy
+            )
+    if {'points_per_fga_l5', 'points_per_fga_l20'}.issubset(df.columns) and 'points_per_fga_trend' not in df.columns:
+        df['points_per_fga_trend'] = (
+            df['points_per_fga_l5'] / df['points_per_fga_l20'].replace(0, np.nan)
+        ).fillna(1.0)
+    if {'scoring_opps_l5', 'scoring_opps_l20'}.issubset(df.columns) and 'scoring_opps_trend' not in df.columns:
+        df['scoring_opps_trend'] = (
+            df['scoring_opps_l5'] / df['scoring_opps_l20'].replace(0, np.nan)
+        ).fillna(1.0)
+    if {'shot_volume_quality_l5', 'shot_volume_quality_l20'}.issubset(df.columns) and 'shot_volume_quality_trend' not in df.columns:
+        df['shot_volume_quality_trend'] = (
+            df['shot_volume_quality_l5'] / df['shot_volume_quality_l20'].replace(0, np.nan)
+        ).fillna(1.0)
 
     # --- Alias ewma names: nba_props uses pts_ewma, models expect pts_ewma5 ---
     ewma_stats = ['pts', 'trb', 'ast', 'fga', 'fta', '3pa', 'stl', 'blk', 'tov', 'mp']
@@ -4331,7 +5238,11 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
                                  edge_analysis: Optional[Dict[str, Dict]] = None) -> Dict[str, Dict]:
     """Build per-target betting policy from a results/edge-analysis snapshot."""
     fallback = {
-        'pts': {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.60, 'min_prob': 0.58, 'min_meta_prob': 0.57, 'min_edge': 1.8, 'min_edge_over': 2.0, 'min_edge_under': 2.0, 'rmse': 5.0},
+        # PTS OVER disabled: 46% forward WR (137 picks), selection-induced upward bias (+2.8 pts on OVER),
+        # near-zero feature signal (confidence r=0.02), market too efficient on points.
+        # PTS UNDER marginal (54.5% forward WR, 132 picks) — allowed at higher edge bar.
+        # min_edge_over=9.9 acts as a hard block; dynamic policy will set allow_over=False when eval data present.
+        'pts': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.54, 'min_prob': 0.60, 'min_meta_prob': 0.58, 'min_edge': 2.5, 'min_edge_over': 9.9, 'min_edge_under': 2.5, 'rmse': 5.0},
         'trb': {'allowed': False, 'allow_over': False, 'allow_under': False, 'shrunk_acc': 0.54, 'min_prob': 0.62, 'min_meta_prob': 0.59, 'min_edge': 1.0, 'min_edge_over': 1.4, 'min_edge_under': 1.2, 'rmse': 2.5},
         'ast': {'allowed': True,  'allow_over': False, 'allow_under': True,  'shrunk_acc': 0.58, 'min_prob': 0.60, 'min_meta_prob': 0.57, 'min_edge': 0.8, 'min_edge_over': 1.6, 'min_edge_under': 0.9, 'rmse': 1.8},
         'pra': {'allowed': True,  'allow_over': True,  'allow_under': True,  'shrunk_acc': 0.62, 'min_prob': 0.59, 'min_meta_prob': 0.56, 'min_edge': 2.5, 'min_edge_over': 2.5, 'min_edge_under': 2.8, 'rmse': 6.9},
@@ -4471,19 +5382,45 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
                 clv_corr >= 0.10
             )
         )
-        allowed = (baseline_allowed and (strong_allowed or under_only_allowed)) or tracking_under_allowed
+        # PTS-specific UNDER lane: lower threshold justified by structural difficulty of PTS.
+        # Points is multiplicative (FGA × FG% + 3PA × 3P% + FTA × FT%), game-script sensitive,
+        # and the most liquid market, so the edge is thinner. Forward WR: 54.5% UNDER (132 picks).
+        # OVER is permanently blocked (see allow_over logic below).
+        # Stricter gates compensate for the lower hit threshold:
+        #   - requires 2,000+ real lines (more data than generic 1,500)
+        #   - requires market hit >= 0.50 (market must agree directionally)
+        #   - does NOT rely solely on clv_corr (too weak for PTS)
+        pts_under_tracking_allowed = (
+            stat == 'pts' and
+            n_real >= 2000 and
+            under_n >= 400 and
+            under_hit is not None and under_hit >= 0.54 and
+            market_hit is not None and market_hit >= 0.50
+        )
+        allowed = (baseline_allowed and (strong_allowed or under_only_allowed)) or tracking_under_allowed or pts_under_tracking_allowed
 
         allow_under = (
             allowed and
             under_n >= 300 and
             under_hit is not None and under_hit >= 0.60
         )
+        # PTS UNDER: lower hit threshold (0.54 vs 0.60) when pts_under_tracking_allowed
+        if stat == 'pts' and pts_under_tracking_allowed and not allow_under:
+            allow_under = (
+                under_n >= 300 and
+                under_hit is not None and under_hit >= 0.54
+            )
         allow_over = (
             allowed and
             over_n >= 300 and
             over_hit is not None and over_hit >= 0.60 and
             strong_n >= 250
         )
+        # PTS OVER: permanently blocked regardless of dynamic metrics.
+        # Forward WR=46% (137 picks). Selection-induced bias means any high-edge
+        # OVER pick is most likely the model being fooled by outlier game noise.
+        if stat == 'pts':
+            allow_over = False
 
         min_edge_under = min_edge
         if under_0_1_hit is not None and under_0_1_hit < 0.56:
@@ -4556,6 +5493,7 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
             'under_hit': round(under_hit, 4) if under_hit is not None else None,
             'over_hit': round(over_hit, 4) if over_hit is not None else None,
             'tracking_under_allowed': tracking_under_allowed,
+            'pts_under_tracking_allowed': pts_under_tracking_allowed if stat == 'pts' else False,
             'market_hit': round(market_hit, 4) if market_hit is not None else None,
             'meta_auc': round(meta_auc, 4) if meta_auc is not None else None,
             'meta_top_hit': round(meta_top_hit, 4) if meta_top_hit is not None else None,
@@ -4702,8 +5640,10 @@ def _filter_best_picks_legacy(pred_df: pd.DataFrame) -> pd.DataFrame:
                 'pa':  ['pts_std', 'ast_std'],
             }
             std_val = row.get(f'{prop}_sigma')
+            volatility_source = 'sigma'
             if not std_val or pd.isna(std_val) or float(std_val) <= 0:
                 # No quantile sidecar σ available — fall back to rolling std
+                volatility_source = 'rolling_std'
                 if prop in _composite_std_components:
                     comp_stds = [row.get(c) for c in _composite_std_components[prop]]
                     valid_stds = [s for s in comp_stds if s and not pd.isna(s) and s > 0]
@@ -4719,10 +5659,9 @@ def _filter_best_picks_legacy(pred_df: pd.DataFrame) -> pd.DataFrame:
                 zscore = primary_gap / std_val
             else:
                 # Final fallback: use prop-specific typical std
-                default_stds = {'pts': 6.0, 'trb': 2.5, 'ast': 2.0,
-                                'pra': 9.0, 'pr': 7.5, 'pa': 7.5,
-                                'stl': 0.8, 'blk': 0.8, 'tov': 1.0}
-                zscore = primary_gap / default_stds.get(prop, 4.0)
+                std_val = _PROP_VOLATILITY_BASELINES.get(prop, 4.0)
+                volatility_source = 'default_std'
+                zscore = primary_gap / std_val
 
             # Confidence: primary signal is zscore of the gap
             conf_pct = 50 + 49 * (1 - math.exp(-0.55 * zscore))
@@ -4965,6 +5904,31 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             # a 13–19 point UNDER edge before even considering model prediction direction.
             sigma_val = row.get(f'{prop}_sigma')
             sigma_val = float(sigma_val) if sigma_val is not None and not pd.isna(sigma_val) and float(sigma_val) > 0 else None
+            volatility_metric = sigma_val
+            volatility_source = 'sigma'
+            if volatility_metric is None:
+                _composite_std_components = {
+                    'pra': ['pts_std', 'trb_std', 'ast_std'],
+                    'pr':  ['pts_std', 'trb_std'],
+                    'pa':  ['pts_std', 'ast_std'],
+                }
+                volatility_source = 'rolling_std'
+                if prop in _composite_std_components:
+                    comp_stds = [row.get(c) for c in _composite_std_components[prop]]
+                    valid_stds = [
+                        float(s) for s in comp_stds
+                        if s is not None and not pd.isna(s) and float(s) > 0
+                    ]
+                    volatility_metric = sum(valid_stds) if valid_stds else None
+                else:
+                    std_fallback = row.get(f'{prop}_std')
+                    if std_fallback is None or pd.isna(std_fallback):
+                        std_fallback = row.get(f'{prop.split("_")[0]}_std')
+                    if std_fallback is not None and not pd.isna(std_fallback) and float(std_fallback) > 0:
+                        volatility_metric = float(std_fallback)
+            if volatility_metric is None:
+                volatility_metric = float(_PROP_VOLATILITY_BASELINES.get(prop, 4.0))
+                volatility_source = 'default_std'
             p25_threshold = sigma_p25.get(prop)
             low_sigma_under = (
                 direction == 'UNDER'
@@ -5213,6 +6177,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 prob_source=prob_source,
             )
             break_even_prob = round((1.0 / _PP_MULTIPLIERS[2]) ** 0.5, 4)
+            support_agreement_count = int(sum(bool(v) for v in [anchor_agrees, l10_agrees, l5_agrees]))
 
             picks.append({
                 'player':         row['player'],
@@ -5232,11 +6197,18 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 'edge_disagreement': round(edge_disagreement, 3),
                 'pick_source':    'market_model',
                 'mp_predicted':   round(float(mp_exp), 1) if mp_exp is not None and not pd.isna(mp_exp) else None,
+                'mp_l10':         round(float(row.get('mp_l10')), 1) if row.get('mp_l10') is not None and not pd.isna(row.get('mp_l10')) else None,
+                'mp_deviation_pred': round(float(row.get('mp_deviation_pred')), 1) if row.get('mp_deviation_pred') is not None and not pd.isna(row.get('mp_deviation_pred')) else None,
+                'games_played':   int(row.get('games_played')) if row.get('games_played') is not None and not pd.isna(row.get('games_played')) else None,
+                'season_games_played': int(row.get('season_games_played')) if row.get('season_games_played') is not None and not pd.isna(row.get('season_games_played')) else None,
                 'anchor_avg':     round(float(anchor_val), 1) if anchor_val is not None and not pd.isna(anchor_val) else None,
                 'anchor_edge':    round(float(anchor_edge), 1) if anchor_edge is not None else None,
+                'anchor_agrees':  bool(anchor_agrees) if anchor_agrees is not None else None,
                 'l10_avg':        round(float(l10_val), 1) if l10_val is not None and not pd.isna(l10_val) else None,
                 'l10_edge':       round(float(l10_edge), 1) if l10_edge is not None else None,
+                'l10_agrees':     bool(l10_agrees) if l10_agrees is not None else None,
                 'l5_avg':         round(float(l5_val), 1) if l5_val is not None and not pd.isna(l5_val) else None,
+                'l5_agrees':      bool(l5_agrees) if l5_agrees is not None else None,
                 'line_move':      round(float(line_move_val), 2) if line_move_val is not None and not pd.isna(line_move_val) else None,
                 'model_wr':       round(float(quality[prop]['shrunk_acc']) * 100, 1),
                 'min_edge_req':   round(min_edge, 2),
@@ -5249,6 +6221,9 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 'lane_rank_bonus': priority_rank_bonus,
                 'sigma': round(sigma_val, 3) if sigma_val is not None else None,
                 'low_sigma_under': low_sigma_under,
+                'volatility_metric': round(float(volatility_metric), 3) if volatility_metric is not None and not pd.isna(volatility_metric) else None,
+                'volatility_source': volatility_source,
+                'support_agreement_count': support_agreement_count,
                 'break_even_prob': break_even_prob,
                 'exceeds_ev_threshold': bool(dir_prob >= break_even_prob),
                 **prob_payload,
@@ -5446,6 +6421,10 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'edge_disagreement':    0.0,
                     'pick_source':          'volume_fill',
                     'mp_predicted':         round(float(mp_exp_fill), 1) if mp_exp_fill is not None and not pd.isna(mp_exp_fill) else None,
+                    'mp_l10':               round(float(row.get('mp_l10')), 1) if row.get('mp_l10') is not None and not pd.isna(row.get('mp_l10')) else None,
+                    'mp_deviation_pred':    round(float(row.get('mp_deviation_pred')), 1) if row.get('mp_deviation_pred') is not None and not pd.isna(row.get('mp_deviation_pred')) else None,
+                    'games_played':         int(row.get('games_played')) if row.get('games_played') is not None and not pd.isna(row.get('games_played')) else None,
+                    'season_games_played':  int(row.get('season_games_played')) if row.get('season_games_played') is not None and not pd.isna(row.get('season_games_played')) else None,
                     'anchor_avg':           round(float(anchor_fill), 1) if anchor_fill is not None and not pd.isna(anchor_fill) else None,
                     'anchor_edge':          round(float(anchor_fill) - float(line), 1) if anchor_fill is not None and not pd.isna(anchor_fill) else None,
                     'l10_avg':              round(float(l10_fill), 1) if l10_fill is not None and not pd.isna(l10_fill) else None,
@@ -5607,6 +6586,10 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'edge_disagreement':    0.0,
                     'pick_source':          'emergency_fill',
                     'mp_predicted':         round(float(mp_exp_emergency), 1) if mp_exp_emergency is not None and not pd.isna(mp_exp_emergency) else None,
+                    'mp_l10':               round(float(row.get('mp_l10')), 1) if row.get('mp_l10') is not None and not pd.isna(row.get('mp_l10')) else None,
+                    'mp_deviation_pred':    round(float(row.get('mp_deviation_pred')), 1) if row.get('mp_deviation_pred') is not None and not pd.isna(row.get('mp_deviation_pred')) else None,
+                    'games_played':         int(row.get('games_played')) if row.get('games_played') is not None and not pd.isna(row.get('games_played')) else None,
+                    'season_games_played':  int(row.get('season_games_played')) if row.get('season_games_played') is not None and not pd.isna(row.get('season_games_played')) else None,
                     'anchor_avg':           round(float(anchor_emergency), 1) if anchor_emergency is not None and not pd.isna(anchor_emergency) else None,
                     'anchor_edge':          round(float(anchor_emergency) - float(line), 1) if anchor_emergency is not None and not pd.isna(anchor_emergency) else None,
                     'l10_avg':              round(float(l10_emergency), 1) if l10_emergency is not None and not pd.isna(l10_emergency) else None,
@@ -5679,12 +6662,19 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
         picks_df['prob_source'] = ''
     if 'selection_priority' not in picks_df.columns:
         picks_df['selection_priority'] = 0.0
+    if 'support_agreement_count' not in picks_df.columns:
+        picks_df['support_agreement_count'] = 0
     if 'lane_rank_bonus' not in picks_df.columns:
         picks_df['lane_rank_bonus'] = 0.0
     if 'sigma' not in picks_df.columns:
         picks_df['sigma'] = np.nan
+    if 'volatility_metric' not in picks_df.columns:
+        picks_df['volatility_metric'] = np.nan
+    if 'volatility_source' not in picks_df.columns:
+        picks_df['volatility_source'] = ''
     if 'low_sigma_under' not in picks_df.columns:
         picks_df['low_sigma_under'] = False
+    picks_df = _apply_consistency_scores(picks_df)
     edge_norm = picks_df.apply(
         lambda r: min(1.0, abs(r['edge']) / max(0.5, float(r['min_edge_req']) * 1.5)),
         axis=1,
@@ -5697,112 +6687,164 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
         edge_norm * 0.15 +
         picks_df['lane_rank_bonus'].fillna(0.0)
     ).round(4)
+    picks_df = _apply_estimated_hit_rates(picks_df)
 
     max_picks = max(1, int(max_picks))
-    picks_df = picks_df.sort_values(['selection_priority', 'rank_score', 'confidence'], ascending=False)
+    picks_df = picks_df.sort_values(
+        [
+            'estimated_hit_rate',
+            'prop_direction_hit_rate',
+            'meta_prob',
+            'dir_prob',
+            'consistency_score',
+            'selection_priority',
+            'rank_score',
+            'confidence',
+        ],
+        ascending=False,
+    )
     picks_df = picks_df.head(max_picks).reset_index(drop=True)
     return picks_df
 
 
 def build_live_pick_card(picks_df: pd.DataFrame,
                          target_picks: int = 5,
-                         min_picks: int = 5) -> pd.DataFrame:
+                         min_picks: int = 5,
+                         slate_date: Optional[str] = None,
+                         history_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     Build the published live card from a sanitized candidate pool.
 
-    Prefer prop diversity first, then controlled duplicates. STL/BLK are capped
-    so the board does not collapse into one stat family unless the pool is too
-    thin to hit the requested card size.
+    Tiered accuracy mode:
+    1. prefer strict publish-bar picks
+    2. if the card is short, backfill with the best market-model picks that still
+       pass the structural safety gates
+    3. only use fill/emergency rows as a last resort to reach the requested card size
     """
     if picks_df is None or len(picks_df) == 0:
         return pd.DataFrame() if picks_df is None else picks_df
 
-    target_picks = max(1, int(target_picks))
-    min_picks = max(1, min(int(min_picks), target_picks))
+    target_picks = max(0, int(target_picks))
+    min_picks = max(0, min(int(min_picks), target_picks))
+    if target_picks == 0:
+        return picks_df.iloc[0:0].copy()
 
     working = picks_df.copy()
-    sort_cols = [c for c in ['selection_priority', 'rank_score', 'confidence', 'dir_prob', 'edge'] if c in working.columns]
+    if 'estimated_hit_rate' not in working.columns:
+        working = _apply_estimated_hit_rates(working, history_df=history_df)
+    working = _apply_live_accuracy_gates(working, history_df=history_df)
+    working = _apply_postseason_context(
+        working,
+        slate_date=slate_date,
+        history_df=history_df,
+    )
+    if len(working) == 0:
+        return working
+
+    postseason_context = bool(
+        working.get('postseason_context', pd.Series(False, index=working.index))
+        .fillna(False)
+        .astype(bool)
+        .any()
+    )
+    sort_cols = []
+    if postseason_context:
+        sort_cols.extend(
+            c for c in [
+                'postseason_pick_score',
+                'postseason_role_score',
+            ] if c in working.columns
+        )
+    sort_cols.extend([
+        c for c in [
+            'estimated_hit_rate',
+            'prop_direction_hit_rate',
+            'meta_bucket_hit_rate',
+            'dir_prob_bucket_hit_rate',
+            'consistency_score',
+            'selection_priority',
+            'rank_score',
+            'dir_prob',
+            'confidence',
+            'edge',
+        ] if c in working.columns
+    ])
+    sort_cols = list(dict.fromkeys(sort_cols))
     if sort_cols:
         working = working.sort_values(sort_cols, ascending=[False] * len(sort_cols))
     working = working.drop_duplicates(subset=['player', 'prop'], keep='first').reset_index(drop=True)
+    if 'pick_source' not in working.columns:
+        working['pick_source'] = ''
+    if 'projection_type' not in working.columns:
+        working['projection_type'] = 'standard'
+    working['projection_type'] = working['projection_type'].apply(_normalize_projection_type)
+    working['projection_type_rank'] = working['projection_type'].apply(_projection_type_rank)
+    for gate_col in [
+        'accuracy_gate_pass',
+        'meta_gate_pass',
+        'volatility_gate_pass',
+        'estimated_hit_rate_pass',
+        'pick_source_gate_pass',
+        'top_tier_lane_pass',
+    ]:
+        if gate_col not in working.columns:
+            working[gate_col] = False
 
-    micro_props = {'STL', 'BLK'}
-    phases = [
-        {'prefer_new_prop': True, 'max_same_prop': 1, 'max_micro_props': 2, 'max_blk_props': 1},
-        {'prefer_new_prop': False, 'max_same_prop': 2, 'max_micro_props': 2, 'max_blk_props': 1},
-        {'prefer_new_prop': False, 'max_same_prop': 2, 'max_micro_props': 3, 'max_blk_props': 1},
-        {'prefer_new_prop': False, 'max_same_prop': 3, 'max_micro_props': target_picks, 'max_blk_props': 2},
+    market_model_mask = working['pick_source'].astype(str).eq('market_model')
+    all_rows_mask = pd.Series(True, index=working.index)
+    tier_specs = [
+        ('core_lane', working['accuracy_gate_pass'] & working['top_tier_lane_pass']),
+        ('core', working['accuracy_gate_pass']),
+        ('market_lane_relaxed', market_model_mask & working['meta_gate_pass'] & working['volatility_gate_pass'] & working['top_tier_lane_pass']),
+        ('market_relaxed', market_model_mask & working['meta_gate_pass'] & working['volatility_gate_pass']),
+        ('market_lane_meta_only', market_model_mask & working['meta_gate_pass'] & working['top_tier_lane_pass']),
+        ('market_meta_only', market_model_mask & working['meta_gate_pass']),
+        ('fill_lane_structured', working['meta_gate_pass'] & working['volatility_gate_pass'] & working['top_tier_lane_pass']),
+        ('fill_structured', working['meta_gate_pass'] & working['volatility_gate_pass']),
+        ('fill_lane_meta_only', working['meta_gate_pass'] & working['top_tier_lane_pass']),
+        ('fill_meta_only', working['meta_gate_pass']),
+        ('last_resort', all_rows_mask),
     ]
 
-    selected_idx = []
-    selected_players = set()
-    player_counts: Dict[str, int] = {}
-    prop_counts: Dict[str, int] = {}
-    micro_count = 0
+    goal = max(target_picks, min_picks)
+    selected_rows = []
+    seen_players = set()
+    seen_pairs = set()
+    used_indices = set()
 
-    def _prop_count(prop_name: str) -> int:
-        return int(prop_counts.get(prop_name, 0))
-
-    for phase in phases:
-        changed = True
-        while changed and len(selected_idx) < target_picks:
-            changed = False
-            for idx, row in working.iterrows():
-                if idx in selected_idx:
-                    continue
-                player = str(row.get('player', ''))
-                prop = str(row.get('prop', '')).upper()
-                if not player or player in selected_players:
-                    continue
-                if phase['prefer_new_prop'] and _prop_count(prop) > 0:
-                    continue
-                if _prop_count(prop) >= phase['max_same_prop']:
-                    continue
-                if prop == 'BLK' and _prop_count(prop) >= phase.get('max_blk_props', phase['max_same_prop']):
-                    continue
-                if prop in micro_props and micro_count >= phase['max_micro_props']:
-                    continue
-
-                selected_idx.append(idx)
-                selected_players.add(player)
-                player_counts[player] = int(player_counts.get(player, 0)) + 1
-                prop_counts[prop] = _prop_count(prop) + 1
-                if prop in micro_props:
-                    micro_count += 1
-                changed = True
-                if len(selected_idx) >= target_picks:
-                    break
-
-    if len(selected_idx) < min_picks:
-        for idx, row in working.iterrows():
-            if idx in selected_idx:
+    for tier_rank, (tier_name, tier_mask) in enumerate(tier_specs, start=1):
+        tier_df = working.loc[tier_mask].copy()
+        if len(tier_df) == 0:
+            continue
+        tier_sort_cols = ['projection_type_rank'] + sort_cols if sort_cols else ['projection_type_rank']
+        tier_ascending = [True] + ([False] * len(sort_cols) if sort_cols else [])
+        tier_df = tier_df.sort_values(tier_sort_cols, ascending=tier_ascending)
+        for idx, row in tier_df.iterrows():
+            if idx in used_indices:
                 continue
-            player = str(row.get('player', ''))
-            if not player or player in selected_players:
+            player_key = str(row.get('player', ''))
+            pair_key = (player_key, str(row.get('prop', '')))
+            if player_key in seen_players or pair_key in seen_pairs:
                 continue
-            selected_idx.append(idx)
-            selected_players.add(player)
-            player_counts[player] = int(player_counts.get(player, 0)) + 1
-            if len(selected_idx) >= min_picks:
+            selected = row.copy()
+            selected['publish_tier'] = tier_name
+            selected['publish_tier_rank'] = tier_rank
+            selected_rows.append(selected)
+            used_indices.add(idx)
+            seen_players.add(player_key)
+            seen_pairs.add(pair_key)
+            if len(selected_rows) >= goal:
                 break
+        if len(selected_rows) >= goal:
+            break
 
-    if len(selected_idx) < min_picks:
-        for idx, row in working.iterrows():
-            if idx in selected_idx:
-                continue
-            player = str(row.get('player', ''))
-            if not player:
-                continue
-            if int(player_counts.get(player, 0)) >= 2:
-                continue
-            selected_idx.append(idx)
-            player_counts[player] = int(player_counts.get(player, 0)) + 1
-            if len(selected_idx) >= min_picks:
-                break
+    if not selected_rows:
+        return working.iloc[0:0].copy()
 
-    final_df = working.loc[selected_idx].copy() if selected_idx else working.iloc[0:0].copy()
-    if sort_cols and len(final_df) > 0:
-        final_df = final_df.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+    final_df = pd.DataFrame(selected_rows).reset_index(drop=True)
+    final_sort = ['publish_tier_rank', 'projection_type_rank'] + sort_cols if sort_cols else ['publish_tier_rank', 'projection_type_rank']
+    final_ascending = [True, True] + ([False] * len(sort_cols) if sort_cols else [])
+    final_df = final_df.sort_values(final_sort, ascending=final_ascending).reset_index(drop=True)
     return final_df.head(target_picks).reset_index(drop=True)
 
 
@@ -6700,15 +7742,32 @@ def _sort_betslip_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     working = candidates.copy()
-    working['_selection_priority'] = pd.to_numeric(working.get('selection_priority'), errors='coerce').fillna(0.0)
+    working['_postseason_pick_score'] = pd.to_numeric(
+        working.get('postseason_pick_score', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(0.0)
+    working['_estimated_hit_rate'] = pd.to_numeric(
+        working.get('estimated_hit_rate', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(0.0)
+    working['_selection_priority'] = pd.to_numeric(
+        working.get('selection_priority', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(0.0)
     working['_dir_prob'] = [
         _coerce_pick_side_probability(row)
         for _, row in working.iterrows()
     ]
-    working['_confidence'] = pd.to_numeric(working.get('confidence'), errors='coerce').fillna(0.0)
-    working['_edge_abs'] = pd.to_numeric(working.get('edge'), errors='coerce').fillna(0.0).abs()
+    working['_confidence'] = pd.to_numeric(
+        working.get('confidence', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(0.0)
+    working['_edge_abs'] = pd.to_numeric(
+        working.get('edge', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(0.0).abs()
     working = working.sort_values(
-        ['_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
+        ['_postseason_pick_score', '_estimated_hit_rate', '_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
         ascending=False,
     )
 
@@ -6726,7 +7785,10 @@ def _sort_betslip_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
         return working.iloc[0:0].copy()
 
     out = pd.DataFrame(deduped).reset_index(drop=True)
-    return out.drop(columns=['_selection_priority', '_dir_prob', '_confidence', '_edge_abs'], errors='ignore')
+    return out.drop(
+        columns=['_postseason_pick_score', '_estimated_hit_rate', '_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
+        errors='ignore',
+    )
 
 
 def _prepare_betslip_candidate_pool(picks_df: pd.DataFrame,
@@ -6857,6 +7919,9 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
         'ev_per_unit',
         'ev_dollar',
     ]
+    col_order = [
+        'game_date', 'slip_type', 'wager', 'potential_payout',
+    ] + metric_cols + pick_cols + ['result', 'actual_payout']
 
     rows = []
     power_pool = _prepare_betslip_candidate_pool(picks_df)
@@ -6903,12 +7968,19 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
     # ── End UNDER-Only track ─────────────────────────────────────────────────
 
     if not rows:
-        return pd.DataFrame()
-
-    # Define final column order
-    col_order = [
-        'game_date', 'slip_type', 'wager', 'potential_payout',
-    ] + metric_cols + pick_cols + ['result', 'actual_payout']
+        empty_df = pd.DataFrame(columns=col_order)
+        if slip_path.exists():
+            existing = pd.read_csv(slip_path, dtype=str)
+            for col in col_order:
+                if col not in existing.columns:
+                    existing[col] = ''
+            if 'picks' in existing.columns:
+                existing = _migrate_picks_column(existing)
+            existing = existing[existing['game_date'] != game_date]
+            existing = existing.reindex(columns=col_order, fill_value='')
+            existing.to_csv(slip_path, index=False)
+        print(f"  Betslips logged -> {slip_path}  (0 slips for {game_date})")
+        return empty_df
 
     new_df = pd.DataFrame(rows)[col_order]
 
@@ -7487,8 +8559,40 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Option
         ('prob_source', ''),
         ('sigma', np.nan),
         ('low_sigma_under', False),
+        ('volatility_metric', np.nan),
+        ('volatility_source', ''),
+        ('support_agreement_count', 0),
+        ('consistency_score', np.nan),
+        ('estimated_hit_rate', np.nan),
+        ('prop_direction_hit_rate', np.nan),
+        ('prop_direction_history_n', 0),
+        ('meta_bucket_hit_rate', np.nan),
+        ('meta_bucket_history_n', 0),
+        ('dir_prob_bucket_hit_rate', np.nan),
+        ('dir_prob_bucket_history_n', 0),
+        ('selection_priority_hit_rate', np.nan),
+        ('selection_priority_history_n', 0),
+        ('top_tier_lane_pass', False),
+        ('top_tier_lane_rate', np.nan),
+        ('top_tier_lane_history_n', 0),
+        ('meta_floor', np.nan),
+        ('volatility_ceiling', np.nan),
+        ('estimated_hit_rate_floor', np.nan),
+        ('meta_gate_pass', False),
+        ('volatility_gate_pass', False),
+        ('estimated_hit_rate_pass', False),
+        ('pick_source_gate_pass', False),
+        ('accuracy_gate_pass', False),
+        ('publish_tier', ''),
+        ('publish_tier_rank', np.nan),
+        ('projection_type_rank', np.nan),
         ('projection_type', 'standard'),
         ('is_promo', False),
+        ('season_stage', 'regular_season'),
+        ('postseason_context', False),
+        ('days_after_regular_end', 0),
+        ('postseason_role_score', np.nan),
+        ('postseason_pick_score', np.nan),
         ('break_even_prob', np.nan),
         ('exceeds_ev_threshold', False),
     ]:
@@ -7536,8 +8640,9 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Option
     _atomic_csv(picks_df, CONFIG['output_dir'] / 'picks_latest.csv')
     _atomic_csv(pred_df, CONFIG['output_dir'] / 'predictions_latest.csv')
     _atomic_text(html, CONFIG['output_dir'] / 'dashboard_latest.html')
-    if isinstance(slips_df, pd.DataFrame) and len(slips_df) > 0:
+    if isinstance(slips_df, pd.DataFrame):
         _atomic_csv(slips_df, CONFIG['output_dir'] / 'betslips_latest.csv')
+    if isinstance(slips_df, pd.DataFrame) and len(slips_df) > 0:
         slips_daily_path, slips_run_path = _archive_csv_snapshot(
             slips_df, 'betslips', slate_date, run_stamp
         )
@@ -7556,9 +8661,25 @@ def generate_html_report(picks_df: pd.DataFrame, timestamp: str) -> str:
     date_str = datetime.now().strftime('%B %d, %Y')
     time_str = datetime.now().strftime('%I:%M %p')
 
-    # Sort by confidence descending (highest confidence first)
-    if 'confidence' in picks_df.columns:
-        picks_df = picks_df.sort_values('confidence', ascending=False)
+    # Sort by the live-card ranking order if present; fall back to confidence.
+    dashboard_sort = [
+        c for c in [
+            'publish_tier_rank',
+            'projection_type_rank',
+            'postseason_pick_score',
+            'estimated_hit_rate',
+            'prop_direction_hit_rate',
+            'meta_prob',
+            'dir_prob',
+            'consistency_score',
+            'selection_priority',
+            'rank_score',
+            'confidence',
+        ] if c in picks_df.columns
+    ]
+    if dashboard_sort:
+        dashboard_ascending = [True if c in {'publish_tier_rank', 'projection_type_rank'} else False for c in dashboard_sort]
+        picks_df = picks_df.sort_values(dashboard_sort, ascending=dashboard_ascending)
 
     # Build table rows
     rows_html = ''
@@ -8173,7 +9294,7 @@ def main():
         active_slate_date = today_str
         if lines_path.exists():
             _hist = pd.read_csv(lines_path)
-            active_hist, hist_slate_date = _select_active_slate_lines(_hist)
+            active_hist, hist_slate_date = _select_lines_for_exact_slate_date(_hist, today_str)
             if len(active_hist) > 0:
                 active_slate_date = hist_slate_date or today_str
                 _line_source = _infer_line_source(active_hist)
@@ -8184,12 +9305,26 @@ def main():
                 _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_hist.columns]
                 vegas = active_hist[['player', 'prop', 'line'] + _market_cols].copy()
                 vegas['num_books'] = active_hist['num_books'].values if 'num_books' in active_hist.columns else 1
+            else:
+                nearest_hist, nearest_hist_date = _select_active_slate_lines(_hist)
+                if len(nearest_hist) > 0 and nearest_hist_date:
+                    print(
+                        f"\nCached lines do not contain today's slate ({today_str}); "
+                        f"nearest cached slate is {nearest_hist_date}. Refreshing live lines instead."
+                    )
         if len(vegas) == 0:
             print("\nFetching Vegas lines...")
             vegas_raw, _line_source = fetch_vegas_lines()
             if len(vegas_raw) > 0:
                 save_lines_snapshot(vegas_raw, source=_line_source)
-                active_live, live_slate_date = _select_active_slate_lines(vegas_raw)
+                active_live, live_slate_date = _select_lines_for_exact_slate_date(vegas_raw, today_str)
+                if len(active_live) == 0:
+                    active_live, live_slate_date = _select_active_slate_lines(vegas_raw)
+                    if len(active_live) > 0 and live_slate_date and live_slate_date != today_str:
+                        print(
+                            f"\nToday's slate ({today_str}) was not present in live {_line_source} lines; "
+                            f"using closest available slate {live_slate_date}."
+                        )
                 active_slate_date = live_slate_date or today_str
                 _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_live.columns]
                 vegas = active_live[['player', 'prop', 'line'] + _market_cols].copy()
@@ -8217,7 +9352,7 @@ def main():
         # Compute regression-to-mean candidates from historical data
         reg_candidates = compute_regression_candidates(df)
 
-        # Build a deeper candidate pool, then sanitize and diversify the published card.
+        # Build a deeper candidate pool, then publish the highest-history-accuracy card.
         candidate_pool_size = max(
             int(CONFIG.get('live_pick_candidate_pool', 25)),
             int(CONFIG.get('live_pick_min', 5)) * 10,
@@ -8235,6 +9370,8 @@ def main():
             picks,
             target_picks=int(CONFIG.get('live_pick_target', 5)),
             min_picks=int(CONFIG.get('live_pick_min', 5)),
+            slate_date=active_slate_date,
+            history_df=df,
         )
 
         print(f"\n{len(picks)} picks found after live-card filtering")
@@ -8243,9 +9380,15 @@ def main():
                 f"  WARNING: only {len(picks)} live picks survived today "
                 f"(minimum target {int(CONFIG.get('live_pick_min', 5))})"
             )
-        
+        if len(picks) == 0:
+            print("\nNo picks cleared the publish bar today. Official card will be empty.")
+
+        # Stamp the line source onto every pick so picks_history.csv tracks it.
+        # This is essential for identifying runs where PrizePicks was unavailable.
+        picks['line_source'] = _line_source
+
         if len(picks) > 0:
-            # Top 10 display: one pick per player (best confidence), different players only
+            # Top 10 display: one pick per player in learned-accuracy order.
             seen = []
             top_display = []
             for _, row in picks.iterrows():
@@ -8255,10 +9398,44 @@ def main():
                 if len(top_display) >= 10:
                     break
             top_display_df = pd.DataFrame(top_display)
-            print("\nTop 10 picks (1 per player):")
-            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'p_over_cal', 'p_over_raw', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'mp_predicted', 'prob_source']
-            display_cols = [c for c in display_cols if c in top_display_df.columns]
-            print(top_display_df[display_cols].to_string(index=False))
+            print()
+            print("=" * 72)
+            print("  TODAY'S PICKS")
+            print("=" * 72)
+            print(f"  {'PLAYER':<22} {'PROP':<5} {'DIR':<6} {'LINE':>5} {'PRED':>5} {'EDGE':>5} {'CONF':>5} {'HIT%':>5} {'TIER'}")
+            print("  " + "-" * 68)
+            for _, r in top_display_df.iterrows():
+                player   = str(r.get('player', ''))[:22]
+                prop     = str(r.get('prop', ''))
+                dirn     = str(r.get('direction', ''))
+                line     = r.get('line', '')
+                pred     = r.get('prediction', '')
+                edge     = r.get('edge', '')
+                conf     = r.get('confidence', '')
+                hit      = r.get('estimated_hit_rate', '')
+                tier     = str(r.get('publish_tier', r.get('pick_source', '')))[:14]
+                mkt      = r.get('market_edge', '')
+                sigma    = r.get('sigma', '')
+                extras = []
+                if mkt is not None and not pd.isna(mkt):
+                    extras.append(f"mkt={float(mkt):+.2f}")
+                if sigma is not None and not pd.isna(sigma):
+                    extras.append(f"σ={float(sigma):.2f}")
+                inj = r.get('injury_adj', False)
+                if inj:
+                    extras.append("INJ+")
+                extras_str = "  " + "  ".join(extras) if extras else ""
+                try:
+                    line_s = f"{float(line):>5.1f}"
+                    pred_s = f"{float(pred):>5.1f}"
+                    edge_s = f"{float(edge):>+5.1f}"
+                    conf_s = f"{float(conf):>4.0f}%"
+                    hit_s  = f"{float(hit)*100:>4.0f}%" if hit is not None and not pd.isna(hit) else "  -- "
+                except Exception:
+                    line_s = pred_s = edge_s = conf_s = hit_s = "  ?  "
+                print(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {pred_s} {edge_s} {conf_s} {hit_s}  {tier}{extras_str}")
+            print("=" * 72)
+            print()
 
             # Injury adjustment summary
             inj_picks = picks[picks.get('injury_adj', pd.Series(False, index=picks.index))]
@@ -8269,11 +9446,7 @@ def main():
                     for _, p in inj_picks.iterrows():
                         print(f"    {p['player']} ({p['prop']}): {p.get('teammates_out', '')}")
 
-            # Stamp the line source onto every pick so picks_history.csv tracks it.
-            # This is essential for identifying runs where PrizePicks was unavailable.
-            picks['line_source'] = _line_source
-
-            save_picks(picks, pred_df, slate_date=active_slate_date)
+        save_picks(picks, pred_df, slate_date=active_slate_date)
 
     elif command == 'backfill':
         days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
@@ -8360,18 +9533,24 @@ def main():
             picks,
             target_picks=int(CONFIG.get('live_pick_target', 5)),
             min_picks=int(CONFIG.get('live_pick_min', 5)),
+            slate_date=active_slate_date_all,
+            history_df=df,
         )
 
+        if len(picks) == 0:
+            print("\nNo picks cleared the publish bar today. Official card will be empty.")
+
+        picks['line_source'] = _line_source_all
+
         if len(picks) > 0:
-            picks['line_source'] = _line_source_all
             print(f"\n{len(picks)} picks found:")
 
-            print("\n=== TOP 20 PICKS (by rank score) ===")
-            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'confidence', 'dir_prob', 'p_over_cal', 'p_over_raw', 'meta_prob', 'market_edge', 'model_wr', 'pick_source', 'l10_avg', 'prob_source']
+            print("\n=== TOP 20 PICKS (by tiered accuracy ranking) ===")
+            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'season_stage', 'publish_tier', 'top_tier_lane_pass', 'postseason_pick_score', 'estimated_hit_rate', 'meta_floor', 'meta_prob', 'volatility_metric', 'volatility_ceiling', 'postseason_role_score', 'consistency_score', 'confidence', 'dir_prob', 'p_over_cal', 'p_over_raw', 'market_edge', 'model_wr', 'pick_source', 'l10_avg', 'prob_source']
             display_cols = [c for c in display_cols if c in picks.columns]
             print(picks.head(20)[display_cols].to_string(index=False))
 
-            save_picks(picks, pred_df, slate_date=active_slate_date_all)
+        save_picks(picks, pred_df, slate_date=active_slate_date_all)
         
     else:
         print(f"Unknown command: {command}")

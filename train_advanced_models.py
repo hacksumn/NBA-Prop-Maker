@@ -293,6 +293,19 @@ SEASON_CONTEXT_FEATURES = [
     'pts_luck_adj', 'fg3_regressed', 'ft_regressed',
 ]
 
+TARGET_REQUIRED_FEATURES: Dict[str, List[str]] = {
+    'pts': [
+        'fga_l5', 'fga_l10', 'fga_l20',
+        'usage_l5', 'usage_l10', 'usage_trend',
+        'fg_pct_l5', 'fg_pct_l10', 'fg_pct_l20', 'fg_pct_luck',
+        'ts_pct_l10', 'ts_pct_trend',
+        'points_per_fga_l10', 'points_per_fga_trend',
+        'scoring_opps_l10', 'scoring_opps_trend',
+        'shot_volume_quality_l10', 'shot_volume_quality_trend',
+        'usage_fga_interaction_l10',
+    ],
+}
+
 DYNAMIC_CONTEXT_SOURCE_FEATURES = ['possessions', 'raw_ppp', 'competitive_poss', 'garbage_time_flag']
 
 
@@ -456,6 +469,21 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
     usage_l10 = _numeric_series(df, 'usage_l10')
     fga_l5 = _numeric_series(df, 'fga_l5')
     fga_l20 = _numeric_series(df, 'fga_l20')
+    fg_pct_l5 = _numeric_series(df, 'fg_pct_l5')
+    fg_pct_l10 = _numeric_series(df, 'fg_pct_l10')
+    fg_pct_l20 = _numeric_series(df, 'fg_pct_l20')
+    ts_pct_l10 = _numeric_series(df, 'ts_pct_l10')
+    ts_pct_trend = _numeric_series(df, 'ts_pct_trend', default=1.0).fillna(1.0)
+    points_per_fga_l5 = _numeric_series(df, 'points_per_fga_l5')
+    points_per_fga_l10 = _numeric_series(df, 'points_per_fga_l10')
+    points_per_fga_l20 = _numeric_series(df, 'points_per_fga_l20')
+    scoring_opps_l10 = _numeric_series(df, 'scoring_opps_l10')
+    scoring_opps_trend = _numeric_series(df, 'scoring_opps_trend', default=1.0).fillna(1.0)
+    shot_volume_quality_l5 = _numeric_series(df, 'shot_volume_quality_l5')
+    shot_volume_quality_l10 = _numeric_series(df, 'shot_volume_quality_l10')
+    shot_volume_quality_l20 = _numeric_series(df, 'shot_volume_quality_l20')
+    shot_volume_quality_trend = _numeric_series(df, 'shot_volume_quality_trend', default=1.0).fillna(1.0)
+    usage_fga_interaction_l10 = _numeric_series(df, 'usage_fga_interaction_l10')
     role_expanding = _numeric_series(df, 'role_expanding', default=0.0).fillna(0.0)
     role_shrinking = _numeric_series(df, 'role_shrinking', default=0.0).fillna(0.0)
     days_rest = _numeric_series(df, 'days_rest', default=2.0).fillna(2.0)
@@ -512,6 +540,17 @@ def _build_market_feature_block(df: pd.DataFrame, target: str, line: pd.Series,
     block['market_fga_shock'] = fga_shock.fillna(0.0)
     block['market_role_shock'] = role_shock.fillna(0.0)
     block['market_role_delta'] = (role_expanding - role_shrinking).fillna(0.0)
+    block['market_fg_pct_l10'] = fg_pct_l10.fillna(fg_pct_l20).fillna(0.0)
+    block['market_fg_pct_delta'] = (fg_pct_l5 - fg_pct_l20).fillna(0.0)
+    block['market_ts_pct_l10'] = ts_pct_l10.fillna(0.0)
+    block['market_ts_pct_trend'] = ts_pct_trend
+    block['market_points_per_fga_l10'] = points_per_fga_l10.fillna(0.0)
+    block['market_points_per_fga_delta'] = (points_per_fga_l5 - points_per_fga_l20).fillna(0.0)
+    block['market_scoring_opps_l10'] = scoring_opps_l10.fillna(0.0)
+    block['market_scoring_opps_trend'] = scoring_opps_trend
+    block['market_shot_volume_quality_l10'] = shot_volume_quality_l10.fillna(0.0)
+    block['market_shot_volume_quality_delta'] = (shot_volume_quality_l5 - shot_volume_quality_l20).fillna(0.0)
+    block['market_usage_fga_interaction_l10'] = usage_fga_interaction_l10.fillna(0.0)
     block['market_total_luck'] = total_luck
     block['market_competitive_share'] = comp_share.clip(lower=0, upper=1)
     block['market_garbage_rate'] = garbage_rate.clip(lower=0, upper=1)
@@ -968,6 +1007,19 @@ class AdvancedPropModel:
             'role_expanding', 'role_shrinking',
             'usage_l5', 'usage_l10',
             'fga_l3',
+        ],
+        'shot_quality': [
+            'fg_pct_l5', 'fg_pct_l10', 'fg_pct_l20', 'fg_pct_luck',
+            '3p_pct_l5', '3p_pct_l10', '3p_pct_l20', '3p_pct_luck',
+            'ft_pct_l5', 'ft_pct_l10', 'ft_pct_l20', 'ft_pct_luck',
+            'ts_pct_l10', 'ts_pct_trend',
+            'points_per_fga_l5', 'points_per_fga_l10', 'points_per_fga_l20',
+            'points_per_fga_trend',
+            'scoring_opps_l5', 'scoring_opps_l10', 'scoring_opps_l20',
+            'scoring_opps_trend',
+            'shot_volume_quality_l5', 'shot_volume_quality_l10', 'shot_volume_quality_l20',
+            'shot_volume_quality_trend',
+            'usage_fga_interaction_l10',
         ],
         'schedule': [
             'is_home', 'is_b2b_second', 'days_rest',
@@ -1785,6 +1837,18 @@ class AdvancedPropModel:
         # ── Feature selection ─────────────────────────────────────────────────
         all_imp  = pd.concat(feature_imp).groupby('feature')['importance'].mean()
         selected = all_imp[all_imp >= importance_threshold].index.tolist()
+        required_features = [
+            c for c in TARGET_REQUIRED_FEATURES.get(target, [])
+            if c in X.columns
+        ]
+        missing_required = [c for c in required_features if c not in selected]
+        if missing_required:
+            selected = list(dict.fromkeys(selected + missing_required))
+            print(
+                f"  Added {len(missing_required)} required {target.upper()} shot-quality features: "
+                f"{', '.join(missing_required[:10])}"
+                f"{'...' if len(missing_required) > 10 else ''}"
+            )
         dropped  = len(all_imp) - len(selected)
         if dropped > 0:
             print(f"\n  Feature selection: {len(selected)}/{len(all_imp)} kept "

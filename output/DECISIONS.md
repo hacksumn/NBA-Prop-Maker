@@ -1149,3 +1149,176 @@ The objective here was operational reliability, not a new product rule. The cano
 - Leave the fetch path alone and wait for a lucky unblocked direct call (rejected — too fragile for a required artifact migration step)
 - Remove the Playwright fallback entirely (rejected — direct API remains intermittent and the browser path is still a useful fallback when it works)
 - Build a separate one-off migration script for `historical_lines.csv` without a live fetch (rejected — would not provide true current market labels)
+
+---
+
+## [DEC-031] Exclude pre-materialization `standard` labels from the clean standard-line audit
+
+- Date: 2026-04-13
+- Status: Accepted
+- Decision owner: Jake
+
+### Context
+
+On 2026-04-13, `output/picks_history.csv` verified that the full `2026-04-12` card went `5W / 0L / 0P`, and all five picks carry:
+
+- `projection_type = standard`
+- `is_promo = False`
+- `line_source = prizepicks`
+
+However, the repo memory already established that the active `2026-04-12` slate used during the 2026-04-12 `predict` run came from legacy cached history. Those rows were normalized to `projection_type='standard'` after schema materialization, not captured as true market-type labels from the post-fix PrizePicks feed.
+
+If these rows are counted as clean standard-line evidence, the standard-line audit will silently mix:
+
+- true-labeled standard rows
+- legacy rows defaulted to standard during normalization
+
+That would defeat the whole purpose of the post-gate audit.
+
+### Decision
+
+For the clean standard-line study:
+
+1. Do **not** treat pre-materialization `projection_type='standard'` rows as audit-eligible evidence.
+2. Count only rows that come from the post-fix true-labeled PrizePicks feed when measuring standard-line OVER/UNDER edge.
+3. Keep the `2026-04-12` `5/5` card as an operational performance fact, but do not use it as proof that standard-line edge is now validated.
+
+### Why
+
+This preserves evaluation integrity. The whole point of the market-type work was to separate true standard lines from goblin/demon boards. Using rows that only look standard because they were default-filled later would recreate the same contamination under a cleaner name.
+
+### Consequences
+
+- The `2026-04-12` `5/5` result is still valid as a betting outcome
+- It does **not** advance the clean standard-line audit sample
+- The current blocker remains graded true-labeled sample depth, especially for true `standard` rows
+- Future audit scripts should filter on provenance, not just `projection_type='standard'`
+
+### Alternatives Considered
+
+- Count all rows marked `standard` regardless of provenance (rejected — mixes true labels with normalized legacy defaults)
+- Ignore the `2026-04-12` performance entirely (rejected — it is still a real operational result and should remain in performance tracking)
+
+
+---
+
+## 2026-04-15 — April 14 Picks Missing from picks_history.csv (Manual Backfill)
+
+### Context
+
+The April 14, 2026 pipeline produced 4 picks (Toumani Camara TRB UNDER, Moussa Diabaté AST UNDER, Bam Adebayo STL UNDER, Andrew Wiggins BLK UNDER) and archived them correctly to `output/archive/2026-04-14/picks_2026-04-14_080224.csv`. However, none of these picks appeared in `output/picks_history.csv` after the April 15 morning run.
+
+### Root Cause
+
+The April 15 pipeline's Step 1 fetched NBA game logs but the latest `game_date` in `nba_data.csv` remained `2026-04-12` — the NBA API had not yet published April 14 box scores. This caused the grader (Step 1.5) to report "All picks already graded" (no ungraded rows existed for April 14 because those rows were never written). The `picks_latest.csv` was overwritten by the April 15 run before the April 14 picks could be recovered automatically.
+
+The `predict` command appends picks to `picks_history.csv` at prediction time (nba_props.py:8162–8172). If the prediction step fails or is never reached for a given date, those picks are silently lost from the history file. The archive tree (`output/archive/`) retains the snapshot but the history file does not self-heal.
+
+### Decision
+
+1. Manually backfill April 14 picks using the archived file (`picks_2026-04-14_080224.csv`), with actuals fetched directly from `nba_api` individual player game logs.
+2. Grades: all 4 picks WIN (4-0 card). Actuals: Camara REB=4, Diabaté AST=1, Adebayo STL=1, Wiggins BLK=0.
+3. Rows written to `picks_history.csv` with `graded_at=2026-04-15`.
+
+### Preventive Measure to Consider
+
+Add a startup check to `run_daily.py` (or Step 1.5) that detects archived picks folders with no corresponding `picks_history.csv` rows and warns loudly — or auto-backfills — before proceeding. This would catch silent history gaps caused by API lag or predict-step failures.
+
+### Consequences
+
+- `picks_history.csv` now has 1,405 rows (4 April 14 rows restored)
+- April 14 performance: 4-0
+- No model or pipeline code was changed
+
+---
+
+## 2026-04-15 — PTS Model Root-Cause Analysis
+
+### Context
+
+User flagged weak PTS prediction performance. Data pulled from `picks_history.csv` (263 graded PTS picks).
+
+### Findings
+
+| Prop | Direction | n | WR |
+|------|-----------|---|----|
+| PTS | OVER | 137 | **46.0%** |
+| PTS | UNDER | 126 | 54.8% |
+| AST | UNDER | 52 | 69.2% |
+| TRB | UNDER | 67 | 67.3% |
+
+PTS OVER is below coin-flip. Key data points:
+- Model mean prediction: 17.5 pts. Mean line: 14.5. Mean actual: 14.7. **Systematic +2.8 pt upward bias on OVER picks.**
+- Confidence correlation with outcome: r=0.02 (noise). Edge correlation: r=0.03 (noise). Model has zero predictive signal on PTS.
+- `sigma` is NaN for nearly all PTS picks — the low-sigma UNDER gate is not activating for PTS.
+
+### Root Causes
+
+1. **Market efficiency** — PTS is the highest-volume prop. Books price it better than AST/TRB. Edge is illusory.
+2. **Multiplicative complexity** — Points = minutes × usage × FGA × FG% + 3PA × 3P% + FTA × FT%. AST/TRB are additive counting stats. More variance, harder to model.
+3. **Game-script sensitivity** — Star player expected at 22 pts plays 28 min in a blowout and scores 11. AST is less sensitive (PG runs offense regardless).
+4. **Upward-biased projection** — Season/rolling averages overestimate points due to selection bias and insufficient line-anchoring. Model predicts 2.8 pts above actual on average.
+5. **Sigma not populating for PTS** — Volatility filter (`low_sigma_under`) is supposed to gate PTS but sigma is NaN for most PTS rows. The filter is inert.
+
+### Decision
+
+1. **Disable PTS OVER immediately** — same mechanism as STL/BLK exclusion. 46% WR is net-negative; no confidence gate fixes zero feature signal.
+2. **Keep PTS UNDER with stricter gates** — 54.8% WR is marginal but acceptable with proper sigma + market-edge agreement filter.
+3. **Investigate sigma NaN for PTS** — sigma must be computed and populated for PTS picks so the low-sigma gate can activate.
+4. **Add PTS-specific downward calibration** — recalibrate projection by anchoring more heavily to the line (~50% weight) to reduce the +2.8 pt upward bias.
+5. **Do not add shot-quality features yet** — only after sigma gate and calibration are fixed, since those are lower-risk and higher-impact.
+
+### Alternatives Considered
+
+- Raise PTS confidence threshold (rejected — confidence has r=0.02 correlation with outcome; no threshold helps)
+- Apply market-edge-only filter for PTS OVER (rejected — market_edge is NaN for most PTS rows; same data gap as sigma)
+- Retrain model specifically for PTS (deferred — not enough forward-valid graded data yet to evaluate a retrain)
+
+---
+
+## 2026-04-15 — PTS Model Policy Fix
+
+### Context
+
+Follow-up to the root-cause analysis. Implemented code changes to harden the PTS quality policy.
+
+### Root-cause clarification (from deeper data pull)
+
+- The dynamic quality policy was already blocking ALL PTS picks (`allowed: False, allow_over: False, allow_under: False`) based on training-set metrics.
+- Sigma NaN for historical PTS picks is not a live bug — PTS stopped generating picks on 2026-04-02, before sigma was added on 2026-04-12. The PTS sidecar correctly produces sigma; it simply has no recent picks to attach it to.
+- The +2.8 pt bias is **selection-induced**, not a systematic model bias. Overall PTS bias across all picks is +0.13 pts (near zero). OVER picks show +2.8 (model went high, we picked OVER → regression) and UNDER picks show -2.61 (model went low, we picked UNDER → regression). Correcting bias_advanced.json would not help.
+- Market hit accuracy for PTS is 0.4915 (below coin-flip) — the market model itself has no signal on PTS direction.
+
+### Changes Made
+
+**nba_props.py — fallback policy (line ~5135)**
+- PTS: `allow_over: False` (was `True`), `shrunk_acc: 0.54` (was `0.60`), `min_edge_over: 9.9` (hard block, was `2.0`)
+
+**nba_props.py — dynamic policy (_build_target_quality_policy)**
+- Added `pts_under_tracking_allowed` gate: activates when `n_real ≥ 2000`, `under_n ≥ 400`, `under_hit ≥ 0.54`, `market_hit ≥ 0.50`
+- Added `allow_under` lower-threshold override for PTS when `pts_under_tracking_allowed`
+- Added hard `allow_over = False` for PTS regardless of dynamic metrics — PTS OVER cannot be re-enabled by model eval data alone
+- `pts_under_tracking_allowed` stored in policy dict for visibility
+
+### Current PTS Policy State
+
+```
+allowed: False | allow_over: False | allow_under: False
+pts_under_tracking_allowed: False (blocked: market_hit=0.4915 < 0.50)
+under_hit: 0.5376 | over_hit: 0.4851 | market_hit: 0.4915
+```
+
+### When PTS UNDER Will Re-Enable
+
+Automatically, when model training data shows:
+- `under_hit ≥ 0.54` (currently 0.5376, close) AND
+- `market_hit ≥ 0.50` (currently 0.4915, close)
+
+A model retrain with more data and better features (FGA, usage rate) could achieve this.
+
+### Consequences
+
+- No change to immediate picks output — PTS remains fully disabled
+- PTS OVER is now permanently hard-blocked (not just dynamically)
+- PTS UNDER gate is in place for future auto-enable when data quality improves
+- Fallback is consistent with forward-observed performance

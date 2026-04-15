@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from nba_props import _select_active_slate_lines
+from nba_props import _select_active_slate_lines, _select_lines_for_exact_slate_date
 from prizepicks_scraper import _parse_projections
 
 
@@ -97,6 +97,33 @@ class SlateDateHandlingTests(unittest.TestCase):
 
         self.assertEqual(slate_date, "2026-04-11")
         self.assertEqual(active["game_date"].tolist(), ["2026-04-11"])
+
+    def test_select_lines_for_exact_slate_date_requires_exact_match(self):
+        lines = pd.DataFrame(
+            [
+                {"game_date": "2026-04-12", "player": "Scottie Barnes", "prop": "player_points", "line": 20.5},
+                {"game_date": "2026-04-14", "player": "Devin Carter", "prop": "player_assists", "line": 6.0},
+            ]
+        )
+
+        active, slate_date = _select_lines_for_exact_slate_date(lines, "2026-04-13")
+
+        self.assertTrue(active.empty)
+        self.assertIsNone(slate_date)
+
+    def test_select_lines_for_exact_slate_date_returns_only_requested_day(self):
+        lines = pd.DataFrame(
+            [
+                {"game_date": "2026-04-12", "player": "Scottie Barnes", "prop": "player_points", "line": 20.5},
+                {"game_date": "2026-04-13", "player": "Devin Carter", "prop": "player_assists", "line": 6.0},
+                {"game_date": "2026-04-13", "player": "Brandon Ingram", "prop": "player_rebounds", "line": 7.5},
+            ]
+        )
+
+        active, slate_date = _select_lines_for_exact_slate_date(lines, "2026-04-13")
+
+        self.assertEqual(slate_date, "2026-04-13")
+        self.assertEqual(active["game_date"].tolist(), ["2026-04-13", "2026-04-13"])
 
 
 if __name__ == "__main__":

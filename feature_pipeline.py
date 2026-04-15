@@ -127,7 +127,11 @@ class FeaturePipeline:
         # Stage 5: Role/usage trends
         print("\n[Stage 5/6] Role/usage trends...")
         df = self._create_role_usage_features(df)
-        
+
+        # Stage 5b: Shot quality / scoring efficiency
+        print("\n[Stage 5b/6] Shot quality and efficiency...")
+        df = self._create_shot_quality_features(df)
+
         # Stage 6: Vegas intelligence
         print("\n[Stage 6/6] Vegas intelligence features...")
         df = self._create_vegas_features(df, vegas_lines)
@@ -424,6 +428,83 @@ class FeaturePipeline:
         df['fga_trend'] = df['fga_trend'].fillna(1.0)
         
         print(f"  Created role/usage features")
+        return df
+
+    def _create_shot_quality_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create shot-volume and shot-efficiency features for PTS modeling."""
+        grouped = df.groupby('player')
+
+        for pct_stat in ['fg_pct', '3p_pct', 'ft_pct']:
+            if pct_stat not in df.columns:
+                continue
+            df[pct_stat] = pd.to_numeric(df[pct_stat], errors='coerce')
+            for window, min_periods in [(5, 2), (10, 3), (20, 5)]:
+                df[f'{pct_stat}_l{window}'] = grouped[pct_stat].transform(
+                    lambda x: x.shift(1).rolling(window, min_periods=min_periods).mean()
+                )
+            df[f'{pct_stat}_luck'] = df[f'{pct_stat}_l5'] - df[f'{pct_stat}_l20']
+
+        if all(col in df.columns for col in ['pts', 'fga', 'fta']):
+            df['_ts_raw'] = pd.to_numeric(df['pts'], errors='coerce') / (
+                2.0 * (
+                    pd.to_numeric(df['fga'], errors='coerce') +
+                    0.44 * pd.to_numeric(df['fta'], errors='coerce') +
+                    1e-6
+                )
+            ).clip(lower=0.01)
+            df['ts_pct_l10'] = df.groupby('player')['_ts_raw'].transform(
+                lambda x: x.shift(1).rolling(10, min_periods=3).mean()
+            )
+            ts_pct_l5 = df.groupby('player')['_ts_raw'].transform(
+                lambda x: x.shift(1).rolling(5, min_periods=2).mean()
+            )
+            df['ts_pct_trend'] = ts_pct_l5 / df['ts_pct_l10'].replace(0, np.nan)
+            df['ts_pct_trend'] = df['ts_pct_trend'].fillna(1.0)
+            df = df.drop(columns=['_ts_raw'], errors='ignore')
+
+        for window in [5, 10, 20]:
+            pts_col = f'pts_l{window}'
+            fga_col = f'fga_l{window}'
+            fta_col = f'fta_l{window}'
+            fg_pct_col = f'fg_pct_l{window}'
+            if pts_col in df.columns and fga_col in df.columns:
+                df[f'points_per_fga_l{window}'] = (
+                    pd.to_numeric(df[pts_col], errors='coerce') /
+                    pd.to_numeric(df[fga_col], errors='coerce').replace(0, np.nan)
+                )
+            if fga_col in df.columns and fta_col in df.columns:
+                df[f'scoring_opps_l{window}'] = (
+                    pd.to_numeric(df[fga_col], errors='coerce') +
+                    0.44 * pd.to_numeric(df[fta_col], errors='coerce')
+                )
+            if fga_col in df.columns:
+                fg_proxy = pd.to_numeric(
+                    df.get(fg_pct_col, pd.Series(np.nan, index=df.index)),
+                    errors='coerce',
+                )
+                df[f'shot_volume_quality_l{window}'] = (
+                    pd.to_numeric(df[fga_col], errors='coerce') * fg_proxy
+                )
+
+        if {'points_per_fga_l5', 'points_per_fga_l20'}.issubset(df.columns):
+            df['points_per_fga_trend'] = (
+                df['points_per_fga_l5'] / df['points_per_fga_l20'].replace(0, np.nan)
+            ).fillna(1.0)
+        if {'scoring_opps_l5', 'scoring_opps_l20'}.issubset(df.columns):
+            df['scoring_opps_trend'] = (
+                df['scoring_opps_l5'] / df['scoring_opps_l20'].replace(0, np.nan)
+            ).fillna(1.0)
+        if {'shot_volume_quality_l5', 'shot_volume_quality_l20'}.issubset(df.columns):
+            df['shot_volume_quality_trend'] = (
+                df['shot_volume_quality_l5'] / df['shot_volume_quality_l20'].replace(0, np.nan)
+            ).fillna(1.0)
+        if {'usage_l10', 'fga_l10'}.issubset(df.columns):
+            df['usage_fga_interaction_l10'] = (
+                pd.to_numeric(df['usage_l10'], errors='coerce').fillna(0.0) *
+                pd.to_numeric(df['fga_l10'], errors='coerce').fillna(0.0)
+            )
+
+        print("  Created shot-quality features")
         return df
     
     def _create_vegas_features(self, df: pd.DataFrame, 

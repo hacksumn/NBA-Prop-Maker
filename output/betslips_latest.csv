@@ -1,6 +1,3 @@
 game_date,slip_type,wager,potential_payout,joint_prob_raw,estimated_correlation,joint_prob_adj,break_even_joint_prob,ev_per_unit,ev_dollar,Pick_1_Player,Pick_1_Prop,Pick_1_Dir,Pick_1_Line,Pick_2_Player,Pick_2_Prop,Pick_2_Dir,Pick_2_Line,Pick_3_Player,Pick_3_Prop,Pick_3_Dir,Pick_3_Line,Pick_4_Player,Pick_4_Prop,Pick_4_Dir,Pick_4_Line,result,actual_payout
-2026-04-12,2-pick Power Play,20.0,60.0,0.9801,0.0,0.9801,0.3333,1.9403,38.81,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,,,,,,,,,,
-2026-04-12,3-pick Power Play,20.0,100.0,0.9703,0.0,0.9703,0.2,3.8515,77.03,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,Luguentz Dort,TRB,UNDER,4.0,,,,,,
-2026-04-12,4-pick Power Play,20.0,200.0,0.9606,0.0,0.9606,0.1,8.606,172.12,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,Luguentz Dort,TRB,UNDER,4.0,Davion Mitchell,AST,UNDER,7.5,,
-2026-04-12,2-pick UNDER-Only,20.0,60.0,0.9801,0.0,0.9801,0.3333,1.9403,38.81,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,,,,,,,,,,
-2026-04-12,3-pick UNDER-Only,20.0,100.0,0.9703,0.0,0.9703,0.2,3.8515,77.03,Max Christie,AST,UNDER,3.0,Julian Champagnie,TRB,UNDER,7.5,Luguentz Dort,TRB,UNDER,4.0,,,,,,
+2026-04-15,2-pick Power Play,20.0,60.0,0.9801,0.0,0.9801,0.3333,1.9403,38.81,Brandon Miller,TRB,UNDER,6.5,Paul George,TRB,UNDER,7.0,,,,,,,,,,
+2026-04-15,2-pick UNDER-Only,20.0,60.0,0.9801,0.0,0.9801,0.3333,1.9403,38.81,Brandon Miller,TRB,UNDER,6.5,Paul George,TRB,UNDER,7.0,,,,,,,,,,
