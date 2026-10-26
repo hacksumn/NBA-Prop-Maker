@@ -14,6 +14,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+TEAM_GAME_LOG_PATH = Path(__file__).resolve().parent / "data" / "nba_team_game_logs.csv"
+
+
 def _season_from_game_date(date_value) -> str:
     """Infer NBA season string from a game date."""
     ts = pd.to_datetime(date_value, errors='coerce')
@@ -35,6 +38,165 @@ def _ensure_nba_season_columns(df: pd.DataFrame, date_col: str = "game_date") ->
             inferred = out[date_col].apply(_season_from_game_date)
             out['season'] = out['season'].replace('', np.nan).fillna(inferred)
         out['season'] = out['season'].astype(str)
+    return out
+
+
+def _canonical_game_id(values: pd.Series) -> pd.Series:
+    """Normalize NBA game identifiers without depending on CSV dtype inference."""
+    numeric = pd.to_numeric(values, errors='coerce')
+    return numeric.astype('Int64').astype('string')
+
+
+def _build_team_allowed_context_source(df: pd.DataFrame) -> pd.DataFrame:
+    """Build exact team-game opponent inputs, preferring NBA team game logs.
+
+    Player box rows are a safe fallback for synthetic/unit-test frames only. If
+    the local team-log source overlaps the requested games, it must cover every
+    requested game; partial coverage fails closed instead of mixing definitions.
+    """
+    # Prediction-time feature frames contain one synthetic row for the upcoming
+    # game.  It deliberately has no box-score outcome.  Only completed games
+    # belong in the allowed-stat history or in the exact-log coverage contract.
+    # These fields identify a completed player box.  Do not require player ORB:
+    # the 2025-26 player feed has ORB missing, while the authoritative team log
+    # used below has complete OREB and is exactly why that source exists.
+    completed_stat_cols = [
+        col for col in ['pts', 'trb', 'ast', 'fga', 'fta', 'tov']
+        if col in df.columns
+    ]
+    if completed_stat_cols:
+        completed_mask = df[completed_stat_cols].notna().all(axis=1)
+    else:
+        completed_mask = pd.Series(True, index=df.index)
+    completed = df.loc[completed_mask].copy()
+
+    if 'GAME_ID' in completed.columns and TEAM_GAME_LOG_PATH.exists():
+        logs = pd.read_csv(TEAM_GAME_LOG_PATH, low_memory=False)
+        required = {
+            'GAME_ID', 'GAME_DATE', 'TEAM_ABBREVIATION', 'MATCHUP', 'PTS',
+            'REB', 'AST', 'FGA', 'FTA', 'OREB', 'TOV', 'season',
+        }
+        missing = sorted(required - set(logs.columns))
+        if missing:
+            raise ValueError(f"NBA team-game log is missing required columns: {missing}")
+        requested_ids = set(_canonical_game_id(completed['GAME_ID']).dropna())
+        logs = logs.copy()
+        logs['_game_id_key'] = _canonical_game_id(logs['GAME_ID'])
+        available_ids = set(logs['_game_id_key'].dropna())
+        overlap = requested_ids & available_ids
+        if overlap:
+            missing_ids = requested_ids - available_ids
+            if missing_ids:
+                raise ValueError(
+                    "NBA team-game log partially covers the feature frame: "
+                    f"{len(missing_ids)} of {len(requested_ids)} games are missing"
+                )
+            logs = logs.loc[logs['_game_id_key'].isin(requested_ids)].copy()
+            if logs.duplicated(['_game_id_key', 'TEAM_ABBREVIATION']).any():
+                raise ValueError("NBA team-game log has duplicate team-game keys")
+            if not logs.groupby('_game_id_key').size().eq(2).all():
+                raise ValueError("NBA team-game log must contain exactly two teams per game")
+            numeric_cols = ['PTS', 'REB', 'AST', 'FGA', 'FTA', 'OREB', 'TOV']
+            logs[numeric_cols] = logs[numeric_cols].apply(pd.to_numeric, errors='coerce')
+            if logs[numeric_cols].isna().any().any():
+                nulls = logs[numeric_cols].isna().sum()
+                raise ValueError(
+                    "NBA team-game log has required stat nulls: "
+                    f"{nulls[nulls.gt(0)].to_dict()}"
+                )
+            matchup_opp = logs['MATCHUP'].astype(str).str.extract(
+                r'(?:vs\.?|@)\s*([A-Z]{3})\s*$', expand=False
+            )
+            if matchup_opp.isna().any():
+                raise ValueError("Could not parse opponent from NBA team-game MATCHUP")
+            team_agg = pd.DataFrame({
+                'season': logs['season'].astype(str),
+                'opp': matchup_opp,
+                'game_date': pd.to_datetime(logs['GAME_DATE'], errors='coerce').dt.normalize(),
+                'pts_allowed': logs['PTS'],
+                'trb_allowed': logs['REB'],
+                'ast_allowed': logs['AST'],
+                'fga_allowed': logs['FGA'],
+                'fta_allowed': logs['FTA'],
+                'orb_allowed': logs['OREB'],
+                'tov_allowed': logs['TOV'],
+            })
+            if team_agg['game_date'].isna().any():
+                raise ValueError("NBA team-game log has invalid GAME_DATE values")
+            return team_agg.sort_values(['season', 'opp', 'game_date']).reset_index(drop=True)
+
+    required_player_cols = {
+        'season', 'opp', 'game_date', 'pts', 'trb', 'ast', 'fga', 'fta', 'orb', 'tov',
+    }
+    missing = sorted(required_player_cols - set(completed.columns))
+    if missing:
+        raise ValueError(
+            "Cannot build opponent context without exact team logs or complete player stats; "
+            f"missing columns: {missing}"
+        )
+    stat_cols = ['pts', 'trb', 'ast', 'fga', 'fta', 'orb', 'tov']
+    fallback_completed = df.loc[df[stat_cols].notna().all(axis=1)].copy()
+    if fallback_completed.empty and not df.empty:
+        raise ValueError("Player-box fallback has no completed rows with all required stats")
+    if fallback_completed[stat_cols].isna().any().any():
+        nulls = fallback_completed[stat_cols].isna().sum()
+        raise ValueError(
+            "Player-box fallback has required stat nulls and cannot estimate possessions: "
+            f"{nulls[nulls.gt(0)].to_dict()}"
+        )
+    team_agg = (
+        fallback_completed.groupby(['season', 'opp', 'game_date'], as_index=False)[stat_cols]
+        .sum(min_count=1)
+        .rename(columns={
+            'pts': 'pts_allowed', 'trb': 'trb_allowed', 'ast': 'ast_allowed',
+            'fga': 'fga_allowed', 'fta': 'fta_allowed', 'orb': 'orb_allowed',
+            'tov': 'tov_allowed',
+        })
+    )
+    return team_agg
+
+
+def _repair_matchup_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Reconstruct missing opponent/home fields from GAME_ID and matchup text."""
+    out = df.copy()
+    if not {'GAME_ID', 'team'}.issubset(out.columns):
+        return out
+    out['team'] = out['team'].astype(str).str.strip().str.upper()
+    supplied_opp = out['opp'].astype('string').str.strip().str.upper()
+    supplied_home = pd.to_numeric(out.get('is_home', pd.Series(np.nan, index=out.index)), errors='coerce')
+    if not supplied_opp.isna().any() and not supplied_home.isna().any():
+        out['opp'] = supplied_opp
+        out['is_home'] = supplied_home.astype(int)
+        return out
+    pairs = out[['GAME_ID', 'team']].drop_duplicates().groupby('GAME_ID')['team'].agg(list)
+    invalid = pairs[pairs.map(len).ne(2)]
+    if not invalid.empty:
+        raise ValueError(f"Cannot repair matchup columns: {len(invalid)} games do not have two teams")
+    opponent = {}
+    for game_id, teams in pairs.items():
+        opponent[(game_id, teams[0])] = teams[1]
+        opponent[(game_id, teams[1])] = teams[0]
+    derived_opp = pd.Series(
+        [opponent[(game_id, team)] for game_id, team in zip(out['GAME_ID'], out['team'])],
+        index=out.index,
+        dtype='string',
+    )
+    disagreement = supplied_opp.notna() & supplied_opp.ne(derived_opp)
+    if disagreement.any():
+        raise ValueError(f"opp disagrees with GAME_ID pairing on {int(disagreement.sum())} rows")
+    out['opp'] = supplied_opp.fillna(derived_opp)
+
+    matchup = out.get('matchup', pd.Series('', index=out.index)).astype(str)
+    home_marker = matchup.str.contains(r'\bvs\.?', case=False, regex=True)
+    away_marker = matchup.str.contains('@', regex=False)
+    derived_home = home_marker.astype(int)
+    disagreement = supplied_home.notna() & (home_marker | away_marker) & supplied_home.ne(derived_home)
+    if disagreement.any():
+        raise ValueError(f"is_home disagrees with matchup text on {int(disagreement.sum())} rows")
+    derived_home = supplied_home.fillna(derived_home)
+    if derived_home.isna().any() or (~(home_marker | away_marker) & supplied_home.isna()).any():
+        raise ValueError("Cannot repair is_home without matchup text or a supplied value")
+    out['is_home'] = derived_home.astype(int)
     return out
 
 
@@ -92,6 +254,7 @@ class FeaturePipeline:
         # Ensure datetime
         df['game_date'] = pd.to_datetime(df['game_date'])
         df = _ensure_nba_season_columns(df)
+        df = _repair_matchup_columns(df)
         df = df.sort_values(['player', 'game_date']).reset_index(drop=True)
 
         # Alias team column so team scoring trends work
@@ -166,10 +329,10 @@ class FeaturePipeline:
         """Create base rolling average features."""
         grouped = df.groupby('player')
         season_grouped = df.groupby(['player', 'season'], dropna=False)
-        
+
         stats = ['pts', 'trb', 'ast', 'mp', 'fga', 'fta', '3pa', 'tov', 'stl', 'blk']
         windows = [5, 10, 20]
-        
+
         # Games played counter
         df['games_played'] = grouped.cumcount()
         df['season_games_played'] = season_grouped.cumcount()
@@ -259,70 +422,89 @@ class FeaturePipeline:
         return df
     
     def _create_opponent_context(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create enhanced opponent context features."""
-        
-        # Team-level aggregations
-        team_agg = df.groupby(['opp', 'game_date']).agg({
-            'pts': 'sum',
-            'trb': 'sum',
-            'ast': 'sum',
-            'fga': 'sum',
-            'fta': 'sum',
-            'tov': 'sum'
-        }).reset_index()
-        
-        team_agg.columns = ['opp', 'game_date', 'pts_allowed', 'trb_allowed', 
-                           'ast_allowed', 'fga_allowed', 'fta_allowed', 'tov_allowed']
-        
-        # Estimate possessions (pace proxy)
-        team_agg['poss_est'] = team_agg['fga_allowed'] + 0.44 * team_agg['fta_allowed'] + team_agg['tov_allowed']
-        
-        # Rolling opponent stats
-        team_agg = team_agg.sort_values(['opp', 'game_date'])
-        team_grouped = team_agg.groupby('opp')
-        
-        for stat in ['pts_allowed', 'trb_allowed', 'ast_allowed', 'fga_allowed', 'poss_est']:
-            team_agg[f'{stat}_l10'] = team_grouped[stat].transform(
-                lambda x: x.shift(1).rolling(10, min_periods=3).mean()
+        """Create strict-pregame, pace-normalized opponent context features."""
+        team_agg = _build_team_allowed_context_source(df)
+
+        # Dean Oliver team possessions; the legacy version omitted ORB.
+        team_agg['poss_est'] = (
+            team_agg['fga_allowed'] + 0.44 * team_agg['fta_allowed']
+            - team_agg['orb_allowed'] + team_agg['tov_allowed']
+        ).clip(lower=1.0)
+
+        # Inclusive postgame states are joined only to later dates below.
+        team_agg = team_agg.sort_values(['season', 'opp', 'game_date'])
+        team_grouped = team_agg.groupby(['season', 'opp'], group_keys=False)
+        raw_stats = ['pts_allowed', 'trb_allowed', 'ast_allowed', 'fga_allowed', 'poss_est']
+        for stat in raw_stats:
+            team_agg[f'{stat}_post_l10'] = team_grouped[stat].transform(
+                lambda x: x.rolling(10, min_periods=3).mean()
             )
         
-        # Pace factor — use fixed constant to avoid leaking future-game data
-        # into the normalization denominator (NBA average ~240 team possessions/game)
-        league_avg_pace = 240
-        team_agg['pace_factor'] = team_agg['poss_est_l10'] / league_avg_pace
-        
-        # Rename for merge
-        merge_cols = ['opp', 'game_date', 'pts_allowed_l10', 'trb_allowed_l10', 
-                      'ast_allowed_l10', 'fga_allowed_l10', 'pace_factor']
-        team_agg = team_agg[merge_cols].copy()
-        team_agg.columns = ['opp', 'game_date', 'opp_pts_allowed_l10', 'opp_trb_allowed_l10',
-                           'opp_ast_allowed_l10', 'opp_fga_allowed_l10', 'opp_pace_factor']
-        
-        # Merge to player data
-        df = df.merge(team_agg, on=['opp', 'game_date'], how='left', suffixes=('', '_new'))
-        
-        # Handle duplicate columns
-        for col in ['opp_pts_allowed_l10', 'opp_trb_allowed_l10', 'opp_ast_allowed_l10', 'opp_fga_allowed_l10']:
-            if f'{col}_new' in df.columns:
-                df[col] = df[col].fillna(df[f'{col}_new'])
-                df = df.drop(columns=[f'{col}_new'])
-        
-        # Defense tier
-        df['opp_pts_allowed_rank'] = df.groupby('game_date')['opp_pts_allowed_l10'].rank(ascending=False)
-        df['opp_trb_allowed_rank'] = df.groupby('game_date')['opp_trb_allowed_l10'].rank(ascending=False)
-        df['opp_ast_allowed_rank'] = df.groupby('game_date')['opp_ast_allowed_l10'].rank(ascending=False)
-        
-        df['opp_def_tier'] = pd.cut(
-            df['opp_pts_allowed_rank'].fillna(15),
+        # Build a 30-team state panel per date before ranking. The legacy code
+        # ranked repeated player rows on the active slate and reversed the rank.
+        state_cols = [f'{stat}_post_l10' for stat in raw_stats]
+        states = []
+        for season in sorted(team_agg['season'].astype(str).unique()):
+            season_mask = team_agg['season'].astype(str).eq(season)
+            # Include target prediction dates as as-of lookup dates.  They do
+            # not enter the rolling history; merge_asof below uses only prior
+            # completed games (allow_exact_matches=False).
+            requested_dates = pd.to_datetime(
+                df.loc[df['season'].astype(str).eq(season), 'game_date'],
+                errors='coerce',
+            ).dropna().dt.normalize().unique()
+            history_dates = team_agg.loc[season_mask, 'game_date'].unique()
+            calendar = pd.DataFrame({
+                'game_date': sorted(set(history_dates) | set(requested_dates))
+            })
+            for opponent in sorted(team_agg.loc[season_mask, 'opp'].dropna().unique()):
+                history = team_agg.loc[
+                    season_mask & team_agg['opp'].eq(opponent), ['game_date', *state_cols]
+                ].sort_values('game_date')
+                state = pd.merge_asof(
+                    calendar, history, on='game_date', direction='backward',
+                    allow_exact_matches=False,
+                )
+                state['season'] = season
+                state['opp'] = opponent
+                states.append(state)
+        context = pd.concat(states, ignore_index=True).rename(columns={
+            'pts_allowed_post_l10': 'opp_pts_allowed_l10',
+            'trb_allowed_post_l10': 'opp_trb_allowed_l10',
+            'ast_allowed_post_l10': 'opp_ast_allowed_l10',
+            'fga_allowed_post_l10': 'opp_fga_allowed_l10',
+            'poss_est_post_l10': 'opp_poss_est_l10',
+        })
+        league_pace = context.groupby('game_date')['opp_poss_est_l10'].transform('mean')
+        context['opp_pace_factor'] = context['opp_poss_est_l10'] / league_pace
+        for stat in ['pts', 'trb', 'ast', 'fga']:
+            per100 = f'opp_{stat}_allowed_per100_l10'
+            context[per100] = 100.0 * context[f'opp_{stat}_allowed_l10'] / context['opp_poss_est_l10']
+            context[f'opp_{stat}_allowed_rank'] = context.groupby('game_date')[per100].rank(
+                ascending=True, method='min'
+            )
+        context['opp_def_tier'] = pd.cut(
+            context['opp_pts_allowed_rank'],
             bins=[0, 6, 12, 18, 24, 30],
-            labels=[1, 2, 3, 4, 5]
+            labels=[1, 2, 3, 4, 5],
         ).astype(float)
-        
-        # Fill missing
+
+        merge_cols = [
+            'season', 'opp', 'game_date', 'opp_pts_allowed_l10', 'opp_trb_allowed_l10',
+            'opp_ast_allowed_l10', 'opp_fga_allowed_l10', 'opp_pace_factor',
+            'opp_pts_allowed_per100_l10', 'opp_trb_allowed_per100_l10',
+            'opp_ast_allowed_per100_l10', 'opp_fga_allowed_per100_l10',
+            'opp_pts_allowed_rank', 'opp_trb_allowed_rank',
+            'opp_ast_allowed_rank', 'opp_fga_allowed_rank', 'opp_def_tier',
+        ]
+        df = df.merge(context[merge_cols], on=['season', 'opp', 'game_date'], how='left', suffixes=('', '_new'))
+        for col in merge_cols[3:]:
+            if f'{col}_new' in df.columns:
+                df[col] = df[f'{col}_new']
+                df = df.drop(columns=[f'{col}_new'])
         df['opp_pace_factor'] = df['opp_pace_factor'].fillna(1.0)
         df['opp_def_tier'] = df['opp_def_tier'].fillna(3)
-        
-        print(f"  Created opponent context features")
+        print("  Created opponent context features")
         return df
     
     def _create_situational_splits(self, df: pd.DataFrame) -> pd.DataFrame:

@@ -2,7 +2,9 @@
 nba_scraper.py
 --------------
 Pulls player game logs from NBA.com via the nba_api package.
-Covers 3 seasons (2023-24, 2024-25, 2025-26) and saves to data/nba_data.csv.
+Covers a rolling 3-season window and includes regular season plus postseason
+logs so the daily runner can keep grading active slates after the regular
+season ends.
 
 Columns saved:
     player, team, game_date, matchup, home_away,
@@ -18,12 +20,10 @@ import pandas as pd
 from datetime import datetime
 
 from nba_api.stats.endpoints import leaguegamelog
-from nba_api.stats.static import players as nba_players
 
 logger = logging.getLogger(__name__)
 
-# Seasons to pull — add more here if you want deeper history
-SEASONS = ["2023-24", "2024-25", "2025-26"]
+SEASON_TYPES = ("Regular Season", "PlayIn", "Playoffs")
 
 # nba_api column name -> our target column name
 COLUMN_MAP = {
@@ -64,9 +64,81 @@ FINAL_COLUMNS = [
 ]
 
 
+def _season_from_date(date_value=None) -> str:
+    """Infer NBA season string from a date-like value."""
+    ts = pd.to_datetime(date_value or datetime.now(), errors="coerce")
+    if pd.isna(ts):
+        ts = pd.Timestamp(datetime.now())
+    start_year = ts.year if ts.month >= 10 else ts.year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
+def _default_seasons(as_of=None, depth: int = 3) -> list[str]:
+    """Return the rolling season window the daily runner should maintain."""
+    current_season = _season_from_date(as_of)
+    current_start = int(current_season.split("-")[0])
+    return [
+        f"{year}-{(year + 1) % 100:02d}"
+        for year in range(current_start - depth + 1, current_start + 1)
+    ]
+
+
+# Seasons to pull by default — keeps the repo current without manual year bumps.
+SEASONS = _default_seasons()
+
+
 def _derive_home_away(matchup: str) -> str:
     """Return 'home' if the team is hosting (matchup uses 'vs.'), else 'away'."""
     return "home" if "vs." in matchup else "away"
+
+
+def _clean_game_log_frame(df: pd.DataFrame, season: str) -> pd.DataFrame:
+    """Normalize raw nba_api player game logs to the shared CSV schema."""
+    if df is None or df.empty:
+        return pd.DataFrame(columns=FINAL_COLUMNS)
+
+    df = df.rename(columns=COLUMN_MAP).copy()
+
+    if "matchup" in df.columns:
+        df["home_away"] = df["matchup"].fillna("").astype(str).apply(_derive_home_away)
+    else:
+        df["home_away"] = ""
+
+    df["season"] = season
+    if "game_date" in df.columns:
+        df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    else:
+        df["game_date"] = ""
+
+    for col in FINAL_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    return df[FINAL_COLUMNS]
+
+
+def _fetch_season_phase(season: str,
+                        season_type: str,
+                        retries: int = 3,
+                        delay: float = 2.0) -> pd.DataFrame:
+    """Fetch one season phase (regular season / play-in / playoffs)."""
+    for attempt in range(1, retries + 1):
+        try:
+            log = leaguegamelog.LeagueGameLog(
+                season=season,
+                player_or_team_abbreviation="P",
+                season_type_all_star=season_type,
+            )
+            return _clean_game_log_frame(log.get_data_frames()[0], season)
+        except Exception as exc:
+            logger.warning(
+                f"Attempt {attempt}/{retries} failed for {season} [{season_type}]: {exc}"
+            )
+            if attempt == retries:
+                logger.error(f"Could not fetch {season} [{season_type}] after {retries} attempts.")
+                return pd.DataFrame(columns=FINAL_COLUMNS)
+            time.sleep(delay * attempt)
+
+    return pd.DataFrame(columns=FINAL_COLUMNS)
 
 
 def fetch_season(season: str, retries: int = 3, delay: float = 2.0) -> pd.DataFrame:
@@ -75,40 +147,30 @@ def fetch_season(season: str, retries: int = 3, delay: float = 2.0) -> pd.DataFr
     Returns a cleaned DataFrame with FINAL_COLUMNS.
     """
     logger.info(f"Fetching player game logs for season {season} ...")
-    for attempt in range(1, retries + 1):
-        try:
-            log = leaguegamelog.LeagueGameLog(
-                season=season,
-                player_or_team_abbreviation="P",   # player-level logs
-                season_type_all_star="Regular Season",
-            )
-            df = log.get_data_frames()[0]
-            break
-        except Exception as exc:
-            logger.warning(f"Attempt {attempt}/{retries} failed for {season}: {exc}")
-            if attempt == retries:
-                logger.error(f"Could not fetch {season} after {retries} attempts.")
-                return pd.DataFrame(columns=FINAL_COLUMNS)
-            time.sleep(delay * attempt)
+    frames = []
+    phase_counts = []
 
-    # Rename columns
-    df = df.rename(columns=COLUMN_MAP)
+    for idx, season_type in enumerate(SEASON_TYPES):
+        phase_df = _fetch_season_phase(season, season_type, retries=retries, delay=delay)
+        if not phase_df.empty:
+            frames.append(phase_df)
+            phase_counts.append(f"{season_type}={len(phase_df):,}")
+        if idx < len(SEASON_TYPES) - 1:
+            time.sleep(0.75)
 
-    # Derive home/away from matchup string
-    df["home_away"] = df["matchup"].apply(_derive_home_away)
+    if not frames:
+        return pd.DataFrame(columns=FINAL_COLUMNS)
 
-    # Tag season
-    df["season"] = season
+    combined = pd.concat(frames, ignore_index=True)
+    if {"PLAYER_ID", "GAME_ID"}.issubset(combined.columns):
+        combined = combined.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last")
+    else:
+        combined = combined.drop_duplicates(subset=["player", "team", "game_date"], keep="last")
+    combined = combined.sort_values(["game_date", "player"]).reset_index(drop=True)
 
-    # Normalise game_date to YYYY-MM-DD
-    df["game_date"] = pd.to_datetime(df["game_date"]).dt.strftime("%Y-%m-%d")
-
-    # Keep only the columns we care about (ignore extras from nba_api)
-    available = [c for c in FINAL_COLUMNS if c in df.columns]
-    df = df[available]
-
-    logger.info(f"  -> {len(df):,} rows fetched for {season}")
-    return df
+    phase_label = ", ".join(phase_counts) if phase_counts else "no phase rows"
+    logger.info(f"  -> {len(combined):,} rows fetched for {season} ({phase_label})")
+    return combined
 
 
 def fetch_all_seasons(seasons: list[str] | None = None) -> pd.DataFrame:

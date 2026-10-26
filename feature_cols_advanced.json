@@ -138,9 +138,14 @@
     "opp_ast_allowed_l10",
     "opp_fga_allowed_l10",
     "opp_pace_factor",
+    "opp_pts_allowed_per100_l10",
+    "opp_trb_allowed_per100_l10",
+    "opp_ast_allowed_per100_l10",
+    "opp_fga_allowed_per100_l10",
     "opp_pts_allowed_rank",
     "opp_trb_allowed_rank",
     "opp_ast_allowed_rank",
+    "opp_fga_allowed_rank",
     "opp_def_tier",
     "pts_home_l15",
     "pts_away_l15",
@@ -238,5 +243,5 @@
     "ast_confidence",
     "risk_factor"
   ],
-  "count": 237
+  "count": 242
 }

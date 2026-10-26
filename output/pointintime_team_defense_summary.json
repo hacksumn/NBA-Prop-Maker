@@ -1,0 +1,35 @@
+{
+  "status": "ready_for_prop_join",
+  "input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\nba_data.csv",
+  "input_sha256": "a9674f3f097ee485a985b2079b5d6f73a32dd719fa55e7fb14576f93d8e12b67",
+  "team_log_input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\nba_team_game_logs.csv",
+  "team_log_input_sha256": "1d8cda4cb44e3a806ccf2e787d6c0425eb1977e286dfba8dc5ddd6ff33226c07",
+  "output": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\pointintime_team_defense_ratings.csv",
+  "output_sha256": "504006bb528caf3f02a9456e4aca902ce89a445b433fb24386acbf41fb0151e0",
+  "min_prior_games": 5,
+  "source_player_rows": 81877,
+  "team_game_rows": 7990,
+  "games": 3995,
+  "output_rows": 7990,
+  "date_min": "2023-10-24",
+  "date_max": "2026-10-24",
+  "duplicate_keys": 0,
+  "required_null_cells": 0,
+  "chronology_violations": 0,
+  "rating_source_counts": {
+    "current_season_expanding": 7468,
+    "prior_season_final": 372,
+    "league_average": 150
+  },
+  "feature_columns": [
+    "off_rtg_pt",
+    "def_rtg_pt",
+    "net_rtg_pt",
+    "pace_pt",
+    "opp_def_rtg_pt",
+    "opp_pace_pt",
+    "opp_def_rank_pt",
+    "opp_def_tier_pt",
+    "matchup_expected_ortg_pt"
+  ]
+}

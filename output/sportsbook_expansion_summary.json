@@ -1,0 +1,97 @@
+{
+  "combined_dates": 80,
+  "combined_feature_rows": 42790,
+  "generated_at_utc": "2026-08-13T04:26:27.000775Z",
+  "holdout_contract": "latest 20 dates with archived model predictions; exactly 100 top-five selections when each date is populated",
+  "odds_api_balance_after_expansion": 13436,
+  "odds_api_expansion_credits_used": 42129,
+  "policy_grain": "sportsbook consensus UNDER; PTS/TRB/AST; >=2 books; >=90% paired prices",
+  "prizepicks_gap_included": false,
+  "prizepicks_gap_reason": "Odds API has no historical PrizePicks market; evaluated separately on the frozen PP overlap.",
+  "snapshots": {
+    "t_minus_5": {
+      "development_dates": 54,
+      "development_rows": 13274,
+      "eligible_dates": 80,
+      "eligible_rows": 15679,
+      "holdout_dates": 20,
+      "holdout_dates_list": [
+        "2026-04-21",
+        "2026-04-22",
+        "2026-04-25",
+        "2026-04-27",
+        "2026-04-28",
+        "2026-04-29",
+        "2026-05-01",
+        "2026-05-02",
+        "2026-05-03",
+        "2026-05-04",
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-09",
+        "2026-05-10",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-15",
+        "2026-05-18"
+      ],
+      "holdout_rows": 1751,
+      "holdout_selected_n": 100,
+      "model_path": "models/sportsbook_selection_overlay_t_minus_5.pkl",
+      "production_blocker": "label and line are sportsbook consensus; live card source is PrizePicks",
+      "production_gate_pass": false,
+      "selected_feature_groups": [
+        "no_vig_probability"
+      ],
+      "selected_features": [
+        "consensus_p_over_t_minus_5"
+      ],
+      "sportsbook_holdout_gate_pass": false,
+      "validation_dates": 24
+    },
+    "t_minus_60": {
+      "development_dates": 54,
+      "development_rows": 12383,
+      "eligible_dates": 80,
+      "eligible_rows": 14791,
+      "holdout_dates": 20,
+      "holdout_dates_list": [
+        "2026-04-21",
+        "2026-04-22",
+        "2026-04-25",
+        "2026-04-27",
+        "2026-04-28",
+        "2026-04-29",
+        "2026-05-01",
+        "2026-05-02",
+        "2026-05-03",
+        "2026-05-04",
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-09",
+        "2026-05-10",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-15",
+        "2026-05-18"
+      ],
+      "holdout_rows": 1766,
+      "holdout_selected_n": 100,
+      "model_path": "models/sportsbook_selection_overlay_t_minus_60.pkl",
+      "production_blocker": "label and line are sportsbook consensus; live card source is PrizePicks",
+      "production_gate_pass": false,
+      "selected_feature_groups": [
+        "no_vig_probability"
+      ],
+      "selected_features": [
+        "consensus_p_over_t_minus_60"
+      ],
+      "sportsbook_holdout_gate_pass": true,
+      "validation_dates": 24
+    }
+  }
+}

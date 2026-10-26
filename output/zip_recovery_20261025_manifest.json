@@ -1,0 +1,70 @@
+{
+  "status": "recovered_and_validated",
+  "recovered_at_utc": "2026-10-26T01:58:01.554834+00:00",
+  "source_zip": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA.zip",
+  "source_zip_sha256": "0c83fcee1a867445ce91cdb2e39e3f40deae2ec9917ffce1cc19d2719d8cfc72",
+  "project_root": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA",
+  "backup_dir": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\backups\\zip_recovery_20261025_pre",
+  "backups": {
+    "player_profiles.csv": {
+      "path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\backups\\zip_recovery_20261025_pre\\player_profiles.csv",
+      "bytes": 283,
+      "sha256": "ac8d45aa629171e77093ee7feef30258fc8f83a9957a8b1d69a3e49a21d8fed2"
+    },
+    "player_clean_baselines.csv": {
+      "path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\backups\\zip_recovery_20261025_pre\\player_clean_baselines.csv",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    },
+    "player_positions.csv": {
+      "path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\backups\\zip_recovery_20261025_pre\\player_positions.csv",
+      "bytes": 4158,
+      "sha256": "97e4a8216fc41aafe79cec0b602ae4c680da197400302e44ccf7f48d3cd4af64"
+    },
+    "game_blowout_index.csv": {
+      "path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\backups\\zip_recovery_20261025_pre\\game_blowout_index.csv",
+      "bytes": 2248,
+      "sha256": "b580ea0ac75c2f90a544ccc8511e231400541ed801c90000b7e2239f20e18c19"
+    }
+  },
+  "restored": {
+    "player_profiles": {
+      "active_path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\player_profiles.csv",
+      "snapshot_path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\season_snapshots\\player_profiles_2025-26.csv",
+      "rows": 506,
+      "sha256": "347746af720bbfc5a835e97fe25e90410ae6cff242cd2cfde54209f406fd09bd"
+    },
+    "player_clean_baselines": {
+      "active_path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\player_clean_baselines.csv",
+      "snapshot_path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\season_snapshots\\player_clean_baselines_2025-26.csv",
+      "rows": 550,
+      "sha256": "75fbc2041f5f5948b09e54c5dad75e5c79cd57389c393cf16b938f1b6d98bf3e"
+    },
+    "player_positions": {
+      "active_path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\player_positions.csv",
+      "archive_rows": 587,
+      "current_rows_before": 241,
+      "rows_after_union": 588,
+      "archive_only_added": 347,
+      "current_only_preserved": 1,
+      "conflicts": 0,
+      "sha256": "97aea18d35a993c9ae32e0cf445c3a1743f42388278574c73000d224e835460d"
+    },
+    "game_blowout_index_2025-26": {
+      "active_current_season_path_untouched": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\game_blowout_index.csv",
+      "snapshot_path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\season_snapshots\\game_blowout_index_2025-26.csv",
+      "rows": 1225,
+      "date_min": "2025-10-21",
+      "date_max": "2026-04-12",
+      "sha256": "2d4b7c7f3900e506ed86aeee568528677a02a3ea2f6e2a191e3b9930c819da59"
+    }
+  },
+  "explicitly_not_restored": [
+    "source code from the ZIP",
+    "model artifacts from the ZIP",
+    "OOF predictions from the ZIP or worktree",
+    "picks/slips from the worktree",
+    "live injury snapshots",
+    "player_projections_today.csv"
+  ]
+}

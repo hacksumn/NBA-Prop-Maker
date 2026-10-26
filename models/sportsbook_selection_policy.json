@@ -1,0 +1,26 @@
+{
+  "t_minus_5": {
+    "enabled_for_production": false,
+    "model_path": "models/sportsbook_selection_overlay_t_minus_5.pkl",
+    "production_blocker": "label and line are sportsbook consensus; live card source is PrizePicks",
+    "selected_feature_groups": [
+      "no_vig_probability"
+    ],
+    "selected_features": [
+      "consensus_p_over_t_minus_5"
+    ],
+    "sportsbook_holdout_gate_pass": false
+  },
+  "t_minus_60": {
+    "enabled_for_production": false,
+    "model_path": "models/sportsbook_selection_overlay_t_minus_60.pkl",
+    "production_blocker": "label and line are sportsbook consensus; live card source is PrizePicks",
+    "selected_feature_groups": [
+      "no_vig_probability"
+    ],
+    "selected_features": [
+      "consensus_p_over_t_minus_60"
+    ],
+    "sportsbook_holdout_gate_pass": true
+  }
+}

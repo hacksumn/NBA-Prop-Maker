@@ -2,6 +2,40 @@
 
 ---
 
+## [2.1.2] — 2026-10-25
+
+### Fixed (early-season crash in step 8 found on the first 2026-27 run)
+- **Root cause:** before any player has 5 games, step 3 wrote an empty `player_clean_baselines.csv` and step 6 wrote an empty `player_profiles.csv`; step 8 then crashed reading the empty baselines file (`No columns to parse from file`), leaving `player_projections_today.csv` stale.
+- `_csv_has_rows()` added. Steps 3 and 6 no longer overwrite an existing file with an empty result, and an empty file is no longer treated as "fresh" (so it is rebuilt on the next run).
+- Step 8 skips Layer 5 when its file is empty (same fallback path as "file not found": projections use raw L20).
+- Step 9 refuses to generate picks if step 8 failed in the same run AND `player_projections_today.csv` is older than 48h (or missing). If step 8 fails but the file is recent, picks still run with a warning.
+- No columns added, removed or renamed. Backup: `run_daily.py.bak_before_empty_layer_fix`.
+
+### Added
+- `rebuild_profiles_2025_26.py` (one-off): rebuilds the emptied `data/player_profiles.csv` from 2025-26 final stats.
+
+### Known limits
+- `player_clean_baselines.csv` (last season's) was emptied before this fix and cannot be restored; it rebuilds automatically once players reach 5 GP in 2026-27. Until then projections use raw L20 (no `clean_*` columns).
+- `nba_props.py predict` (step 9) has not been run against projections without the Layer 5 columns.
+
+---
+
+## [2.1.1] — 2026-10-25
+
+### Changed
+- **`run_daily.py`**: new `_apply_current_roster_team()` called in step 8. `team_abbr` in the base projections now comes from `data/reference/official_rosters/official_roster_<season>.csv` (matched on player_id, then normalized name) instead of the player's last logged game, which is stale for anyone traded or signed since. Players not on the roster file keep their previous team. Fails soft (missing/invalid roster file leaves projections unchanged). No columns added, removed or renamed.
+- Offline check against `nba_data.csv` (through 2026-05-18): 120 of 802 players get a new team; 447/802 matched to the 2026-27 roster.
+- Backup of the prior file: `run_daily.py.bak_before_roster_fix`.
+
+### Added
+- `data/reference/official_rosters/official_roster_2026-27.csv` (521 players, 30 teams; `player_pool_guard.py` overwrites it on its normal 18-hour refresh).
+- `data/reference/official_rosters/roster_team_changes_2026-27.csv` (last logged team vs 2026-27 roster team, per player).
+
+### Known limits
+- 74 roster players (mostly rookies/new signings) have no rows in `nba_data.csv`, so they get no projection until they log a 2026-27 game.
+
+---
+
 ## [2.1.0] — 2026-03-25
 
 ### Updated

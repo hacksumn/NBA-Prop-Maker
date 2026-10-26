@@ -1,0 +1,39 @@
+{
+  "card": {
+    "close_consensus_coverage": 159,
+    "closing_side_probability_above_half_rate": 0.4779874213836478,
+    "graded_rows": 173,
+    "logged_rows": 195,
+    "mean_closing_side_probability": 0.5018089262641222,
+    "mean_cross_market_line_clv": 0.6713836477987422,
+    "median_pp_reference_age_minutes": 534.15,
+    "positive_cross_market_line_clv_rate": 0.7169811320754716,
+    "pp_reference_coverage": 137,
+    "pp_reference_within_60_minutes": 3
+  },
+  "gap": {
+    "graded_rows": 10943,
+    "pp_below_under_rate": 0.49528301886792453,
+    "pp_plus_one_under_rate": 0.6707175925925926
+  },
+  "interpretation": {
+    "blk_market_wide_softness": "weaker_than_prior_small_sample",
+    "gap_signal": "confirmed_in_sample_at_larger_scale",
+    "late_line_movement": "weak_not_monotonic",
+    "same_book_prizepicks_clv": "not_measurable_from_stale_archived_pp_snapshots",
+    "sportsbook_price_confirmation": "not_established",
+    "stl_market_wide_softness": "not_confirmed_at_scale"
+  },
+  "movement": {
+    "graded_rows": 14985,
+    "line_down_under_rate": 0.5149863760217984,
+    "line_up_under_rate": 0.5360501567398119,
+    "unchanged_under_rate": 0.5397434850093946
+  },
+  "regime_validation": {
+    "blk_consensus_close_n_30plus": 965,
+    "blk_consensus_close_under_rate_30plus": 0.5865284974093264,
+    "stl_consensus_close_n_30plus": 621,
+    "stl_consensus_close_under_rate_30plus": 0.5185185185185185
+  }
+}

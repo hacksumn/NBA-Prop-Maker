@@ -1,0 +1,11 @@
+snapshot_kind,method,n,wins,hit_rate,dates,hit_rate_ci_low,hit_rate_ci_high,lift_vs_random_mean_pp,auc,game_date
+t_minus_60,shadow_overlay,4,1.0,0.25,,,,,,2026-04-10
+t_minus_60,shadow_overlay,5,4.0,0.8,,,,,,2026-04-12
+t_minus_60,current_model_edge,4,1.0,0.25,,,,,,2026-04-10
+t_minus_60,current_model_edge,5,3.0,0.6,,,,,,2026-04-12
+t_minus_5,shadow_overlay,4,1.0,0.25,,,,,,2026-04-10
+t_minus_5,shadow_overlay,5,3.0,0.6,,,,,,2026-04-12
+t_minus_5,shadow_overlay,1,0.0,0.0,,,,,,2026-05-06
+t_minus_5,current_model_edge,4,1.0,0.25,,,,,,2026-04-10
+t_minus_5,current_model_edge,5,3.0,0.6,,,,,,2026-04-12
+t_minus_5,current_model_edge,1,0.0,0.0,,,,,,2026-05-06

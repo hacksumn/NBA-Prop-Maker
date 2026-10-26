@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "items": [{
+    "id": "dec058-selective-recovery",
+    "title": "What data was selectively recovered?",
+    "assumptions": [
+      "The restored 2025-26 profiles and clean baselines are early-season fallbacks, not current-season measurements."
+    ],
+    "queries": [{
+      "id": "zip-recovery-manifest",
+      "source": {
+        "label": "DEC-058 recovery audit",
+        "files": [
+          { "label": "Fresh_Start_NBA.zip" },
+          { "label": "zip_recovery_20261025_manifest.json" },
+          { "label": "DECISIONS.md" }
+        ],
+        "metricDefinitions": [{
+          "label": "Recovered rows",
+          "definition": "Recovered rows count validated unique-key records activated or preserved as season-specific snapshots by the DEC-058 recovery."
+        }],
+        "filters": [
+          "Recovery source: SHA-256-verified August 11 ZIP",
+          "Recovery date: October 25, 2026",
+          "Excluded: code, models, OOF predictions, picks, slips, live injuries, and projections"
+        ],
+        "caveats": [
+          "Historical lines and NBA box scores were already supersets of the ZIP and were not rewritten.",
+          "The current 2026-27 blowout index remained untouched; only the 2025-26 index was archived."
+        ],
+        "evidenceFlow": [{
+          "kind": "validation",
+          "title": "Grain and integrity checks",
+          "detail": "All restored tables have zero blank keys and zero duplicate keys; the position union has zero assignment conflicts; every restored hash matches the manifest."
+        }, {
+          "kind": "validation",
+          "title": "Production isolation",
+          "detail": "All 56 active production-model hashes still match the DEC-057 recovery manifest."
+        }]
+      },
+      "sourceRoles": [
+        { "kind": "file", "label": "Fresh_Start_NBA.zip", "role": "Source archive containing the validated 2025-26 cache records." },
+        { "kind": "file", "label": "zip_recovery_20261025_manifest.json", "role": "Records source, backup, destination, row-count, and SHA-256 evidence for the recovery." },
+        { "kind": "file", "label": "DECISIONS.md", "role": "Records the recovery decision, exclusions, permanent cache contracts, and verification result." }
+      ],
+      "columns": [
+        { "field": "asset", "label": "Asset" },
+        { "field": "before", "label": "Before" },
+        { "field": "after", "label": "After" },
+        { "field": "action", "label": "Action" }
+      ],
+      "rows": [
+        { "asset": "Player profiles", "before": 0, "after": 506, "action": "Restored and season-versioned" },
+        { "asset": "Clean baselines", "before": 0, "after": 550, "action": "Restored and season-versioned" },
+        { "asset": "Player positions", "before": 241, "after": 588, "action": "Conflict-free union" },
+        { "asset": "2025-26 blowout games", "before": 0, "after": 1225, "action": "Preserved as season snapshot" },
+        { "asset": "2026-27 blowout games", "before": 36, "after": 36, "action": "Active cache left untouched" }
+      ],
+      "reportingPeriod": "ZIP state through August 11, 2026; recovery executed October 25, 2026"
+    }]
+  }]
+}

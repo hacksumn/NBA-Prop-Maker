@@ -1,0 +1,7 @@
+prop,graded_picks,over_picks,under_picks,model_accuracy,model_over_accuracy,model_under_accuracy,always_under_accuracy,edge_vs_always_under,beats_always_under,baseline_status,status
+AST,95,0,95,70.5,,70.5,70.5,0.0,False,OK,FAIL
+PA,296,118,178,56.8,52.5,59.6,54.7,2.0,True,OK,PASS
+PR,304,134,170,53.0,47.8,57.1,54.9,-2.0,False,OK,FAIL
+PRA,309,152,157,52.1,48.0,56.1,54.0,-1.9,False,OK,FAIL
+PTS,263,137,126,50.2,46.0,54.8,54.4,-4.2,False,OK,FAIL
+TRB,93,12,81,62.4,50.0,64.2,62.4,0.0,False,OK,FAIL

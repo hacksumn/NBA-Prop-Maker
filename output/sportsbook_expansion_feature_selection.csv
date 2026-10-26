@@ -1,0 +1,19 @@
+snapshot_kind,step,feature_group,features,mean_top5_lift_pp,positive_folds,nonnegative_folds,mean_auc_lift,validation_top5_n,validation_dates,survival_gate,exclusion_reason
+t_minus_60,1,no_vig_probability,consensus_p_over_t_minus_60,21.896551724137932,3,3,0.03735945364607285,119,24,True,
+t_minus_60,1,book_dispersion,line_range_t_minus_60|line_std_t_minus_60|p_over_std_t_minus_60,11.954022988505747,3,3,-0.00921333109297022,119,24,False,
+t_minus_60,1,sportsbook_consensus_line,consensus_line_t_minus_60,6.752873563218392,2,2,-0.0017559592606428975,119,24,False,
+t_minus_60,1,market_availability,book_count_t_minus_60|paired_price_share_t_minus_60,-9.137931034482758,1,1,-0.0054196657652398755,119,24,False,
+t_minus_60,2,sportsbook_consensus_line,consensus_line_t_minus_60,0.0,0,4,-0.0015825829700383542,119,24,False,
+t_minus_60,2,market_availability,book_count_t_minus_60|paired_price_share_t_minus_60,-1.6666666666666692,0,2,-0.00031214134621021516,119,24,False,
+t_minus_60,2,book_dispersion,line_range_t_minus_60|line_std_t_minus_60|p_over_std_t_minus_60,-2.5287356321839094,0,1,-0.0004914851610228754,119,24,False,
+t_minus_60,0,t60_to_t5_movement,,,0,0,,0,0,False,not known until T-5
+t_minus_60,0,market_withdrawal,,,0,0,,0,0,False,not known until T-5
+t_minus_5,1,no_vig_probability,consensus_p_over_t_minus_5,18.448275862068964,4,4,0.04464591737552827,119,24,True,
+t_minus_5,1,t60_to_t5_movement,line_move_60_to_5|p_over_move_60_to_5|dispersion_move_60_to_5,10.229885057471263,3,4,0.004493700938430628,119,24,True,
+t_minus_5,1,book_dispersion,line_range_t_minus_5|line_std_t_minus_5|p_over_std_t_minus_5,7.643678160919539,3,3,-0.000274490331796412,119,24,False,
+t_minus_5,1,sportsbook_consensus_line,consensus_line_t_minus_5,5.862068965517242,2,2,-0.0016953797239360469,119,24,False,
+t_minus_5,1,market_withdrawal_availability,book_count_t_minus_5|paired_price_share_t_minus_5|market_withdrawn_by_t5,-10.862068965517242,0,0,-0.004263935647924405,119,24,False,
+t_minus_5,2,sportsbook_consensus_line,consensus_line_t_minus_5,0.0,0,4,-0.0014114099056261875,119,24,False,
+t_minus_5,2,book_dispersion,line_range_t_minus_5|line_std_t_minus_5|p_over_std_t_minus_5,-0.8620689655172403,1,2,0.0005457899300827795,119,24,False,
+t_minus_5,2,market_withdrawal_availability,book_count_t_minus_5|paired_price_share_t_minus_5|market_withdrawn_by_t5,-1.6666666666666663,0,3,-0.000927767252567685,119,24,False,
+t_minus_5,2,t60_to_t5_movement,line_move_60_to_5|p_over_move_60_to_5|dispersion_move_60_to_5,-2.4712643678160924,1,2,-0.0018801419584968115,119,24,False,

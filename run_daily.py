@@ -9,7 +9,7 @@ Pipeline Execution Order:
     STEP 1   — NBA Game Logs          (nba_scraper → data/nba_data.csv)
     STEP 1.5 — Auto-grade picks       (picks_history.csv)
     STEP 1.6 — Auto-grade betslips    (betslips_history.csv)
-    STEP 2   — PrizePicks Lines       (prizepicks_scraper → data/historical_lines.csv)
+    STEP 2   — PrizePicks Snapshot    (history only; Step 9 fetches sportsbook lines)
     STEP 3   — Layer 5: Blowout Index (blowout_discount_model → game_blowout_index.csv)
     STEP 4   — Layer 1: PBP Fetch     (pbp_fetcher → pbp_possessions_master.csv)
     STEP 5   — Layer 2: PPP Engine    (ppp_engine → team_ratings.csv, player_adj_ppp.csv)
@@ -25,11 +25,13 @@ Usage:
     python3 run_daily.py --skip-layers      # skip layers 1-5, only fetch data
     python3 run_daily.py --layers-only      # skip data fetch, only run layers
     python3 run_daily.py --skip-picks       # run pipeline but do not generate today's picks
+    python3 run_daily.py --skip-pp-closing-capture  # do not start the T-60/T-5 watcher
     python3 run_daily.py --skip-weekly-retrain  # skip Sunday model maintenance
     python3 run_daily.py --seasons 2024-25  # custom season list
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -55,12 +57,14 @@ DATA_DIR      = SCRIPT_DIR / "data"
 FILES_DIR     = SCRIPT_DIR / "files"
 OUTPUT_DIR    = SCRIPT_DIR / "output"
 LOG_DIR       = SCRIPT_DIR / "logs"
+MODEL_DIR     = SCRIPT_DIR / "models"
 
 GAME_LOG_CSV  = DATA_DIR / "nba_data.csv"
 LINES_CSV     = DATA_DIR / "historical_lines.csv"
 PICKS_LATEST  = OUTPUT_DIR / "picks_latest.csv"
 BETSLIPS_LATEST = OUTPUT_DIR / "betslips_latest.csv"
 LOG_FILE      = LOG_DIR / f"run_{datetime.now().strftime('%Y%m%d')}.log"
+LIVE_BOX_SCORE_SEASON_TYPES = ("Regular Season", "PlayIn", "Playoffs")
 
 # Layer output files (all written to data/)
 BLOWOUT_INDEX   = DATA_DIR / "game_blowout_index.csv"
@@ -76,11 +80,13 @@ LIVE_INJURY_CSV  = DATA_DIR / "live_injury_status.csv"
 # Final merged output — this is what your prediction model reads every day
 PROJECTIONS_TODAY = DATA_DIR / "player_projections_today.csv"
 PROJECTIONS_ARCHIVE_DIR = DATA_DIR / "projection_archive"
+LAYER_SNAPSHOT_DIR = DATA_DIR / "season_snapshots"
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROJECTIONS_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+LAYER_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -253,18 +259,22 @@ def _summarise_live_pick_outputs():
 
         # Print a clean fixed-width summary (avoids mangled wide-DataFrame log output)
         logger.info("  ── Live card ─────────────────────────────────────────────────────")
-        logger.info(f"  {'PLAYER':<22} {'PROP':<5} {'DIR':<6} {'LINE':>5} {'CONF':>5} {'HIT%':>5}  TIER")
-        logger.info("  " + "-" * 63)
+        logger.info(f"  {'PLAYER':<22} {'PROP':<5} {'DIR':<6} {'LINE':>5} {'MODE':<8} {'SRC':<10} {'SIG':>5} {'CONF':>5} {'HIST':>5}  TIER")
+        logger.info("  " + "-" * 91)
         for _, r in picks.iterrows():
             player = str(r.get("player", ""))[:22]
             prop   = str(r.get("prop",   ""))
             dirn   = str(r.get("direction", ""))
             line   = r.get("line", "")
+            mode   = str(r.get("projection_type", "standard"))[:8]
+            source = str(r.get("line_source", ""))[:10]
+            signal = r.get("signal_score", "")
             conf   = r.get("confidence", "")
             hit    = r.get("estimated_hit_rate", "")
             tier   = str(r.get("publish_tier", r.get("pick_source", "")))[:16]
             try:
                 line_s = f"{float(line):>5.1f}"
+                signal_s = f"{float(signal):>4.0f}" if signal is not None and str(signal) not in ("", "nan") else "  --"
                 conf_s = f"{float(conf):>4.0f}%"
                 if hit is not None and str(hit) not in ("", "nan"):
                     hit_val = float(hit)
@@ -274,9 +284,9 @@ def _summarise_live_pick_outputs():
                 else:
                     hit_s = "  -- "
             except Exception:
-                line_s = conf_s = hit_s = "  ?  "
-            logger.info(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {conf_s} {hit_s}  {tier}")
-        logger.info("  " + "-" * 63)
+                line_s = signal_s = conf_s = hit_s = "  ?  "
+            logger.info(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {mode:<8} {source:<10} {signal_s} {conf_s} {hit_s}  {tier}")
+        logger.info("  " + "-" * 91)
 
     if not BETSLIPS_LATEST.exists():
         _warn(f"Live betslips file not found at {BETSLIPS_LATEST}")
@@ -386,6 +396,38 @@ def _run_python_step(step_no, title: str, script_args, errors, error_label: str,
     return False
 
 
+def _production_model_hashes(model_dir: Path = MODEL_DIR) -> dict[str, str]:
+    """Hash the top-level production bundle so maintenance cannot mutate it silently."""
+    hashes: dict[str, str] = {}
+    if not model_dir.exists():
+        return hashes
+    for path in sorted(item for item in model_dir.iterdir() if item.is_file()):
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        hashes[path.name] = digest.hexdigest()
+    return hashes
+
+
+def _record_production_immutability_failure(before: dict[str, str], errors: list[str]) -> bool:
+    """Fail loudly if an isolated weekly candidate changed production artifacts."""
+    after = _production_model_hashes()
+    if after == before:
+        return True
+    changed = sorted(
+        name for name in set(before) | set(after)
+        if before.get(name) != after.get(name)
+    )
+    message = (
+        "Weekly maintenance mutated the production model bundle: "
+        + ", ".join(changed[:12])
+    )
+    _fail(message)
+    errors.append(message)
+    return False
+
+
 # ── Step 1: NBA Game Logs ──────────────────────────────────────────────────────
 
 def _blank_text_mask(series):
@@ -395,6 +437,203 @@ def _blank_text_mask(series):
 def _normalize_game_date_series(series):
     import pandas as pd
     return pd.to_datetime(series, errors="coerce").dt.strftime("%Y-%m-%d")
+
+
+def _season_from_game_date(date_value) -> str:
+    """Infer NBA season label from a played game date."""
+    import pandas as pd
+
+    ts = pd.to_datetime(date_value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+    start_year = ts.year if ts.month >= 10 else ts.year - 1
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
+def _active_season(args=None, as_of=None) -> str:
+    """Resolve one season contract for every daily modeling layer."""
+    requested = list(getattr(args, "seasons", None) or [])
+    if requested:
+        def _valid_season(value):
+            match = re.fullmatch(r"(20\d{2})-(\d{2})", str(value))
+            return bool(
+                match
+                and int(match.group(2)) == (int(match.group(1)) + 1) % 100
+            )
+
+        invalid = [value for value in requested if not _valid_season(value)]
+        if invalid:
+            raise ValueError(f"Invalid NBA season labels: {invalid}")
+        return max((str(value) for value in requested), key=lambda value: int(value.split("-")[0]))
+    season = _season_from_game_date(as_of or datetime.now())
+    if not season:
+        raise ValueError(f"Could not derive active NBA season from {as_of!r}")
+    return season
+
+
+def _prepare_box_score_frame(df, normalize_name_fn):
+    """Standardize raw/local box score rows into the grading schema."""
+    import pandas as pd
+
+    box = df.copy()
+    box = box.rename(columns={
+        "PLAYER_NAME": "player",
+        "GAME_DATE": "game_date",
+        "PTS": "pts",
+        "REB": "trb",
+        "AST": "ast",
+        "STL": "stl",
+        "BLK": "blk",
+        "TOV": "tov",
+    })
+
+    if "player" not in box.columns:
+        box["player"] = ""
+    if "game_date" not in box.columns:
+        box["game_date"] = ""
+
+    box["player"] = box["player"].fillna("").astype(str)
+    box["game_date"] = pd.to_datetime(box["game_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    box = box.dropna(subset=["game_date"]).copy()
+
+    for col in ["pts", "trb", "ast", "stl", "blk", "tov"]:
+        if col not in box.columns:
+            box[col] = 0
+        box[col] = pd.to_numeric(box[col], errors="coerce").fillna(0)
+
+    box["pra"] = box["pts"] + box["trb"] + box["ast"]
+    box["pr"]  = box["pts"] + box["trb"]
+    box["pa"]  = box["pts"] + box["ast"]
+    box["ra"]  = box["trb"] + box["ast"]
+    box["player_norm"] = box["player"].apply(normalize_name_fn)
+
+    if {"GAME_ID", "player_norm"}.issubset(box.columns):
+        box = box.drop_duplicates(subset=["GAME_ID", "player_norm"], keep="last")
+    else:
+        box = box.drop_duplicates(subset=["game_date", "player_norm"], keep="last")
+    return box
+
+
+def _fetch_live_box_scores_for_date(game_date,
+                                    normalize_name_fn,
+                                    fetcher_cls=None,
+                                    sleep_fn=None):
+    """Fetch one day's player box scores, trying regular season then postseason phases."""
+    import pandas as pd
+
+    if fetcher_cls is None:
+        from nba_api.stats.endpoints import leaguegamelog
+        fetcher_cls = leaguegamelog.LeagueGameLog
+    if sleep_fn is None:
+        sleep_fn = time.sleep
+
+    season = _season_from_game_date(game_date)
+    request_date = pd.to_datetime(game_date, errors="coerce")
+    if not season or pd.isna(request_date):
+        return pd.DataFrame(), None
+
+    for idx, season_type in enumerate(LIVE_BOX_SCORE_SEASON_TYPES):
+        try:
+            response = fetcher_cls(
+                season=season,
+                season_type_all_star=season_type,
+                date_from_nullable=request_date.strftime("%m/%d/%Y"),
+                date_to_nullable=request_date.strftime("%m/%d/%Y"),
+                player_or_team_abbreviation="P",
+            )
+            live_box = _prepare_box_score_frame(response.get_data_frames()[0], normalize_name_fn)
+        except Exception as exc:
+            logger.warning(f"    Live fetch failed for {game_date} [{season_type}]: {exc}")
+            live_box = pd.DataFrame()
+
+        if not live_box.empty:
+            return live_box, season_type
+
+        if idx < len(LIVE_BOX_SCORE_SEASON_TYPES) - 1:
+            sleep_fn(0.25)
+
+    return pd.DataFrame(), None
+
+
+def _hydrate_live_box_scores(box, target_dates, normalize_name_fn, context_label=""):
+    """Fill missing box-score dates from nba_api across regular/play-in/playoff phases."""
+    import pandas as pd
+
+    prepared = _prepare_box_score_frame(box, normalize_name_fn)
+    available_dates = set(prepared["game_date"].dropna().astype(str).unique())
+    missing_dates = sorted(
+        set(str(date) for date in target_dates if str(date).strip()) - available_dates
+    )
+
+    for missing_date in missing_dates:
+        logger.info(f"  {context_label}nba_data.csv missing {missing_date} — fetching live from nba_api...")
+        live_box, season_type = _fetch_live_box_scores_for_date(missing_date, normalize_name_fn)
+        if live_box.empty:
+            continue
+        prepared = pd.concat([prepared, live_box], ignore_index=True)
+        if {"GAME_ID", "player_norm"}.issubset(prepared.columns):
+            prepared = prepared.drop_duplicates(subset=["GAME_ID", "player_norm"], keep="last")
+        else:
+            prepared = prepared.drop_duplicates(subset=["game_date", "player_norm"], keep="last")
+        available_dates.update(live_box["game_date"].dropna().astype(str).tolist())
+        logger.info(
+            f"    Fetched {len(live_box)} player rows for {missing_date} [{season_type}]"
+        )
+
+    return prepared, available_dates
+
+
+def _sync_betslip_views_from_history(slips_df,
+                                     latest_path: Optional[Path] = None,
+                                     archive_root: Optional[Path] = None):
+    """Refresh stable betslip views from betslips_history.csv after grading."""
+    import pandas as pd
+
+    latest_path = latest_path or BETSLIPS_LATEST
+    archive_root = archive_root or (OUTPUT_DIR / "archive")
+
+    if slips_df is None or len(slips_df) == 0 or "game_date" not in slips_df.columns:
+        return [], False
+
+    working = slips_df.copy()
+    working["game_date"] = _normalize_game_date_series(working["game_date"])
+    working = working.dropna(subset=["game_date"]).copy()
+    if len(working) == 0:
+        return [], False
+
+    synced_dates = []
+    for game_date, day_df in working.groupby("game_date", sort=True):
+        day_dir = Path(archive_root) / str(game_date)
+        day_dir.mkdir(parents=True, exist_ok=True)
+        daily_path = day_dir / f"betslips_{game_date}.csv"
+        _atomic_csv(day_df.reset_index(drop=True), daily_path)
+        synced_dates.append(str(game_date))
+
+    latest_synced = False
+    try:
+        preferred_dates = working.loc[~_blank_text_mask(working.get("result", pd.Series("", index=working.index))), "game_date"]
+        if len(preferred_dates) > 0:
+            latest_target_date = max(preferred_dates.astype(str))
+        else:
+            latest_target_date = max(working["game_date"].astype(str))
+
+        safe_to_overwrite = True
+        if latest_path.exists():
+            latest_df = pd.read_csv(latest_path, dtype=str, low_memory=False)
+            if "game_date" in latest_df.columns and len(latest_df) > 0:
+                latest_df["game_date"] = _normalize_game_date_series(latest_df["game_date"])
+                latest_dates = set(latest_df["game_date"].dropna().astype(str).unique())
+                if latest_dates and latest_dates != {latest_target_date}:
+                    safe_to_overwrite = False
+
+        if safe_to_overwrite:
+            latest_slice = working[working["game_date"].astype(str) == latest_target_date].copy()
+            _atomic_csv(latest_slice.reset_index(drop=True), latest_path)
+            latest_synced = True
+    except Exception as exc:
+        logger.warning(f"  Could not sync betslips_latest.csv from history: {exc}")
+
+    return synced_dates, latest_synced
 
 
 def step1_game_logs(args, errors):
@@ -516,14 +755,8 @@ def step1_5_grade_picks(errors):
             return re.sub(r"[^a-z0-9 ]", "", n.lower()).strip()
 
         box = pd.read_csv(GAME_LOG_CSV, low_memory=False)
-        box["game_date"] = pd.to_datetime(box["game_date"]).dt.strftime("%Y-%m-%d")
-        for col in ["pts", "trb", "ast", "stl", "blk", "tov"]:
-            box[col] = pd.to_numeric(box[col], errors="coerce").fillna(0)
-        box["pra"] = box["pts"] + box["trb"] + box["ast"]
-        box["pr"]  = box["pts"] + box["trb"]
-        box["pa"]  = box["pts"] + box["ast"]
-        box["player_norm"] = box["player"].apply(_norm)
-        available_dates = set(box["game_date"].unique())
+        box = _prepare_box_score_frame(box, _norm)
+        available_dates = set(box["game_date"].dropna().astype(str).unique())
 
         prop_map = {
             "PTS": "pts", "TRB": "trb", "AST": "ast", "STL": "stl",
@@ -532,44 +765,11 @@ def step1_5_grade_picks(errors):
         today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
         gradeable = ungraded[ungraded["game_date"].fillna("").astype(str) < today_str].copy()
 
-        # Fetch missing dates directly from nba_api (handles the 2-3 day data lag)
-        missing_dates = sorted(set(gradeable["game_date"].dropna().unique()) - available_dates)
-        if missing_dates:
-            try:
-                from nba_api.stats.endpoints import leaguegamelog
-                import time as _time
-                for md in missing_dates:
-                    logger.info(f"  nba_data.csv missing {md} — fetching live from nba_api...")
-                    try:
-                        gl = leaguegamelog.LeagueGameLog(
-                            season="2025-26",
-                            date_from_nullable=pd.to_datetime(md).strftime("%m/%d/%Y"),
-                            date_to_nullable=pd.to_datetime(md).strftime("%m/%d/%Y"),
-                            player_or_team_abbreviation="P",
-                        )
-                        api_df = gl.get_data_frames()[0]
-                        if not api_df.empty:
-                            col_map = {
-                                "PLAYER_NAME": "player", "GAME_DATE": "game_date",
-                                "PTS": "pts", "REB": "trb", "AST": "ast",
-                                "STL": "stl", "BLK": "blk", "TOV": "tov",
-                            }
-                            api_df = api_df.rename(columns=col_map)
-                            api_df["game_date"] = pd.to_datetime(api_df["game_date"]).dt.strftime("%Y-%m-%d")
-                            for col in ["pts", "trb", "ast", "stl", "blk", "tov"]:
-                                api_df[col] = pd.to_numeric(api_df[col], errors="coerce").fillna(0)
-                            api_df["pra"] = api_df["pts"] + api_df["trb"] + api_df["ast"]
-                            api_df["pr"]  = api_df["pts"] + api_df["trb"]
-                            api_df["pa"]  = api_df["pts"] + api_df["ast"]
-                            api_df["player_norm"] = api_df["player"].apply(_norm)
-                            box = pd.concat([box, api_df], ignore_index=True)
-                            available_dates.add(md)
-                            logger.info(f"    Fetched {len(api_df)} player rows for {md}")
-                        _time.sleep(1)
-                    except Exception as e:
-                        logger.warning(f"    Could not fetch {md} from nba_api: {e}")
-            except ImportError:
-                logger.warning("  nba_api not available — cannot fetch missing dates")
+        box, available_dates = _hydrate_live_box_scores(
+            box,
+            gradeable["game_date"].dropna().astype(str).unique(),
+            _norm,
+        )
 
         wins = losses = pushes = graded_count = 0
         newly_graded_rows = []  # track only picks graded in this run
@@ -720,11 +920,23 @@ def step1_6_grade_betslips(errors):
         slips["game_date"] = _normalize_game_date_series(slips["game_date"])
         ungraded = slips[_blank_text_mask(slips["result"])]
         if len(ungraded) == 0:
+            synced_dates, latest_synced = _sync_betslip_views_from_history(slips)
+            if synced_dates:
+                logger.info(
+                    f"  Synced betslip daily archives for {len(synced_dates)} dates"
+                    f"{' and refreshed betslips_latest.csv' if latest_synced else ''}"
+                )
             _ok("All betslips already graded")
             return
         today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
         gradeable = ungraded[ungraded["game_date"].fillna("").astype(str) < today_str].copy()
         if len(gradeable) == 0:
+            synced_dates, latest_synced = _sync_betslip_views_from_history(slips)
+            if synced_dates:
+                logger.info(
+                    f"  Synced betslip daily archives for {len(synced_dates)} dates"
+                    f"{' and refreshed betslips_latest.csv' if latest_synced else ''}"
+                )
             _ok("No completed-slate betslips pending grading")
             return
 
@@ -733,56 +945,13 @@ def step1_6_grade_betslips(errors):
             return re.sub(r"[^a-z0-9 ]", "", n.lower()).strip()
 
         box = pd.read_csv(GAME_LOG_CSV, low_memory=False)
-        box["game_date"] = pd.to_datetime(box["game_date"]).dt.strftime("%Y-%m-%d")
-        for col in ["pts", "trb", "ast", "stl", "blk", "tov"]:
-            box[col] = pd.to_numeric(box[col], errors="coerce").fillna(0)
-        box["pra"] = box["pts"] + box["trb"] + box["ast"]
-        box["pr"]  = box["pts"] + box["trb"]
-        box["pa"]  = box["pts"] + box["ast"]
-        box["ra"]  = box["trb"] + box["ast"]
-        box["player_norm"] = box["player"].apply(_norm)
-        available_dates = set(box["game_date"].unique())
-
-        # Live-fetch fallback: same as Step 1.5 — fetch any missing dates from nba_api
-        missing_dates = sorted(
-            set(gradeable["game_date"].dropna().astype(str).unique()) - available_dates
+        box = _prepare_box_score_frame(box, _norm)
+        box, available_dates = _hydrate_live_box_scores(
+            box,
+            gradeable["game_date"].dropna().astype(str).unique(),
+            _norm,
+            context_label="[1.6] ",
         )
-        if missing_dates:
-            try:
-                from nba_api.stats.endpoints import leaguegamelog
-                import time as _time2
-                for md in missing_dates:
-                    try:
-                        gl = leaguegamelog.LeagueGameLog(
-                            season="2025-26",
-                            date_from_nullable=pd.to_datetime(md).strftime("%m/%d/%Y"),
-                            date_to_nullable=pd.to_datetime(md).strftime("%m/%d/%Y"),
-                            player_or_team_abbreviation="P",
-                        )
-                        api_df = gl.get_data_frames()[0]
-                        if not api_df.empty:
-                            col_map = {
-                                "PLAYER_NAME": "player", "GAME_DATE": "game_date",
-                                "PTS": "pts", "REB": "trb", "AST": "ast",
-                                "STL": "stl", "BLK": "blk", "TOV": "tov",
-                            }
-                            api_df = api_df.rename(columns=col_map)
-                            api_df["game_date"] = pd.to_datetime(api_df["game_date"]).dt.strftime("%Y-%m-%d")
-                            for col in ["pts", "trb", "ast", "stl", "blk", "tov"]:
-                                api_df[col] = pd.to_numeric(api_df[col], errors="coerce").fillna(0)
-                            api_df["pra"] = api_df["pts"] + api_df["trb"] + api_df["ast"]
-                            api_df["pr"]  = api_df["pts"] + api_df["trb"]
-                            api_df["pa"]  = api_df["pts"] + api_df["ast"]
-                            api_df["ra"]  = api_df["trb"] + api_df["ast"]
-                            api_df["player_norm"] = api_df["player"].apply(_norm)
-                            box = pd.concat([box, api_df], ignore_index=True)
-                            available_dates.add(md)
-                            logger.info(f"  [1.6] Live-fetched {len(api_df)} rows for betslip grading on {md}")
-                        _time2.sleep(1)
-                    except Exception as e:
-                        logger.warning(f"  [1.6] Could not fetch {md} from nba_api: {e}")
-            except ImportError:
-                logger.warning("  [1.6] nba_api not available for betslip live-fetch")
 
         prop_map = {
             "PTS": "pts", "TRB": "trb", "AST": "ast", "STL": "stl",
@@ -873,11 +1042,23 @@ def step1_6_grade_betslips(errors):
 
         if newly_graded > 0:
             _atomic_csv(slips, betslips_path)
+            synced_dates, latest_synced = _sync_betslip_views_from_history(slips)
+            if synced_dates:
+                logger.info(
+                    f"  Synced betslip daily archives for {len(synced_dates)} dates"
+                    f"{' and refreshed betslips_latest.csv' if latest_synced else ''}"
+                )
             graded_now = slips[~_blank_text_mask(slips["result"])]
             wins = (graded_now["result"] == "WIN").sum()
             total = len(graded_now)
             _ok(f"Betslips: {wins}/{total} all-time | {newly_graded} newly graded")
         else:
+            synced_dates, latest_synced = _sync_betslip_views_from_history(slips)
+            if synced_dates:
+                logger.info(
+                    f"  Synced betslip daily archives for {len(synced_dates)} dates"
+                    f"{' and refreshed betslips_latest.csv' if latest_synced else ''}"
+                )
             _ok("No betslips could be graded (box scores unavailable)")
     except Exception as exc:
         _warn(f"Betslip grading failed (non-fatal): {exc}")
@@ -886,7 +1067,7 @@ def step1_6_grade_betslips(errors):
 # ── Step 2: PrizePicks Lines ───────────────────────────────────────────────────
 
 def step2_prizepicks(args, errors):
-    _step_header(2, "PrizePicks Lines  (prizepicks_scraper → historical_lines.csv)")
+    _step_header(2, "PrizePicks Snapshot  (live card source + history)")
     try:
         from prizepicks_scraper import save_lines
         save_lines(output_path=str(LINES_CSV))
@@ -898,6 +1079,65 @@ def step2_prizepicks(args, errors):
         errors.append(f"PrizePicks lines: {exc}")
 
 
+def step2_5_start_prizepicks_closing_capture(args, errors):
+    """Start the detached T-60/T-5 PrizePicks watcher for today's slate."""
+    if args.skip_pp_closing_capture:
+        logger.info("Skipping PrizePicks T-60/T-5 watcher (--skip-pp-closing-capture)")
+        return
+    watcher = SCRIPT_DIR / "scripts" / "capture_prizepicks_closing_snapshots.py"
+    watcher_log = LOG_DIR / "prizepicks_snapshot_watcher.log"
+    try:
+        log_handle = watcher_log.open("a", encoding="utf-8")
+        popen_kwargs = {
+            "cwd": str(SCRIPT_DIR),
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+            "stdin": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+        else:
+            popen_kwargs["start_new_session"] = True
+        command = [
+            sys.executable,
+            str(watcher),
+            "--watch",
+            "--date",
+            datetime.now().strftime("%Y-%m-%d"),
+        ]
+        pair_requested = bool(getattr(args, "pair_sportsbook_t60", False))
+        if pair_requested:
+            from nba_props import CONFIG as MODEL_CONFIG
+            spend_allowed = bool(MODEL_CONFIG.get("allow_live_odds_api_spend", False))
+            credit_budget = int(MODEL_CONFIG.get("odds_api_credit_reserve", 0) or 0)
+            if not spend_allowed:
+                _warn(
+                    "Sportsbook T-60 pairing requested but blocked because "
+                    "CONFIG['allow_live_odds_api_spend'] is False"
+                )
+            elif credit_budget <= 0:
+                _warn("Sportsbook T-60 pairing requested but the configured credit budget is zero")
+            else:
+                command.extend([
+                    "--pair-sportsbook-t60",
+                    "--odds-credit-budget",
+                    str(credit_budget),
+                ])
+                logger.warning(
+                    "  PAID sportsbook T-60 pairing explicitly enabled; lifetime cap=%s credits",
+                    credit_budget,
+                )
+        else:
+            logger.info("  Sportsbook T-60 pairing disabled by default (PrizePicks-only watcher)")
+        subprocess.Popen(command, **popen_kwargs)
+        log_handle.close()
+        _ok(f"PrizePicks T-60/T-5 watcher started (log: {watcher_log.name})")
+    except Exception as exc:
+        _warn(f"PrizePicks closing watcher did not start: {exc}")
+        logger.debug(exc, exc_info=True)
+        errors.append(f"PrizePicks closing watcher: {exc}")
+
+
 # ── Step 3: Layer 5 — Blowout Discount Index ──────────────────────────────────
 
 def step3_blowout_index(args, errors):
@@ -905,10 +1145,21 @@ def step3_blowout_index(args, errors):
     try:
         from blowout_discount_model import build_game_blowout_index
 
+        active_season = _active_season(args)
+
         # Rebuild index daily — it's fast (one API call for the full game log)
         logger.info("  Building game blowout index...")
-        blowout_index = build_game_blowout_index(season="2025-26")
-        blowout_index.to_csv(BLOWOUT_INDEX, index=False)
+        blowout_index = build_game_blowout_index(season=active_season)
+        if blowout_index is None or len(blowout_index) == 0:
+            raise ValueError(
+                f"blowout index returned 0 games for {active_season}; "
+                f"preserving the existing {BLOWOUT_INDEX.name}"
+            )
+        _atomic_csv(blowout_index, BLOWOUT_INDEX)
+        _atomic_csv(
+            blowout_index,
+            LAYER_SNAPSHOT_DIR / f"game_blowout_index_{active_season}.csv",
+        )
 
         tier_counts = blowout_index["blowout_tier"].value_counts()
         _ok(
@@ -924,7 +1175,7 @@ def step3_blowout_index(args, errors):
         rebuild_baselines = True
         if CLEAN_BASELINES.exists():
             age_hours = (time.time() - CLEAN_BASELINES.stat().st_mtime) / 3600
-            if age_hours < 12:
+            if age_hours < 12 and _csv_has_rows(CLEAN_BASELINES):
                 rebuild_baselines = False
                 _ok(f"Clean baselines are fresh ({age_hours:.1f}h old) — skipping rebuild")
 
@@ -947,7 +1198,7 @@ def step3_blowout_index(args, errors):
             logger.info("  Fetching active player list for clean baselines...")
             time.sleep(0.65)
             player_df = leaguedashplayerstats.LeagueDashPlayerStats(
-                season="2025-26",
+                season=active_season,
                 per_mode_detailed="PerGame",
                 measure_type_detailed_defense="Base"
             ).get_data_frames()[0]
@@ -975,14 +1226,24 @@ def step3_blowout_index(args, errors):
             baselines = build_clean_baselines(
                 player_ids,
                 blowout_index,
-                "2025-26",
+                active_season,
                 last_n=20,
                 request_delay=player_log_delay,
                 request_retries=player_log_retries,
                 retry_backoff=player_log_retry_backoff,
                 failure_cooldown=player_log_failure_cooldown,
             )
-            baselines.to_csv(CLEAN_BASELINES, index=False)
+            if baselines is None or len(baselines) == 0:
+                _warn(
+                    f"No players qualify for clean baselines yet (need GP>={MIN_GP_FOR_BASELINE}); "
+                    f"keeping existing {CLEAN_BASELINES.name} - not overwritten with an empty file"
+                )
+                return
+            _atomic_csv(baselines, CLEAN_BASELINES)
+            _atomic_csv(
+                baselines,
+                LAYER_SNAPSHOT_DIR / f"player_clean_baselines_{active_season}.csv",
+            )
             coverage_pct = 100.0 * len(baselines) / len(active) if len(active) > 0 else 0.0
             _ok(
                 f"Clean baselines: {len(baselines)}/{len(active)} qualifying players "
@@ -1002,16 +1263,18 @@ def step4_pbp_fetch(args, errors):
     try:
         from pbp_fetcher import fetch_season
 
+        active_season = _active_season(args)
+
         # Only fetch the last 7 days of PBP — full season fetch is too slow for daily use
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
         if args.full_refresh:
-            logger.info("  Full refresh: fetching entire 2025-26 PBP season (slow)...")
-            fetch_season("2025-26")
+            logger.info(f"  Full refresh: fetching entire {active_season} PBP season (slow)...")
+            fetch_season(active_season)
         else:
             logger.info(f"  Incremental: fetching PBP for {start_date} -> {end_date}")
-            fetch_season("2025-26", start_date=start_date, end_date=end_date)
+            fetch_season(active_season, start_date=start_date, end_date=end_date)
 
         # Always rebuild master from all available per-game files
         from pbp_fetcher import merge_possession_summaries
@@ -1064,7 +1327,7 @@ def step5_ppp_engine(errors):
 
 # ── Step 6: Layer 3 — Usage & Injury Model ────────────────────────────────────
 
-def step6_usage_injury(errors):
+def step6_usage_injury(errors, season=None):
     _step_header(6, "Layer 3 — Usage & Injury Model")
     try:
         from usage_injury_model import (
@@ -1073,11 +1336,13 @@ def step6_usage_injury(errors):
         )
         import pandas as pd
 
+        active_season = season or _active_season()
+
         # Rebuild profiles only if stale (>12 hours old)
         rebuild = True
         if PLAYER_PROFILES.exists():
             age_hours = _file_age_hours(PLAYER_PROFILES) or 0.0
-            if age_hours < 12:
+            if age_hours < 12 and _csv_has_rows(PLAYER_PROFILES):
                 rebuild = False
                 _ok(f"Player profiles are fresh ({age_hours:.1f}h old) — skipping rebuild")
 
@@ -1086,14 +1351,20 @@ def step6_usage_injury(errors):
             try:
                 profiles = _retry_step_call(
                     "Player profile rebuild",
-                    lambda: build_player_profiles(season="2025-26"),
+                    lambda: build_player_profiles(season=active_season),
                     attempts=2,
                     delay_s=12.0,
                 )
+                if profiles is None or len(profiles) == 0:
+                    raise ValueError("profile build returned 0 players (too early in the season); not overwriting")
                 _atomic_csv(profiles, PLAYER_PROFILES)
+                _atomic_csv(
+                    profiles,
+                    LAYER_SNAPSHOT_DIR / f"player_profiles_{active_season}.csv",
+                )
                 _ok(f"Player profiles: {len(profiles)} players → {PLAYER_PROFILES.name}")
             except Exception as exc:
-                if not PLAYER_PROFILES.exists():
+                if not _csv_has_rows(PLAYER_PROFILES):
                     raise
                 age_hours = _file_age_hours(PLAYER_PROFILES) or 0.0
                 _warn(
@@ -1109,7 +1380,7 @@ def step6_usage_injury(errors):
         all_absences = []
         for team in teams:
             try:
-                absences = detect_recent_absences(profiles, team, season="2025-26")
+                absences = detect_recent_absences(profiles, team, season=active_season)
                 if absences:
                     all_absences.extend(absences)
                 time.sleep(0.3)
@@ -1156,11 +1427,12 @@ def step6_usage_injury(errors):
 
 # ── Step 7: Layer 4 — Luck & Regression Model ─────────────────────────────────
 
-def step7_luck_model(errors):
+def step7_luck_model(errors, season=None):
     _step_header(7, "Layer 4 — Luck & Regression Model")
     try:
         import pandas as pd
         from luck_regression_model import build_player_luck_scores
+        active_season = season or _active_season()
         # Layer 3 makes 30+ API calls — give the NBA API a cooldown before hitting it again
         logger.info("  Waiting 15s for API rate-limit cooldown after Layer 3...")
         time.sleep(15)
@@ -1168,7 +1440,7 @@ def step7_luck_model(errors):
         try:
             luck_df = _retry_step_call(
                 "Luck model rebuild",
-                lambda: build_player_luck_scores(season="2025-26"),
+                lambda: build_player_luck_scores(season=active_season),
                 attempts=2,
                 delay_s=15.0,
             )
@@ -1198,10 +1470,95 @@ def step7_luck_model(errors):
 
 # ── Step 8: Merge All Layers → player_projections_today.csv ──────────────────
 
-def step8_merge_projections(errors):
+# Set when step 8 (merge projections) fails, so step 9 can refuse to pick from stale projections.
+_RUN_STATE = {"projections_step_failed": False}
+STALE_PROJECTIONS_BLOCK_HOURS = 48
+
+
+def _csv_has_rows(path) -> bool:
+    """True only if the CSV exists and holds at least one data row.
+
+    An empty or header-only file (e.g. early season, before any player has enough games)
+    is not usable as a layer input and must not count as 'fresh' or 'present'.
+    """
+    try:
+        if not path.exists() or path.stat().st_size < 2:
+            return False
+        import pandas as pd
+
+        return len(pd.read_csv(path, nrows=1)) > 0
+    except Exception:
+        return False
+
+
+def _apply_current_roster_team(proj, season):
+    """Set team_abbr from the official current-season roster.
+
+    Base projections take team_abbr from each player's last logged game, which is stale
+    for anyone traded or signed since (all offseason, and until the player logs a game
+    this season). The official roster (data/reference/official_rosters) is current.
+    Matches on player_id first, then on normalized name. Players not on the roster file
+    keep their existing team_abbr. Fails soft: any problem leaves proj unchanged.
+    """
+    import pandas as pd
+
+    path = DATA_DIR / "reference" / "official_rosters" / f"official_roster_{season}.csv"
+    if not path.exists():
+        logger.warning(f"  Roster team override skipped: {path.name} not found")
+        return proj
+    try:
+        roster = pd.read_csv(path, low_memory=False)
+        need = {"player_name", "player_id", "team_abbr"}
+        if roster.empty or not need.issubset(roster.columns):
+            logger.warning(f"  Roster team override skipped: {path.name} empty or missing columns")
+            return proj
+        roster = roster.dropna(subset=list(need)).copy()
+        roster["player_id"] = pd.to_numeric(roster["player_id"], errors="coerce")
+        roster = roster.dropna(subset=["player_id"])
+        roster["player_id"] = roster["player_id"].astype(int)
+        roster["team_abbr"] = roster["team_abbr"].astype(str).str.upper().str.strip()
+        roster["_norm"] = roster["player_name"].apply(_normalize_player_name)
+
+        by_id = dict(zip(roster["player_id"], roster["team_abbr"]))
+        uniq = roster.drop_duplicates("_norm", keep=False)  # ambiguous names are not matched
+        by_name = dict(zip(uniq["_norm"], uniq["team_abbr"]))
+
+        new_team = pd.Series(index=proj.index, dtype=object)
+        if "player_id" in proj.columns:
+            ids = pd.to_numeric(proj["player_id"], errors="coerce")
+            new_team = ids.map(lambda v: by_id.get(int(v)) if pd.notna(v) else None)
+        missing = new_team.isna()
+        if missing.any():
+            fallback = proj.loc[missing, "player"].apply(_normalize_player_name).map(by_name)
+            new_team.loc[missing] = fallback
+
+        old_team = proj["team_abbr"].astype(str).str.upper().str.strip()
+        changed = new_team.notna() & (new_team != old_team)
+        matched = int(new_team.notna().sum())
+        if changed.any():
+            sample = ", ".join(
+                f"{p} {o}->{n}" for p, o, n in zip(
+                    proj.loc[changed, "player"].head(5), old_team[changed].head(5), new_team[changed].head(5)
+                )
+            )
+            logger.info(f"  Roster team override: {int(changed.sum())} players updated (e.g. {sample})")
+        else:
+            logger.info("  Roster team override: no team changes found")
+        logger.info(f"  Roster match: {matched}/{len(proj)} players on {path.name}")
+        proj = proj.copy()
+        proj.loc[new_team.notna(), "team_abbr"] = new_team[new_team.notna()]
+        return proj
+    except Exception as exc:
+        logger.warning(f"  Roster team override failed ({exc}); keeping last-game teams")
+        return proj
+
+
+def step8_merge_projections(errors, season=None):
     _step_header(8, "Merge All Layers → player_projections_today.csv")
     try:
         import pandas as pd
+
+        active_season = season or _active_season()
 
         # Preserve the current working file before overwriting it, if it was never archived.
         if PROJECTIONS_TODAY.exists():
@@ -1255,8 +1612,11 @@ def step8_merge_projections(errors):
         # Add normalized name key to proj once — used for all name-based merges below
         proj["player_norm"] = proj["player"].apply(_normalize_player_name)
 
+        # Use the current official roster for team_abbr (traded players keep a stale team otherwise)
+        proj = _apply_current_roster_team(proj, active_season)
+
         # ── Merge Layer 5: Blowout-clean baselines ────────────────────────────
-        if CLEAN_BASELINES.exists():
+        if _csv_has_rows(CLEAN_BASELINES):
             logger.info("  Merging Layer 5 (blowout-clean baselines)...")
             bl = pd.read_csv(CLEAN_BASELINES)[
                 ["player_name", "clean_pts", "clean_reb", "clean_ast",
@@ -1270,7 +1630,7 @@ def step8_merge_projections(errors):
             merged_count = proj["clean_pts"].notna().sum()
             _ok(f"Layer 5 merged: {merged_count} players have blowout-clean baselines")
         else:
-            _warn("Clean baselines not found — Layer 5 not merged")
+            _warn("Clean baselines missing or empty — Layer 5 not merged (projections fall back to raw L20)")
 
         # ── Merge Layer 2: Opponent-adjusted PPP ─────────────────────────────
         if PLAYER_ADJ_PPP.exists():
@@ -1295,7 +1655,7 @@ def step8_merge_projections(errors):
             _warn("player_adj_ppp.csv not found — Layer 2 not merged")
 
         # ── Merge Layer 3: Usage profiles ─────────────────────────────────────
-        if PLAYER_PROFILES.exists():
+        if _csv_has_rows(PLAYER_PROFILES):
             logger.info("  Merging Layer 3 (usage profiles)...")
             prof = pd.read_csv(PLAYER_PROFILES)
             # profiles uses player_name (lowercase); normalize for diacritic-safe merge
@@ -1480,7 +1840,7 @@ def step8_merge_projections(errors):
         # Add metadata
         run_dt = datetime.now()
         proj["generated_at"] = run_dt.strftime("%Y-%m-%d %H:%M:%S")
-        proj["season"] = "2025-26"
+        proj["season"] = active_season
 
         # Sort by projected points descending
         proj = proj.sort_values("proj_pts_final", ascending=False)
@@ -1560,6 +1920,7 @@ def step8_merge_projections(errors):
         _fail(f"Merge step failed: {exc}")
         logger.debug(exc, exc_info=True)
         errors.append(f"Step 8 Merge: {exc}")
+        _RUN_STATE["projections_step_failed"] = True
 
 
 def step8_5_weekly_maintenance(args, errors):
@@ -1570,37 +1931,127 @@ def step8_5_weekly_maintenance(args, errors):
         logger.info("Skipping weekly maintenance (runs automatically on Sunday only)")
         return
 
-    _section("WEEKLY MODEL MAINTENANCE")
-    _run_python_step(
+    _section("WEEKLY ISOLATED MODEL MAINTENANCE")
+    production_before = _production_model_hashes()
+    run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate_dir = MODEL_DIR / "weekly_candidates" / run_stamp
+    comparison_detail = OUTPUT_DIR / f"weekly_candidate_{run_stamp}_same_row_oof.csv"
+    comparison_summary = OUTPUT_DIR / f"weekly_candidate_{run_stamp}_same_row_oof_summary.json"
+
+    def _stop(message: str) -> None:
+        _warn(message)
+        _record_production_immutability_failure(production_before, errors)
+
+    team_logs_ok = _run_python_step(
         "8.5a",
+        "Weekly Team-Game Log Refresh",
+        ["scripts/fetch_nba_team_game_logs.py", "--seasons", _active_season(args)],
+        errors,
+        "Weekly team-game log refresh",
+        "Weekly team-game log refresh complete",
+    )
+    if not team_logs_ok:
+        _stop("Skipping weekly candidate build because team-game logs did not refresh")
+        return
+
+    features_ok = _run_python_step(
+        "8.5b",
         "Weekly Feature Pipeline Rebuild",
         ["feature_pipeline.py"],
         errors,
         "Weekly feature rebuild",
         "Weekly feature rebuild complete",
     )
-    _run_python_step(
-        "8.5b",
-        "Weekly Advanced Model Retrain",
-        ["train_advanced_models.py"],
-        errors,
-        "Weekly advanced retrain",
-        "Weekly advanced retrain complete",
-    )
-    _run_python_step(
+    if not features_ok:
+        _stop("Skipping weekly candidate build because the feature rebuild failed")
+        return
+
+    ratings_ok = _run_python_step(
         "8.5c",
-        "Weekly Confidence Calibration",
-        ["calibrate_confidence.py"],
+        "Weekly Point-in-Time Defense Rebuild",
+        ["scripts/build_pointintime_team_defense.py"],
         errors,
-        "Weekly confidence calibration",
-        "Weekly confidence calibration complete",
+        "Weekly point-in-time defense rebuild",
+        "Weekly point-in-time defense rebuild complete",
     )
+    if not ratings_ok:
+        _stop("Skipping weekly candidate build because point-in-time defense failed")
+        return
+
+    joined_ok = _run_python_step(
+        "8.5d",
+        "Weekly Defense Training Join",
+        ["scripts/build_prop_defense_rating_training_data.py"],
+        errors,
+        "Weekly defense training join",
+        "Weekly defense training join complete",
+    )
+    if not joined_ok:
+        _stop("Skipping weekly candidate build because the defense join failed")
+        return
+
+    retrain_ok = _run_python_step(
+        "8.5e",
+        "Weekly Isolated Advanced Candidate",
+        [
+            "train_advanced_models.py",
+            "--input", "data/model_data_defenserating_advanced.csv",
+            "--model-dir", str(candidate_dir),
+            "--require-defense-rating-features",
+            "--no-auto-build-features",
+        ],
+        errors,
+        "Weekly isolated advanced candidate",
+        "Weekly isolated advanced candidate complete",
+    )
+    if not retrain_ok:
+        _stop("Weekly candidate training failed; production remains unchanged")
+        return
+
+    comparison_ok = _run_python_step(
+        "8.5f",
+        "Weekly Candidate Same-Row OOF Audit",
+        [
+            "scripts/evaluate_defense_rating_retrain.py",
+            "--production", "models/probability_oof_advanced.csv",
+            "--candidate", str(candidate_dir / "probability_oof_advanced.csv"),
+            "--production-features", "models/selected_features_advanced.json",
+            "--candidate-features", str(candidate_dir / "selected_features_advanced.json"),
+            "--detail", str(comparison_detail),
+            "--summary", str(comparison_summary),
+        ],
+        errors,
+        "Weekly candidate OOF audit",
+        "Weekly candidate OOF audit complete",
+    )
+    if not comparison_ok:
+        _stop("Weekly candidate audit failed; production remains unchanged")
+        return
+
+    if not _record_production_immutability_failure(production_before, errors):
+        return
+    logger.info(f"  Candidate retained for review: {candidate_dir}")
+    logger.info(f"  Comparison retained for review: {comparison_summary}")
+    logger.info("  Production models were not promoted or recalibrated")
 
 
 def step9_generate_picks(args, errors):
     if args.skip_picks:
         logger.info("Skipping live pick generation (--skip-picks)")
         return
+
+    if _RUN_STATE["projections_step_failed"]:
+        proj_age = _file_age_hours(PROJECTIONS_TODAY)
+        if proj_age is None or proj_age > STALE_PROJECTIONS_BLOCK_HOURS:
+            age_text = "missing" if proj_age is None else f"{proj_age:.0f}h old"
+            msg = (
+                f"Step 8 failed and {PROJECTIONS_TODAY.name} is {age_text} - "
+                f"NOT generating picks from stale projections"
+            )
+            _fail(msg)
+            errors.append(f"Live pick generation: {msg}")
+            return
+        _warn(f"Step 8 failed; picks will use projections from {proj_age:.1f}h ago")
 
     ok = _run_python_step(
         9,
@@ -1616,7 +2067,7 @@ def step9_generate_picks(args, errors):
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def main():
+def main() -> int:
     _banner()
 
     parser = argparse.ArgumentParser(
@@ -1627,7 +2078,7 @@ def main():
     parser.add_argument("--full-refresh",  action="store_true",
                         help="Re-pull all seasons from scratch (slow). Use once or after a long gap.")
     parser.add_argument("--lines-only",    action="store_true",
-                        help="Only update PrizePicks lines; skip game logs and layers.")
+                        help="Only update the PrizePicks history snapshot; skip game logs, layers, and picks.")
     parser.add_argument("--logs-only",     action="store_true",
                         help="Only update NBA game logs; skip PrizePicks lines.")
     parser.add_argument("--skip-layers",   action="store_true",
@@ -1636,6 +2087,10 @@ def main():
                         help="Skip data fetch; only run the 5 model layers.")
     parser.add_argument("--skip-picks",    action="store_true",
                         help="Skip live pick generation at the end of the daily run.")
+    parser.add_argument("--skip-pp-closing-capture", action="store_true",
+                        help="Do not launch the background PrizePicks T-60/T-5 watcher.")
+    parser.add_argument("--pair-sportsbook-t60", action="store_true",
+                        help="Explicitly request paid sportsbook pairing at T-60; also requires allow_live_odds_api_spend=True.")
     parser.add_argument("--skip-weekly-retrain", action="store_true",
                         help="Skip automatic Sunday feature/model/calibration refresh.")
     parser.add_argument("--seasons",       nargs="+", default=None, metavar="SEASON",
@@ -1644,6 +2099,8 @@ def main():
 
     start_time = time.time()
     errors = []
+    active_season = _active_season(args)
+    logger.info(f"Active NBA season contract: {active_season}")
 
     # ── Data Fetch Phase ──────────────────────────────────────────────────────
     if not args.layers_only:
@@ -1656,6 +2113,7 @@ def main():
 
         if not args.logs_only:
             step2_prizepicks(args, errors)
+            step2_5_start_prizepicks_closing_capture(args, errors)
         else:
             logger.info("Skipping PrizePicks lines (--logs-only mode)")
 
@@ -1664,9 +2122,9 @@ def main():
         step3_blowout_index(args, errors)
         step4_pbp_fetch(args, errors)
         step5_ppp_engine(errors)
-        step6_usage_injury(errors)
-        step7_luck_model(errors)
-        step8_merge_projections(errors)
+        step6_usage_injury(errors, season=active_season)
+        step7_luck_model(errors, season=active_season)
+        step8_merge_projections(errors, season=active_season)
         step8_5_weekly_maintenance(args, errors)
 
     if not args.lines_only and not args.logs_only:
@@ -1682,15 +2140,15 @@ def main():
         logger.info(f"  Projections ready: {PROJECTIONS_TODAY}")
 
     if errors:
-        logger.warning(f"\n  {len(errors)} non-fatal error(s):")
+        logger.warning(f"\n  Pipeline completed with {len(errors)} error(s):")
         for e in errors:
             logger.warning(f"    [FAIL] {e}")
-        logger.info("  (Non-fatal errors do not stop the pipeline)")
     else:
         logger.info("  All steps completed successfully")
 
     logger.info("=" * 65)
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

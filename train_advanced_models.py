@@ -18,6 +18,7 @@ from sklearn.preprocessing import StandardScaler
 import json
 import pickle
 import time
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import warnings
@@ -38,6 +39,18 @@ from probability_utils import (
     tail_threshold_tag,
 )
 warnings.filterwarnings('ignore')
+
+
+PROBABILITY_BUNDLE_SCHEMA_VERSION = 1
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 digest used to bind probability artifacts together."""
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 # ── Per-target regression hyperparameters ─────────────────────────────────────
 # Tuned for each stat's distribution: range, skew, and predictability.
@@ -138,27 +151,31 @@ META_CLASSIFIER_PARAMS: Dict[str, Dict] = {
 
 BLEND_REGRESSION_TARGETS = {'pts', 'trb', 'ast'}
 BLEND_BASE_MODEL_ORDER = ['xgb', 'etr', 'bayes', 'fp']
+AVAILABILITY_MINUTES_PROP_FEATURES = [
+    'availability_probability',
+    'conditional_minutes_prediction',
+    'expected_minutes_prediction',
+]
+DEFENSE_RATING_PROP_FEATURES = [
+    'opp_def_rtg_pt',
+    'opp_pace_pt',
+    'opp_def_tier_pt',
+]
 
 # ── Season recency weights ─────────────────────────────────────────────────────
-SEASON_WEIGHTS = {
-    '2025-26': (pd.Timestamp('2025-10-01'), None,                      3.0),
-    '2024-25': (pd.Timestamp('2024-10-01'), pd.Timestamp('2025-10-01'), 2.0),
-    '2023-24': (None,                       pd.Timestamp('2024-10-01'), 1.0),
-}
-
-
 def _get_sample_weights(df: pd.DataFrame) -> np.ndarray:
-    """Return per-row training weights based on game season (recency bias)."""
-    dates = pd.to_datetime(df['game_date'])
-    w = np.ones(len(df))
-    for season, (lo, hi, weight) in SEASON_WEIGHTS.items():
-        mask = np.ones(len(df), dtype=bool)
-        if lo is not None:
-            mask &= (dates >= lo).values
-        if hi is not None:
-            mask &= (dates < hi).values
-        w[mask] = weight
-    return w
+    """Weight the newest NBA season 3x, the previous season 2x, and older rows 1x."""
+    dates = pd.to_datetime(df['game_date'], errors='raise')
+    season_start_year = np.where(dates.dt.month >= 10, dates.dt.year, dates.dt.year - 1)
+    observed = sorted(pd.Series(season_start_year).dropna().astype(int).unique())
+    if not observed:
+        return np.ones(len(df), dtype=float)
+    newest = observed[-1]
+    weights = np.ones(len(df), dtype=float)
+    weights[season_start_year == newest] = 3.0
+    if len(observed) >= 2:
+        weights[season_start_year == observed[-2]] = 2.0
+    return weights
 
 
 def _print_calibration(records: list, target: str, label: str = "real lines") -> None:
@@ -385,6 +402,25 @@ def _load_lines_lookup() -> dict:
         df['player_norm'] = df['player'].apply(_norm)
     df['target'] = df['prop'].map(PROP_TO_TARGET)
     df = df.dropna(subset=['target'])
+    if 'source' not in df.columns:
+        df['source'] = 'unknown'
+    if 'snapshot_ts' not in df.columns:
+        df['snapshot_ts'] = 'unknown'
+    source = df['source'].fillna('unknown').astype(str).str.lower()
+    df['_source_priority'] = np.select(
+        [source.str.contains('fanduel'), source.str.contains('prizepicks'), source.str.contains('odds_api')],
+        [3, 2, 1],
+        default=0,
+    )
+    df['_snapshot_sort'] = pd.to_datetime(df['snapshot_ts'], errors='coerce', utc=True)
+    if 'commence_time' in df.columns:
+        commence = pd.to_datetime(df['commence_time'], errors='coerce', utc=True)
+        df = df[df['_snapshot_sort'].isna() | commence.isna() | df['_snapshot_sort'].le(commence)].copy()
+    df = df.sort_values(
+        ['game_date', 'player_norm', 'target', '_source_priority', '_snapshot_sort'],
+        kind='stable',
+        na_position='first',
+    ).drop_duplicates(['game_date', 'player_norm', 'target'], keep='last')
 
     lookup = {}
     for _, row in df.iterrows():
@@ -1005,6 +1041,8 @@ class AdvancedPropModel:
     
     # Feature groups
     FEATURE_GROUPS = {
+        'availability_minutes_oof': AVAILABILITY_MINUTES_PROP_FEATURES,
+        'point_in_time_team_defense': DEFENSE_RATING_PROP_FEATURES,
         'core_rolling': [
             'pts_l5', 'pts_l10', 'pts_l20',
             'trb_l5', 'trb_l10', 'trb_l20',
@@ -1631,14 +1669,60 @@ class AdvancedPropModel:
             ['game_date', 'target']
         ).reset_index(drop=True)
 
-    def fit_probability_calibrators(self) -> Dict[str, object]:
+    def fit_probability_calibrators(self, holdout_dates: int = 20) -> Dict[str, object]:
+        """Fit calibration on earlier OOF dates and reserve the latest dates for audit."""
         prob_oof = self.get_probability_oof_frame()
         if len(prob_oof) == 0:
             self.probability_calibrators = {}
             self.probability_diagnostics = {}
             return {'calibrators': {}, 'diagnostics': {}}
         real_only = prob_oof[prob_oof['line_source'].eq('real')].copy()
-        calibrators, diagnostics = fit_isotonic_calibrators(real_only)
+        real_only['game_date'] = pd.to_datetime(real_only['game_date'], errors='raise')
+        unique_dates = sorted(real_only['game_date'].dt.normalize().unique())
+        if holdout_dates < 1 or len(unique_dates) <= holdout_dates:
+            raise ValueError(
+                'Probability calibration requires at least one fit date plus '
+                f'{holdout_dates} reserved holdout dates; found {len(unique_dates)} dates'
+            )
+        holdout_start = pd.Timestamp(unique_dates[-holdout_dates])
+        fit_rows = real_only[real_only['game_date'] < holdout_start].copy()
+        holdout_rows = real_only[real_only['game_date'] >= holdout_start].copy()
+        calibrators, fit_diagnostics = fit_isotonic_calibrators(fit_rows)
+
+        holdout_diagnostics = {}
+        for target, target_rows in holdout_rows.groupby('target'):
+            valid = target_rows[['actual_over', 'p_over_raw']].dropna()
+            if len(valid) == 0:
+                continue
+            raw = valid['p_over_raw'].astype(float).values
+            calibrated = apply_isotonic_calibrators(raw, str(target), calibrators)
+            holdout_diagnostics[str(target)] = {
+                'n_rows': int(len(valid)),
+                'raw': compute_binary_probability_metrics(
+                    valid['actual_over'].astype(int).values,
+                    raw,
+                ),
+                'calibrated': compute_binary_probability_metrics(
+                    valid['actual_over'].astype(int).values,
+                    calibrated,
+                ),
+            }
+
+        diagnostics = {
+            'split': {
+                'method': 'chronological_latest_dates_holdout',
+                'fit_rows': int(len(fit_rows)),
+                'fit_dates': int(fit_rows['game_date'].dt.normalize().nunique()),
+                'fit_date_min': fit_rows['game_date'].min().date().isoformat(),
+                'fit_date_max': fit_rows['game_date'].max().date().isoformat(),
+                'holdout_rows': int(len(holdout_rows)),
+                'holdout_dates': int(holdout_rows['game_date'].dt.normalize().nunique()),
+                'holdout_date_min': holdout_rows['game_date'].min().date().isoformat(),
+                'holdout_date_max': holdout_rows['game_date'].max().date().isoformat(),
+            },
+            'fit': fit_diagnostics,
+            'holdout': holdout_diagnostics,
+        }
         self.probability_calibrators = calibrators
         self.probability_diagnostics = diagnostics
         return {'calibrators': calibrators, 'diagnostics': diagnostics}
@@ -2450,6 +2534,38 @@ class AdvancedPropModel:
                     pass
             probability_oof.sort_values(['target', 'game_date']).to_csv(probability_oof_path, index=False)
 
+        if self.probability_sidecars:
+            if len(probability_oof) == 0:
+                raise RuntimeError('Probability sidecars cannot be saved without OOF rows')
+            if not self.probability_calibrators or not self.probability_diagnostics:
+                raise RuntimeError(
+                    'Probability sidecars cannot be saved without a fitted chronological calibrator. '
+                    'Call fit_probability_calibrators() before save_models().'
+                )
+            sidecar_hashes = {
+                target: _sha256_file(self.model_dir / f'prob_sidecar_{target}{suffix}.pkl')
+                for target in sorted(self.probability_sidecars)
+            }
+            contract = {
+                'schema_version': PROBABILITY_BUNDLE_SCHEMA_VERSION,
+                'targets': sorted(self.probability_sidecars),
+                'sidecar_sha256': sidecar_hashes,
+                'oof_sha256': _sha256_file(probability_oof_path),
+            }
+            calibrator_path = self.model_dir / f'probability_calibrator{suffix}.pkl'
+            with open(calibrator_path, 'wb') as f:
+                pickle.dump({
+                    'calibrators': self.probability_calibrators,
+                    'diagnostics': self.probability_diagnostics,
+                    'sidecar_contract': contract,
+                }, f)
+            diagnostics_path = self.model_dir / f'probability_diagnostics{suffix}.json'
+            with open(diagnostics_path, 'w') as f:
+                json.dump(_json_safe({
+                    'sidecar_contract': contract,
+                    **self.probability_diagnostics,
+                }), f, indent=2)
+
         print(f"\nModels saved to: {self.model_dir}")
     
     def load_models(self, suffix: str = ''):
@@ -2499,6 +2615,21 @@ class AdvancedPropModel:
         probability_oof_path = self.model_dir / f"probability_oof{suffix}.csv"
         if probability_oof_path.exists():
             self.probability_oof_rows = [pd.read_csv(probability_oof_path)]
+
+        calibrator_path = self.model_dir / f"probability_calibrator{suffix}.pkl"
+        if calibrator_path.exists():
+            with open(calibrator_path, 'rb') as f:
+                payload = pickle.load(f)
+            contract = payload.get('sidecar_contract') or {}
+            expected = contract.get('sidecar_sha256') or {}
+            actual = {
+                target: _sha256_file(self.model_dir / f'prob_sidecar_{target}{suffix}.pkl')
+                for target in sorted(self.probability_sidecars)
+            }
+            if expected != actual:
+                raise RuntimeError('Probability calibrator does not match the loaded sidecar bundle')
+            self.probability_calibrators = payload.get('calibrators', {})
+            self.probability_diagnostics = payload.get('diagnostics', {})
 
         print(
             f"Loaded {len(self.models)} regression + {len(self.classifiers)} classifier + "
@@ -2653,6 +2784,131 @@ def _prepare_training_frame(df: pd.DataFrame, args, trainer: AdvancedPropModel) 
     return df
 
 
+def _validate_availability_minutes_training_features(
+    df: pd.DataFrame,
+    trainer: Optional[AdvancedPropModel] = None,
+) -> Dict[str, object]:
+    """Fail closed when an availability-aware retrain lacks strict OOF features."""
+    required = [
+        *AVAILABILITY_MINUTES_PROP_FEATURES,
+        'availability_prediction_split',
+        'availability_model_train_end',
+        'game_date',
+    ]
+    missing = sorted(set(required) - set(df.columns))
+    if missing:
+        raise ValueError(
+            'Availability-aware retraining requires the merged OOF artifact; '
+            f'missing columns: {missing}. Run '
+            'scripts/build_prop_availability_training_data.py first.'
+        )
+    if df[required].isna().any().any():
+        nulls = df[required].isna().sum()
+        raise ValueError(
+            'Availability-aware training columns contain nulls: '
+            f'{nulls[nulls.gt(0)].to_dict()}'
+        )
+
+    game_dates = pd.to_datetime(df['game_date'], errors='raise')
+    train_ends = pd.to_datetime(df['availability_model_train_end'], errors='raise')
+    chronology_failures = int((train_ends >= game_dates).sum())
+    if chronology_failures:
+        raise ValueError(
+            f'Availability-aware training contains {chronology_failures} OOF chronology violations'
+        )
+
+    probability = pd.to_numeric(df['availability_probability'], errors='raise')
+    conditional = pd.to_numeric(df['conditional_minutes_prediction'], errors='raise')
+    expected = pd.to_numeric(df['expected_minutes_prediction'], errors='raise')
+    if not probability.between(0, 1).all():
+        raise ValueError('availability_probability must be between zero and one')
+    if not conditional.between(0, 48).all() or not expected.between(0, 48).all():
+        raise ValueError('Availability/minutes predictions must be between zero and 48')
+    if not np.allclose(expected, probability * conditional, rtol=1e-9, atol=1e-9):
+        raise ValueError(
+            'expected_minutes_prediction must equal availability_probability times '
+            'conditional_minutes_prediction'
+        )
+
+    feature_owner = trainer if trainer is not None else AdvancedPropModel()
+    available_features = set(feature_owner.get_feature_columns(df))
+    unregistered = sorted(set(AVAILABILITY_MINUTES_PROP_FEATURES) - available_features)
+    if unregistered:
+        raise RuntimeError(f'Availability/minutes features are not registered: {unregistered}')
+
+    return {
+        'enabled': True,
+        'rows': int(len(df)),
+        'date_min': game_dates.min().date().isoformat(),
+        'date_max': game_dates.max().date().isoformat(),
+        'chronology_violations': chronology_failures,
+        'feature_columns': AVAILABILITY_MINUTES_PROP_FEATURES,
+        'prediction_splits': sorted(df['availability_prediction_split'].astype(str).unique().tolist()),
+    }
+
+
+def _validate_defense_rating_training_features(
+    df: pd.DataFrame,
+    trainer: Optional[AdvancedPropModel] = None,
+) -> Dict[str, object]:
+    """Fail closed unless the rigorous team ratings are strictly pregame."""
+    required = [
+        *DEFENSE_RATING_PROP_FEATURES,
+        'opp_def_rank_pt',
+        'rating_asof_date',
+        'game_date',
+        'team_rating_source',
+        'opp_rating_source',
+        'n_prior_games',
+        'opp_n_prior_games',
+    ]
+    missing = sorted(set(required) - set(df.columns))
+    if missing:
+        raise ValueError(
+            'Defense-rating retraining requires the point-in-time joined artifact; '
+            f'missing columns: {missing}. Run scripts/build_pointintime_team_defense.py '
+            'and scripts/build_prop_defense_rating_training_data.py first.'
+        )
+    if df[required].isna().any().any():
+        nulls = df[required].isna().sum()
+        raise ValueError(
+            'Defense-rating training columns contain nulls: '
+            f'{nulls[nulls.gt(0)].to_dict()}'
+        )
+    game_dates = pd.to_datetime(df['game_date'], errors='raise')
+    rating_asof = pd.to_datetime(df['rating_asof_date'], errors='raise')
+    chronology_failures = int((rating_asof >= game_dates).sum())
+    if chronology_failures:
+        raise ValueError(
+            f'Defense-rating training contains {chronology_failures} chronology violations'
+        )
+    if not pd.to_numeric(df['opp_def_rtg_pt'], errors='raise').between(80, 150).all():
+        raise ValueError('opp_def_rtg_pt must be between 80 and 150')
+    if not pd.to_numeric(df['opp_pace_pt'], errors='raise').between(70, 130).all():
+        raise ValueError('opp_pace_pt must be between 70 and 130')
+    if not pd.to_numeric(df['opp_def_rank_pt'], errors='raise').between(1, 30).all():
+        raise ValueError('opp_def_rank_pt must be between 1 and 30')
+    if not pd.to_numeric(df['opp_def_tier_pt'], errors='raise').between(1, 5).all():
+        raise ValueError('opp_def_tier_pt must be between 1 and 5')
+    if (pd.to_numeric(df[['n_prior_games', 'opp_n_prior_games']].stack(), errors='raise') < 0).any():
+        raise ValueError('Defense-rating prior-game counts cannot be negative')
+
+    feature_owner = trainer if trainer is not None else AdvancedPropModel()
+    available_features = set(feature_owner.get_feature_columns(df))
+    unregistered = sorted(set(DEFENSE_RATING_PROP_FEATURES) - available_features)
+    if unregistered:
+        raise RuntimeError(f'Defense-rating features are not registered: {unregistered}')
+    return {
+        'enabled': True,
+        'rows': int(len(df)),
+        'date_min': game_dates.min().date().isoformat(),
+        'date_max': game_dates.max().date().isoformat(),
+        'chronology_violations': chronology_failures,
+        'feature_columns': DEFENSE_RATING_PROP_FEATURES,
+        'rating_source_counts': df['opp_rating_source'].astype(str).value_counts().to_dict(),
+    }
+
+
 def main():
     """Train all models with advanced features."""
     import argparse
@@ -2675,6 +2931,10 @@ def main():
                         help='Minimum prior games required after feature generation')
     parser.add_argument('--include-season-context-training', action=argparse.BooleanOptionalAction, default=False,
                         help='Use season-level enriched layer fields in training. Off by default because current historical values are hindsight aggregates.')
+    parser.add_argument('--require-availability-features', action='store_true',
+                        help='Fail unless strict OOF availability/minutes features and chronology metadata are present')
+    parser.add_argument('--require-defense-rating-features', action='store_true',
+                        help='Fail unless strict point-in-time defense ratings and chronology metadata are present')
     
     args = parser.parse_args()
     
@@ -2690,6 +2950,31 @@ def main():
     if not args.include_season_context_training:
         print("Season-context layer features are excluded from training to avoid hindsight leakage.")
     df = _prepare_training_frame(df, args, trainer)
+
+    availability_contract = None
+    if args.require_availability_features:
+        availability_contract = _validate_availability_minutes_training_features(df, trainer=trainer)
+        print(
+            "Availability/minutes OOF contract verified: "
+            f"{availability_contract['rows']:,} rows, "
+            f"{availability_contract['date_min']} to {availability_contract['date_max']}, "
+            "0 chronology violations"
+        )
+
+    defense_rating_contract = None
+    if args.require_defense_rating_features:
+        if Path(args.model_dir).resolve() == (BASE_DIR / 'models').resolve():
+            raise ValueError(
+                'Defense-rating candidates must use an isolated --model-dir; '
+                'production models cannot be overwritten by an unvalidated retrain.'
+            )
+        defense_rating_contract = _validate_defense_rating_training_features(df, trainer=trainer)
+        print(
+            "Point-in-time defense contract verified: "
+            f"{defense_rating_contract['rows']:,} rows, "
+            f"{defense_rating_contract['date_min']} to {defense_rating_contract['date_max']}, "
+            "0 chronology violations"
+        )
 
     if 'game_date' not in df.columns:
         raise ValueError("Input data must contain game_date after preparation")
@@ -2709,6 +2994,9 @@ def main():
                 results[target] = trainer.train_model(df, target, lines_lookup=lines_lookup)
             except Exception as e:
                 print(f"Error training {target}: {e}")
+
+    # Calibrate on earlier OOF dates and keep the latest 20 dates out of the fit.
+    trainer.fit_probability_calibrators(holdout_dates=20)
 
     # Save models
     trainer.save_models(suffix='_advanced')
@@ -2768,6 +3056,28 @@ def main():
     with open(probability_analysis_path, 'w') as f:
         json.dump(_json_safe(probability_payload), f, indent=2)
     print(f"Probability analysis saved to: {probability_analysis_path}")
+
+    if availability_contract is not None:
+        availability_contract.update({
+            'input': str(Path(args.input).resolve()),
+            'targets_requested': list(args.targets),
+            'targets_trained': sorted(results.keys()),
+        })
+        contract_path = Path(args.model_dir) / 'availability_feature_contract.json'
+        with open(contract_path, 'w') as f:
+            json.dump(_json_safe(availability_contract), f, indent=2)
+        print(f"Availability feature contract saved to: {contract_path}")
+
+    if defense_rating_contract is not None:
+        defense_rating_contract.update({
+            'input': str(Path(args.input).resolve()),
+            'targets_requested': list(args.targets),
+            'targets_trained': sorted(results.keys()),
+        })
+        contract_path = Path(args.model_dir) / 'defense_rating_feature_contract.json'
+        with open(contract_path, 'w') as f:
+            json.dump(_json_safe(defense_rating_contract), f, indent=2)
+        print(f"Defense-rating feature contract saved to: {contract_path}")
 
 
 if __name__ == "__main__":

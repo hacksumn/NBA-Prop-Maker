@@ -1,0 +1,30 @@
+{
+  "status": "contract_pass",
+  "grain": [
+    "GAME_ID",
+    "PLAYER_ID",
+    "team"
+  ],
+  "training_rows": 74254,
+  "live_rows": 81877,
+  "aligned_rows": 74254,
+  "selected_features": 99,
+  "status_counts": {
+    "match": 97,
+    "external_live_attachment": 2
+  },
+  "drifted_features": [],
+  "missing_features": [],
+  "affected_props": [],
+  "external_live_features": [
+    "opp_def_rtg_pt",
+    "opp_pace_pt"
+  ],
+  "tolerance": {
+    "atol": 1e-09,
+    "rtol": 1e-09
+  },
+  "raw_input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\nba_data.csv",
+  "training_input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\model_data_defenserating_advanced.csv",
+  "selected_input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\selected_features_advanced.json"
+}

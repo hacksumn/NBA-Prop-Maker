@@ -43,6 +43,57 @@ from player_pool_guard import sanitize_player_names
 
 logger = logging.getLogger(__name__)
 
+
+def _deduplicate_offered_projection_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Deduplicate exact PrizePicks offers without inventing a line.
+
+    Standard, goblin, demon, and promo projections are different placeable
+    contracts.  Their line is therefore part of the offer grain and must never
+    be averaged with another contract.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    out = df.copy()
+    required = {"game_date", "player", "prop", "line"}
+    missing = sorted(required - set(out.columns))
+    if missing:
+        raise ValueError(f"PrizePicks projection rows are missing required columns: {missing}")
+    if "projection_type" not in out.columns:
+        out["projection_type"] = "standard"
+    out["projection_type"] = out["projection_type"].fillna("standard").astype(str).str.strip().str.lower()
+    out.loc[~out["projection_type"].isin({"standard", "goblin", "demon"}), "projection_type"] = "standard"
+    if "is_promo" not in out.columns:
+        out["is_promo"] = False
+    out["is_promo"] = out["is_promo"].fillna(False).astype(bool)
+    out["line"] = pd.to_numeric(out["line"], errors="raise")
+
+    grain = ["game_date", "player", "prop", "line", "projection_type", "is_promo"]
+    # Duplicate API objects do not represent additional books. Preserve the
+    # first copy of ancillary metadata instead of inflating ``num_books``.
+    aggregations = {
+        column: "first" for column in out.columns if column not in grain
+    }
+    if aggregations:
+        out = out.groupby(grain, as_index=False, dropna=False).agg(aggregations)
+    else:
+        out = out.drop_duplicates(subset=grain, keep="first")
+    return out.sort_values(
+        ["game_date", "player", "prop", "projection_type", "is_promo", "line"],
+        kind="stable",
+    ).reset_index(drop=True)
+
+
+def _line_source_priority(value: object) -> int:
+    source = str(value or "").strip().lower()
+    if "fanduel" in source:
+        return 3
+    if "prizepicks" in source:
+        return 2
+    if "odds_api" in source:
+        return 1
+    return 0
+
 # ── Config ────────────────────────────────────────────────────────────────────
 # Set this to your local Chrome profile directory, OR set the env variable.
 # Common locations:
@@ -117,6 +168,8 @@ def _coerce_slate_date(*values) -> str | None:
         ts = pd.to_datetime(value, errors="coerce")
         if pd.isna(ts):
             continue
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("America/Chicago")
         return ts.strftime("%Y-%m-%d")
     return None
 
@@ -161,9 +214,23 @@ def _parse_projections(data: dict) -> pd.DataFrame:
         if line is None:
             continue
         game_rel = rels.get("game", {}).get("data", {})
-        game_attrs = game_map.get(game_rel.get("id", ""), {})
+        game_id = str(game_rel.get("id", "") or "")
+        game_attrs = game_map.get(game_id, {})
+        commence_time = (
+            attrs.get("start_time")
+            or game_attrs.get("start_time")
+            or attrs.get("board_time")
+            or game_attrs.get("end_time")
+        )
+        game_description = (
+            game_attrs.get("description")
+            or game_attrs.get("name")
+            or game_attrs.get("title")
+            or attrs.get("description")
+            or ""
+        )
         slate_date = _coerce_slate_date(
-            attrs.get("start_time"),
+            commence_time,
             attrs.get("board_time"),
             attrs.get("end_time"),
             game_attrs.get("start_time"),
@@ -190,22 +257,37 @@ def _parse_projections(data: dict) -> pd.DataFrame:
             "num_books":       1,
             "projection_type": projection_type,
             "is_promo":        is_promo,
+            "event_id":         game_id,
+            "commence_time":    commence_time,
+            "game_description": game_description,
         })
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        # Keep one line per slate/player/prop to avoid collapsing tomorrow's board
-        # into today's run date when PrizePicks posts the next slate early.
-        df = df.groupby(["game_date", "player", "prop"], as_index=False).agg(
-            player_norm=("player_norm", "first"),
-            line=("line", "median"),
-            num_books=("num_books", "sum"),
-            projection_type=("projection_type", "first"),
-            is_promo=("is_promo", "max"),
-        )
-        df.sort_values(["game_date", "player", "prop"], inplace=True)
-        df.reset_index(drop=True, inplace=True)
+        df = _deduplicate_offered_projection_rows(df)
     return df
+
+
+def _merge_historical_lines(existing: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+    """Append source snapshots without collapsing competing books or run times."""
+    if existing is None or existing.empty:
+        combined = fresh.copy()
+    else:
+        combined = pd.concat([existing, fresh], ignore_index=True)
+
+    combined["game_date"] = pd.to_datetime(combined["game_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    combined["line"] = pd.to_numeric(combined["line"], errors="coerce")
+    combined["num_books"] = pd.to_numeric(combined["num_books"], errors="coerce").fillna(1).clip(lower=1)
+    combined["source"] = combined["source"].fillna("unknown").astype(str)
+    combined["snapshot_ts"] = combined["snapshot_ts"].replace("", pd.NA).fillna("unknown").astype(str)
+    combined["projection_type"] = combined.get("projection_type", pd.Series("standard", index=combined.index)).fillna("standard").astype(str)
+    combined["is_promo"] = combined.get("is_promo", pd.Series(False, index=combined.index)).fillna(False).astype(bool)
+    combined = combined.dropna(subset=["game_date", "player", "player_norm", "prop", "line"])
+    key = ["game_date", "player_norm", "prop", "line", "source", "snapshot_ts"]
+    combined = combined.drop_duplicates(subset=key, keep="last")
+    return combined.sort_values(
+        ["game_date", "prop", "player", "source", "snapshot_ts"], kind="stable"
+    ).reset_index(drop=True)
 
 
 # ── Strategy A: Playwright with existing browser profile ──────────────────────
@@ -412,12 +494,9 @@ def _fetch_direct() -> dict | None:
 
 # ── Main fetch ────────────────────────────────────────────────────────────────
 
-def fetch_todays_lines(chrome_profile: str | None = None,
-                       cf_cookie: str | None = None) -> pd.DataFrame:
-    """
-    Fetch today's NBA prop lines from PrizePicks.
-    Tries direct API first, then Playwright profile, then cookie fallback.
-    """
+def fetch_prizepicks_payload(chrome_profile: str | None = None,
+                             cf_cookie: str | None = None) -> dict | None:
+    """Fetch and return the raw PrizePicks NBA projections payload."""
     logger.info("Fetching today's PrizePicks NBA prop lines ...")
 
     cookie = cf_cookie or CF_CLEARANCE_COOKIE
@@ -447,6 +526,15 @@ def fetch_todays_lines(chrome_profile: str | None = None,
             "  2. Set PRIZEPICKS_CHROME_PROFILE to your Chrome User Data directory\n"
             "  3. Or export __cf_clearance cookie and set PRIZEPICKS_CF_COOKIE=<value>"
         )
+        return None
+
+    return data
+
+
+def parse_prizepicks_payload(data: dict | None,
+                             require_roster: bool = True) -> pd.DataFrame:
+    """Parse a raw PrizePicks payload and apply the production player guard."""
+    if data is None:
         return pd.DataFrame()
 
     df = _parse_projections(data)
@@ -456,7 +544,7 @@ def fetch_todays_lines(chrome_profile: str | None = None,
         date_col="game_date",
         player_norm_col="player_norm",
         drop_unknown=True,
-        require_roster=True,
+        require_roster=require_roster,
     )
     logger.info(
         "Parsed %s validated NBA prop lines across %s slate date(s) (%s canonicalized, %s dropped)",
@@ -470,6 +558,13 @@ def fetch_todays_lines(chrome_profile: str | None = None,
     return df
 
 
+def fetch_todays_lines(chrome_profile: str | None = None,
+                       cf_cookie: str | None = None) -> pd.DataFrame:
+    """Fetch and validate today's NBA prop lines from PrizePicks."""
+    data = fetch_prizepicks_payload(chrome_profile=chrome_profile, cf_cookie=cf_cookie)
+    return parse_prizepicks_payload(data, require_roster=True)
+
+
 # ── Save / append ─────────────────────────────────────────────────────────────
 
 def save_lines(output_path: str = "data/historical_lines.csv",
@@ -477,7 +572,7 @@ def save_lines(output_path: str = "data/historical_lines.csv",
                cf_cookie: str | None = None) -> str:
     """
     Fetch current PrizePicks lines and append them to the historical CSV.
-    Idempotent per slate date: re-running replaces rows for the same game_date.
+    Idempotent per source snapshot: re-running preserves earlier observations.
     Returns the absolute path of the saved file.
     """
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
@@ -485,8 +580,7 @@ def save_lines(output_path: str = "data/historical_lines.csv",
     fresh = fetch_todays_lines(chrome_profile=chrome_profile, cf_cookie=cf_cookie)
 
     if fresh.empty:
-        logger.warning("No lines fetched; historical_lines.csv not updated.")
-        return os.path.abspath(output_path)
+        raise RuntimeError("No current PrizePicks lines were fetched; historical_lines.csv was not updated")
 
     fresh = fresh.copy()
     fresh["num_books"] = pd.to_numeric(fresh.get("num_books", 1), errors="coerce").fillna(1).clip(lower=1)
@@ -511,14 +605,6 @@ def save_lines(output_path: str = "data/historical_lines.csv",
     else:
         combined = fresh
 
-    combined["game_date"] = pd.to_datetime(combined["game_date"], errors="coerce").dt.strftime("%Y-%m-%d")
-    combined["line"] = pd.to_numeric(combined["line"], errors="coerce")
-    combined["num_books"] = pd.to_numeric(combined["num_books"], errors="coerce").fillna(1).clip(lower=1)
-    combined["source"] = combined["source"].fillna("unknown").astype(str)
-    combined["snapshot_ts"] = combined["snapshot_ts"].replace("", pd.NA).fillna(pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")).astype(str)
-    combined["projection_type"] = combined.get("projection_type", pd.Series("standard", index=combined.index)).fillna("standard").astype(str)
-    combined["is_promo"] = combined.get("is_promo", pd.Series(False, index=combined.index)).fillna(False).astype(bool)
-    combined = combined.dropna(subset=["game_date", "player", "player_norm", "prop", "line"])
     combined, summary = sanitize_player_names(
         combined,
         player_col="player",
@@ -527,14 +613,10 @@ def save_lines(output_path: str = "data/historical_lines.csv",
         drop_unknown=True,
         require_roster=False,
     )
-    combined["_snapshot_sort"] = pd.to_datetime(combined["snapshot_ts"], errors="coerce")
-    combined = combined.sort_values(
-        ["game_date", "player_norm", "prop", "num_books", "_snapshot_sort", "line"],
-        ascending=[True, True, True, True, True, True],
-    )
-    combined = combined.drop_duplicates(subset=["game_date", "player_norm", "prop"], keep="last")
-    combined = combined.drop(columns=["_snapshot_sort"], errors="ignore")
-    combined.to_csv(output_path, index=False)
+    combined = _merge_historical_lines(pd.DataFrame(), combined)
+    tmp_path = f"{output_path}.tmp"
+    combined.to_csv(tmp_path, index=False)
+    os.replace(tmp_path, output_path)
     logger.info(f"Prop lines saved -> {output_path}  ({len(combined):,} total rows)")
     if summary["canonicalized_rows"] or summary["dropped_rows"]:
         logger.info(

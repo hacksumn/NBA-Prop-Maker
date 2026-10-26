@@ -14,6 +14,7 @@ Outputs:
 """
 import json
 import pickle
+import hashlib
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -21,7 +22,8 @@ import numpy as np
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 
-from probability_utils import fit_isotonic_calibrators, compute_sigma_context_analysis
+from probability_utils import compute_sigma_context_analysis
+from train_advanced_models import AdvancedPropModel
 
 ROOT = Path(__file__).parent
 MODEL_DIR = ROOT / "models"
@@ -31,8 +33,34 @@ LEGACY_OUT_PATH = MODEL_DIR / "confidence_calibrator.pkl"
 PROB_OUT_PATH = MODEL_DIR / "probability_calibrator_advanced.pkl"
 PROB_DIAG_PATH = MODEL_DIR / "probability_diagnostics_advanced.json"
 SIGMA_CONTEXT_PATH = MODEL_DIR / "sigma_context_analysis.json"
+PROBABILITY_BUNDLE_SCHEMA_VERSION = 1
 
 MODEL_DIR.mkdir(exist_ok=True)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _active_sidecar_contract() -> Dict:
+    """Bind a standalone calibration run to the probability models it calibrates."""
+    sidecar_paths = sorted(MODEL_DIR.glob("prob_sidecar_*_advanced.pkl"))
+    hashes = {
+        path.name.removeprefix("prob_sidecar_").removesuffix("_advanced.pkl"): _sha256_file(path)
+        for path in sidecar_paths
+    }
+    if not hashes:
+        raise RuntimeError("No advanced probability sidecars found for calibration")
+    return {
+        "schema_version": PROBABILITY_BUNDLE_SCHEMA_VERSION,
+        "targets": sorted(hashes),
+        "sidecar_sha256": hashes,
+        "oof_sha256": _sha256_file(PROB_OOF_PATH),
+    }
 
 
 def _json_safe(value):
@@ -45,39 +73,58 @@ def _json_safe(value):
     return value
 
 
-def calibrate_probability_outputs() -> Tuple[Dict, Dict]:
+def calibrate_probability_outputs(holdout_dates: int = 20) -> Tuple[Dict, Dict]:
     if not PROB_OOF_PATH.exists():
         print("probability_oof_advanced.csv not found - probability calibration skipped")
         return {}, {}
 
-    prob_oof = pd.read_csv(PROB_OOF_PATH)
-    if 'line_source' in prob_oof.columns:
-        prob_oof = prob_oof[prob_oof['line_source'] == 'real'].copy()
-    prob_oof = prob_oof.dropna(subset=['target', 'p_over_raw', 'actual_over'])
-    if len(prob_oof) == 0:
+    all_oof = pd.read_csv(PROB_OOF_PATH)
+    real_oof = all_oof.copy()
+    if 'line_source' in real_oof.columns:
+        real_oof = real_oof[real_oof['line_source'] == 'real'].copy()
+    real_oof = real_oof.dropna(subset=['target', 'p_over_raw', 'actual_over'])
+    if len(real_oof) == 0:
         print("No real-line OOF probability rows available - probability calibration skipped")
         return {}, {}
 
-    calibrators, diagnostics = fit_isotonic_calibrators(prob_oof)
+    trainer = AdvancedPropModel(model_dir=str(MODEL_DIR))
+    trainer.probability_oof_rows = [all_oof]
+    fitted = trainer.fit_probability_calibrators(holdout_dates=holdout_dates)
+    calibrators = fitted['calibrators']
+    diagnostics = fitted['diagnostics']
+    contract = _active_sidecar_contract()
+    missing_calibrators = sorted(set(contract["targets"]) - set(calibrators))
+    if missing_calibrators:
+        raise RuntimeError(
+            "Probability calibration is missing active sidecar targets: "
+            + ", ".join(missing_calibrators)
+        )
     payload = {
         'calibrators': calibrators,
         'diagnostics': diagnostics,
-        'n_rows': int(len(prob_oof)),
+        'n_rows': int(len(real_oof)),
         'targets': sorted(calibrators.keys()),
+        'sidecar_contract': contract,
     }
     with open(PROB_OUT_PATH, 'wb') as f:
         pickle.dump(payload, f)
     with open(PROB_DIAG_PATH, 'w') as f:
         json.dump(_json_safe({
-            'n_rows': int(len(prob_oof)),
-            'targets': sorted(diagnostics.keys()),
-            'diagnostics': diagnostics,
+            'n_rows': int(len(real_oof)),
+            'targets': sorted(calibrators.keys()),
+            **diagnostics,
+            'sidecar_contract': contract,
         }), f, indent=2)
 
-    print(f"Probability OOF rows: {len(prob_oof):,}")
-    for target in sorted(diagnostics.keys()):
-        raw = diagnostics[target].get('raw_metrics', {})
-        cal = diagnostics[target].get('calibrated_metrics', {})
+    split = diagnostics['split']
+    print(
+        "Probability calibration split: "
+        f"{split['fit_rows']:,} fit rows through {split['fit_date_max']} | "
+        f"{split['holdout_rows']:,} untouched rows across {split['holdout_dates']} dates"
+    )
+    for target in sorted(diagnostics['holdout']):
+        raw = diagnostics['holdout'][target].get('raw', {})
+        cal = diagnostics['holdout'][target].get('calibrated', {})
         raw_brier = raw.get('brier')
         cal_brier = cal.get('brier')
         raw_ece = raw.get('ece')
@@ -85,7 +132,7 @@ def calibrate_probability_outputs() -> Tuple[Dict, Dict]:
         raw_ll = raw.get('log_loss')
         cal_ll = cal.get('log_loss')
         print(
-            f"  {target.upper():3s} | "
+            f"  {target.upper():3s} holdout | "
             f"Brier {raw_brier:.4f} -> {cal_brier:.4f} | "
             f"LogLoss {raw_ll:.4f} -> {cal_ll:.4f} | "
             f"ECE {raw_ece:.4f} -> {cal_ece:.4f}"
@@ -95,7 +142,7 @@ def calibrate_probability_outputs() -> Tuple[Dict, Dict]:
     print(f"Probability diagnostics saved -> {PROB_DIAG_PATH}")
 
     # sigma-context analysis: how does calibration quality vary with predicted spread?
-    sigma_context = compute_sigma_context_analysis(prob_oof)
+    sigma_context = compute_sigma_context_analysis(real_oof)
     if sigma_context:
         with open(SIGMA_CONTEXT_PATH, 'w') as f:
             json.dump(_json_safe(sigma_context), f, indent=2)

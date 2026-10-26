@@ -1,0 +1,158 @@
+{
+  "overall_assessment": "ready_for_prop_retraining",
+  "enabled_for_live": false,
+  "checks": {
+    "candidate_key_duplicates": 0,
+    "candidate_null_feature_cells": 0,
+    "oof_key_duplicates": 0,
+    "oof_chronology_failures": 0,
+    "holdout_join_rows": 35444,
+    "holdout_expected_rows": 35444,
+    "calibration_max_absolute_decile_gap": 0.022682939909236532
+  },
+  "paired_date_bootstrap": {
+    "dates": 193,
+    "draws": 5000,
+    "availability_brier_gain": {
+      "mean_daily_gain": 0.031865636937435375,
+      "positive_dates": 183,
+      "ci95_low": 0.02856353698068939,
+      "ci95_high": 0.035049466715629876
+    },
+    "hard_mae_gain": {
+      "mean_daily_gain": 0.250171482169822,
+      "positive_dates": 143,
+      "ci95_low": 0.17144853426775708,
+      "ci95_high": 0.3393584628699383
+    },
+    "soft_mse_gain": {
+      "mean_daily_gain": 20.39990106410157,
+      "positive_dates": 182,
+      "ci95_low": 17.727235597325873,
+      "ci95_high": 23.654801094252797
+    },
+    "conditional_mae_gain": {
+      "mean_daily_gain": 0.2268648859454367,
+      "positive_dates": 159,
+      "ci95_low": 0.18702287402095213,
+      "ci95_high": 0.26578682242503565
+    }
+  },
+  "subgroup_rows": [
+    {
+      "subgroup": "all_holdout_candidates",
+      "rows": 35444,
+      "availability_rate": 0.7141406161832751,
+      "availability_brier": 0.11151350220004021,
+      "rolling_availability_brier": 0.14624698042777157,
+      "availability_auc": 0.8861728954663175,
+      "conditional_minutes_mae": 4.787715013636043,
+      "conditional_baseline_mae": 5.027537663295407,
+      "hard_gated_minutes_mae": 5.902701705143505,
+      "last_status_baseline_mae": 6.157248523492457,
+      "soft_expected_minutes_rmse": 8.728322193078878,
+      "last_status_baseline_rmse": 9.877959248487647,
+      "brier_improvement": 0.03473347822773136,
+      "conditional_mae_improvement": 0.23982264965936384,
+      "hard_mae_improvement": 0.25454681834895254,
+      "soft_rmse_improvement": 1.1496370554087694
+    },
+    {
+      "subgroup": "first_half",
+      "rows": 18518,
+      "availability_rate": 0.744086834431364,
+      "availability_brier": 0.10244269492340104,
+      "rolling_availability_brier": 0.1394547380496722,
+      "availability_auc": 0.8902914899613362,
+      "conditional_minutes_mae": 4.596935932995111,
+      "conditional_baseline_mae": 4.828170888066381,
+      "hard_gated_minutes_mae": 5.664775075710469,
+      "last_status_baseline_mae": 5.924356481981496,
+      "soft_expected_minutes_rmse": 8.406765897798602,
+      "last_status_baseline_rmse": 9.488423172734263,
+      "brier_improvement": 0.03701204312627117,
+      "conditional_mae_improvement": 0.23123495507127068,
+      "hard_mae_improvement": 0.2595814062710273,
+      "soft_rmse_improvement": 1.0816572749356617
+    },
+    {
+      "subgroup": "second_half",
+      "rows": 16926,
+      "availability_rate": 0.6813777620229233,
+      "availability_brier": 0.1214374776903394,
+      "rolling_availability_brier": 0.15367807722309496,
+      "availability_auc": 0.8793068251700081,
+      "conditional_minutes_mae": 5.0156474641824245,
+      "conditional_baseline_mae": 5.2657302234168615,
+      "hard_gated_minutes_mae": 6.163006876113666,
+      "last_status_baseline_mae": 6.412045570916538,
+      "soft_expected_minutes_rmse": 9.067069269016956,
+      "last_status_baseline_rmse": 10.28725117057263,
+      "brier_improvement": 0.03224059953275556,
+      "conditional_mae_improvement": 0.250082759234437,
+      "hard_mae_improvement": 0.24903869480287177,
+      "soft_rmse_improvement": 1.220181901555673
+    },
+    {
+      "subgroup": "rotation_15_plus",
+      "rows": 26977,
+      "availability_rate": 0.7744004151684768,
+      "availability_brier": 0.09390589653612173,
+      "rolling_availability_brier": 0.1290635170607572,
+      "availability_auc": 0.8819519151665154,
+      "conditional_minutes_mae": 4.612135251710176,
+      "conditional_baseline_mae": 4.817264212659359,
+      "hard_gated_minutes_mae": 6.222144160837349,
+      "last_status_baseline_mae": 6.521103161952774,
+      "soft_expected_minutes_rmse": 9.231712385947144,
+      "last_status_baseline_rmse": 10.489649305987044,
+      "brier_improvement": 0.03515762052463546,
+      "conditional_mae_improvement": 0.20512896094918354,
+      "hard_mae_improvement": 0.29895900111542506,
+      "soft_rmse_improvement": 1.2579369200398993
+    },
+    {
+      "subgroup": "likely_prop_pool_proxy",
+      "rows": 19398,
+      "availability_rate": 0.8921022785854211,
+      "availability_brier": 0.07855009005400937,
+      "rolling_availability_brier": 0.09431385393432518,
+      "availability_auc": 0.7731828677835738,
+      "conditional_minutes_mae": 4.5984950810301655,
+      "conditional_baseline_mae": 4.7577039391312725,
+      "hard_gated_minutes_mae": 6.449103084997259,
+      "last_status_baseline_mae": 6.731882152799257,
+      "soft_expected_minutes_rmse": 9.180829278631812,
+      "last_status_baseline_rmse": 10.291901948121758,
+      "brier_improvement": 0.015763763880315806,
+      "conditional_mae_improvement": 0.15920885810110708,
+      "hard_mae_improvement": 0.28277906780199835,
+      "soft_rmse_improvement": 1.1110726694899462
+    },
+    {
+      "subgroup": "model_probability_080_plus",
+      "rows": 21946,
+      "availability_rate": 0.9216258088034266,
+      "availability_brier": 0.0700123579876153,
+      "rolling_availability_brier": 0.08960973286098127,
+      "availability_auc": 0.670606521309206,
+      "conditional_minutes_mae": 4.609411855347562,
+      "conditional_baseline_mae": 4.803793796763242,
+      "hard_gated_minutes_mae": 6.134871995718327,
+      "last_status_baseline_mae": 6.262418360217503,
+      "soft_expected_minutes_rmse": 8.776830962575643,
+      "last_status_baseline_rmse": 9.147161497083665,
+      "brier_improvement": 0.019597374873365964,
+      "conditional_mae_improvement": 0.19438194141567955,
+      "hard_mae_improvement": 0.12754636449917633,
+      "soft_rmse_improvement": 0.3703305345080228
+    }
+  ],
+  "caveats": [
+    "Historical candidates come from prior same-team appearances, not a transaction/roster feed.",
+    "Players returning after more than 45 days and players before their second team appearance are outside the candidate contract.",
+    "The likely-prop-pool subgroup is a minutes/availability proxy, not a true historical PrizePicks eligibility table.",
+    "The 0.50 hard availability gate is fixed and was not optimized on the latest-season holdout.",
+    "The model package remains disabled for live use until the surrounding prop models pass their own chronological evaluation."
+  ]
+}

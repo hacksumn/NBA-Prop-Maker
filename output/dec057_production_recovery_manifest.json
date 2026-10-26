@@ -1,0 +1,419 @@
+{
+  "status": "activated_by_operator_direction",
+  "activated_at_utc": "2026-10-25T22:42:59.416123+00:00",
+  "source": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\recovery_dec057_20261025",
+  "destination": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models",
+  "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025",
+  "files_activated": 56,
+  "production_selected_defense_features": {
+    "pts": [],
+    "trb": [],
+    "ast": [],
+    "pra": [],
+    "pr": [],
+    "pa": [],
+    "stl": [
+      "opp_def_rtg_pt"
+    ],
+    "blk": [
+      "opp_pace_pt"
+    ],
+    "tov": []
+  },
+  "reason": "Jake explicitly directed that the corrected team-defense logic be active and not reverted because the OOF betting-direction comparison was null.",
+  "evidence_caveat": "DEC-051 found no positive same-row OOF betting-direction interval and no reserved future holdout exists; activation is a data-contract correctness decision, not a validated performance-improvement claim.",
+  "files": [
+    {
+      "name": "bias_advanced.json",
+      "before_sha256": "dc8a8283c46c7453d191b87bacf37a4a76b21e5380318b917d4e0a5cde404d43",
+      "candidate_sha256": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c",
+      "after_sha256": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\bias_advanced.json"
+    },
+    {
+      "name": "clf_ast_advanced.pkl",
+      "before_sha256": "4f3c4ea6a9cec4a16f04cde0dd5a8e4edc2cc53c9bd80339edb0e307db01783a",
+      "candidate_sha256": "0b19acb67f3b8918b393f84816af9b37fe6b57462622a22aa105fbd3fdacc02b",
+      "after_sha256": "0b19acb67f3b8918b393f84816af9b37fe6b57462622a22aa105fbd3fdacc02b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_ast_advanced.pkl"
+    },
+    {
+      "name": "clf_blk_advanced.pkl",
+      "before_sha256": "b859d04d745063d7852b01b8543d0b89242c5757745d808f5b4c0c6aff2f686b",
+      "candidate_sha256": "e51344021985ffd21fe39f5c83d07d60d4bfb54813473443b5fa204f6651ef9c",
+      "after_sha256": "e51344021985ffd21fe39f5c83d07d60d4bfb54813473443b5fa204f6651ef9c",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_blk_advanced.pkl"
+    },
+    {
+      "name": "clf_pa_advanced.pkl",
+      "before_sha256": "600cd7e52f6886114fe1303d21b754bd1c3ce141191a0971b0a93df4f4c824de",
+      "candidate_sha256": "2acc3b0f97591ba8f28c2dc93785691f00dfa3a26f11b777b8d116e3be4bb4c0",
+      "after_sha256": "2acc3b0f97591ba8f28c2dc93785691f00dfa3a26f11b777b8d116e3be4bb4c0",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_pa_advanced.pkl"
+    },
+    {
+      "name": "clf_pr_advanced.pkl",
+      "before_sha256": "cfa1a639366a27c04183350eefe87d56e3856a9ac2b5b7132ee1134622998340",
+      "candidate_sha256": "2014b8cf59c6b861cd5b7297f24f6c6f3bbb4758abb6adf9a1b9a162b343c9bc",
+      "after_sha256": "2014b8cf59c6b861cd5b7297f24f6c6f3bbb4758abb6adf9a1b9a162b343c9bc",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_pr_advanced.pkl"
+    },
+    {
+      "name": "clf_pra_advanced.pkl",
+      "before_sha256": "4c7238c013b8620909ea8ca34be16f6ed98f87519e4be63db9870c98570b0adf",
+      "candidate_sha256": "7b6926b671c2765b71e3d0695db4481a75c5a41a4c96c156d903215d323b6ce8",
+      "after_sha256": "7b6926b671c2765b71e3d0695db4481a75c5a41a4c96c156d903215d323b6ce8",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_pra_advanced.pkl"
+    },
+    {
+      "name": "clf_pts_advanced.pkl",
+      "before_sha256": "34068623ee7c5c6a3083ec252c5c56581793e64915f944775b9ae23eff90bd5b",
+      "candidate_sha256": "8b35b0a022683606fed90aa862f2702f591fc9baa157274e6b0b94679cffa8e2",
+      "after_sha256": "8b35b0a022683606fed90aa862f2702f591fc9baa157274e6b0b94679cffa8e2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_pts_advanced.pkl"
+    },
+    {
+      "name": "clf_stl_advanced.pkl",
+      "before_sha256": "54d6bd9229b38b1ed20815497560dd89f47ba6a156b69892266c116b1dbec1a4",
+      "candidate_sha256": "0e7392829d72d9de71fe43c9ac50f2dda331b5ceac7a7d62732c52e4d7c0211d",
+      "after_sha256": "0e7392829d72d9de71fe43c9ac50f2dda331b5ceac7a7d62732c52e4d7c0211d",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_stl_advanced.pkl"
+    },
+    {
+      "name": "clf_tov_advanced.pkl",
+      "before_sha256": "6826bf24938bd4cf3b2d744df0d6c0bfac34f604cb8d8991bcd5c0f573d40a25",
+      "candidate_sha256": "03696c3438216e8ce873301b1eb3baa7cd9d740ac4be70342104c73e5882892b",
+      "after_sha256": "03696c3438216e8ce873301b1eb3baa7cd9d740ac4be70342104c73e5882892b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_tov_advanced.pkl"
+    },
+    {
+      "name": "clf_trb_advanced.pkl",
+      "before_sha256": "6ab7701b5bbcb517aeb9e18254df4dcc1dc20875ac6e92912487123985c5ad4c",
+      "candidate_sha256": "40f0ad871de0392860efbee019f15c4fb590ca1daa09d5b84dcb5dc839950b08",
+      "after_sha256": "40f0ad871de0392860efbee019f15c4fb590ca1daa09d5b84dcb5dc839950b08",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\clf_trb_advanced.pkl"
+    },
+    {
+      "name": "defense_rating_feature_contract.json",
+      "before_sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06",
+      "candidate_sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06",
+      "after_sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\defense_rating_feature_contract.json"
+    },
+    {
+      "name": "edge_xgb_ast_advanced.pkl",
+      "before_sha256": "9b1200b8b07843dd5b5a5aabe34f0660e94a679f086d52669a09524d23e8d54c",
+      "candidate_sha256": "6e1db1b19f7fce2a0eccbd37e85c4f72001a8875e0d61b21495a53771356427a",
+      "after_sha256": "6e1db1b19f7fce2a0eccbd37e85c4f72001a8875e0d61b21495a53771356427a",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_ast_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_blk_advanced.pkl",
+      "before_sha256": "6628364503a98a115219e0b5ed684bb9d0df62c7eca9343d9fba609ae0227ad1",
+      "candidate_sha256": "025c9a3aa89efd52a03998a88327edb36fc95d35b4e3472e0a941335271933f7",
+      "after_sha256": "025c9a3aa89efd52a03998a88327edb36fc95d35b4e3472e0a941335271933f7",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_blk_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pa_advanced.pkl",
+      "before_sha256": "fdb5eb62c9499c82603042955700b507b0ed1dc0604694bad56216d04141415d",
+      "candidate_sha256": "b5d37f2b7e2e7ca315e2633e2f8f2d6d63100c62e0302877d2014ecf55e2f8ae",
+      "after_sha256": "b5d37f2b7e2e7ca315e2633e2f8f2d6d63100c62e0302877d2014ecf55e2f8ae",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_pa_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pr_advanced.pkl",
+      "before_sha256": "8362a7f209da01133774d9119f3c3cffea059c02cf288b81a54bdd37e996b0a8",
+      "candidate_sha256": "814bcf9830ffb43221e13e7bcdd1200012a046bfe6b473bebbfa23ea334b340d",
+      "after_sha256": "814bcf9830ffb43221e13e7bcdd1200012a046bfe6b473bebbfa23ea334b340d",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_pr_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pra_advanced.pkl",
+      "before_sha256": "148cbbf707d628e173196145ba5f384a05b75c42ff04dc1606963c316a849ab9",
+      "candidate_sha256": "939adfe04c51d00f5e43b9572b6270b40345525e621a22e038ff23ba6edc9fb8",
+      "after_sha256": "939adfe04c51d00f5e43b9572b6270b40345525e621a22e038ff23ba6edc9fb8",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_pra_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pts_advanced.pkl",
+      "before_sha256": "25299c63130f8c73c38aa0f8d69d0c2ea44d6dc86492474d3b6d8fd99a000f77",
+      "candidate_sha256": "980e977b997bad5ee3d264a73baa4cd9b39a4587e31172556a56e0235d4ee6d0",
+      "after_sha256": "980e977b997bad5ee3d264a73baa4cd9b39a4587e31172556a56e0235d4ee6d0",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_pts_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_stl_advanced.pkl",
+      "before_sha256": "509bd1fc5a75775eabd001f1fde1c91233764915ee25bd39f4e830e2d4e410e4",
+      "candidate_sha256": "dd869075b6e25b82b6cc2174256b624eaa3f416db75f9aa8b4030c3d976c3c74",
+      "after_sha256": "dd869075b6e25b82b6cc2174256b624eaa3f416db75f9aa8b4030c3d976c3c74",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_stl_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_tov_advanced.pkl",
+      "before_sha256": "b11b9d1f28be8d491fc3cc4722e74cfe48f8e9974c42bf98b6128ed6b540736e",
+      "candidate_sha256": "ae33380263aa32cc15614bae8864d3c07432c2cdd89e36ac0390458eb3baf515",
+      "after_sha256": "ae33380263aa32cc15614bae8864d3c07432c2cdd89e36ac0390458eb3baf515",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_tov_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_trb_advanced.pkl",
+      "before_sha256": "3d8f67a142dbc54ed4dd73ca9888dffe01fb34edb5a57bbd28d8a6b73a743c01",
+      "candidate_sha256": "0063536100c083ec77e18d53bb6815418a26ec916583d531f148fa30c66ffd01",
+      "after_sha256": "0063536100c083ec77e18d53bb6815418a26ec916583d531f148fa30c66ffd01",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\edge_xgb_trb_advanced.pkl"
+    },
+    {
+      "name": "feature_importance_advanced.json",
+      "before_sha256": "ecbab594694cc99ccf30f21874dc9d401362695d116055a4bc2c8f77340a71b0",
+      "candidate_sha256": "347b076d667e2a0f65bbbb2aece1ce0d97285d6d5b7f8395569ff392d8c30aa7",
+      "after_sha256": "347b076d667e2a0f65bbbb2aece1ce0d97285d6d5b7f8395569ff392d8c30aa7",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\feature_importance_advanced.json"
+    },
+    {
+      "name": "market_feature_sets_advanced.json",
+      "before_sha256": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41",
+      "candidate_sha256": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41",
+      "after_sha256": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\market_feature_sets_advanced.json"
+    },
+    {
+      "name": "meta_clf_ast_advanced.pkl",
+      "before_sha256": "561d2947b321077216af85a92c7dce323ae97e03aed2d25b3c4017988a679de1",
+      "candidate_sha256": "cdcae8fde41534aa16c8d77e0ddd8c0aca1a3be0e249c3d8ee4516ad752f5b50",
+      "after_sha256": "cdcae8fde41534aa16c8d77e0ddd8c0aca1a3be0e249c3d8ee4516ad752f5b50",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_ast_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_blk_advanced.pkl",
+      "before_sha256": "f8c510e857fd95108f861ec147941063a1c23f6566e6982a978f390d749ac7b3",
+      "candidate_sha256": "1fe1f8b93b174262948ac3b171f4904dfd6a48a87d3aa3d359af30d23fdfff75",
+      "after_sha256": "1fe1f8b93b174262948ac3b171f4904dfd6a48a87d3aa3d359af30d23fdfff75",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_blk_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pa_advanced.pkl",
+      "before_sha256": "3c44605fa16f07fbb7974db07a566f5e4406e81ad750f603af2ec7bc9d1fdad6",
+      "candidate_sha256": "3c6e5d6f0788c7dc26d3f981fba147e965ba74582b397c4892f79147a8e0fae1",
+      "after_sha256": "3c6e5d6f0788c7dc26d3f981fba147e965ba74582b397c4892f79147a8e0fae1",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_pa_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pr_advanced.pkl",
+      "before_sha256": "bf66f9aa89e40a8112a29848a2d16876a13963338ca386adf18dd6c6175e8080",
+      "candidate_sha256": "68f1a449a5496f2287e74560570bbd3e12d3040f7161ac5774e2d222a5d4b905",
+      "after_sha256": "68f1a449a5496f2287e74560570bbd3e12d3040f7161ac5774e2d222a5d4b905",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_pr_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pra_advanced.pkl",
+      "before_sha256": "ead179f97cf25e9446478e19657e4e1db8ee810abbba45a7395cd043c674305a",
+      "candidate_sha256": "a0e4da4c6a73f6d3eed7aa6ea52e7a9db9fe6c53fec5c6ca57f9c2190bdc353b",
+      "after_sha256": "a0e4da4c6a73f6d3eed7aa6ea52e7a9db9fe6c53fec5c6ca57f9c2190bdc353b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_pra_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pts_advanced.pkl",
+      "before_sha256": "3010688fa740446c69aa8a3d74dc66ce036a0e6ac3ad3a465c5d2d5e3146dcd8",
+      "candidate_sha256": "7c3b8360f996430b8019c270e3ecf3165aa9fabc8a5fea4167cb35389e1fa990",
+      "after_sha256": "7c3b8360f996430b8019c270e3ecf3165aa9fabc8a5fea4167cb35389e1fa990",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_pts_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_stl_advanced.pkl",
+      "before_sha256": "009355d19597397fc6643ff3a3ba05fe43ec50a2f5f5399e760a700ab2947752",
+      "candidate_sha256": "754b97309ba1da097841167b18f7e0c8237db31e490eca9524d8b5298fe45f18",
+      "after_sha256": "754b97309ba1da097841167b18f7e0c8237db31e490eca9524d8b5298fe45f18",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_stl_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_tov_advanced.pkl",
+      "before_sha256": "3c64dd65a60851766a5fd4aa3b58e9dbbd31319edcaa379c110217ad58d7f231",
+      "candidate_sha256": "357656a1da10bb7d521ec000b0146280b1c377199dcf85649bc83f23a93cffd2",
+      "after_sha256": "357656a1da10bb7d521ec000b0146280b1c377199dcf85649bc83f23a93cffd2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_tov_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_trb_advanced.pkl",
+      "before_sha256": "746664c48201fb6e4c760552dfa732796bc82bef0902d68183b1980838c9d2fe",
+      "candidate_sha256": "5d8cd186b513c0c70723a57c8116ccc8ac390be34bcc18263c8ae70dcc1d06e5",
+      "after_sha256": "5d8cd186b513c0c70723a57c8116ccc8ac390be34bcc18263c8ae70dcc1d06e5",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\meta_clf_trb_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_ast_advanced.pkl",
+      "before_sha256": "232e97f582c7d88eb73e977da20f009db4e7483af423c559d33e771ee4836eb8",
+      "candidate_sha256": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0",
+      "after_sha256": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_ast_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_blk_advanced.pkl",
+      "before_sha256": "eb5d47e57f132a44b70a916d1342bdc1707432acd579901bc9143d8c0af06fdf",
+      "candidate_sha256": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224",
+      "after_sha256": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_blk_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pa_advanced.pkl",
+      "before_sha256": "ee384e058fdabdc502ef513ef897bd7b9243cf673dc8434cb76f06de7919f582",
+      "candidate_sha256": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633",
+      "after_sha256": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_pa_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pr_advanced.pkl",
+      "before_sha256": "33ba4eb196449e3c499391357af4df32d75c1479af47ab38cba3733afb66fb2d",
+      "candidate_sha256": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2",
+      "after_sha256": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_pr_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pra_advanced.pkl",
+      "before_sha256": "c1ea9c92d72cf478ef0b506f46ee0b793bdce7d22eef427e99e8a91336d9f198",
+      "candidate_sha256": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f",
+      "after_sha256": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_pra_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pts_advanced.pkl",
+      "before_sha256": "f7a00a897dfd0b65e2ae0ba1b1e50c5cfe69b91ea6649dce24453c9c5c9fd8b2",
+      "candidate_sha256": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415",
+      "after_sha256": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_pts_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_stl_advanced.pkl",
+      "before_sha256": "d819f77673a5363d0c675a3ff77f014cfbea764dea3170f4905acc066bc47b29",
+      "candidate_sha256": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5",
+      "after_sha256": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_stl_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_tov_advanced.pkl",
+      "before_sha256": "e37af4064a2c14899a193e822568b2c55ead346881bd220310ea1870c5c5c6b9",
+      "candidate_sha256": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9",
+      "after_sha256": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_tov_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_trb_advanced.pkl",
+      "before_sha256": "31eea020a004cca5fb40799ac1e50d287585439e42f71bec908954b030aa8d55",
+      "candidate_sha256": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e",
+      "after_sha256": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\prob_sidecar_trb_advanced.pkl"
+    },
+    {
+      "name": "probability_calibrator_advanced.pkl",
+      "before_sha256": "de1d4e3b94d19d46ab172c26862a7415ab67394948b9e91613c851e8c9c6fa00",
+      "candidate_sha256": "959a64f5879fbf48342896b1f4067002e0ae2eccf6fcddfa32c28bd3c461231b",
+      "after_sha256": "959a64f5879fbf48342896b1f4067002e0ae2eccf6fcddfa32c28bd3c461231b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\probability_calibrator_advanced.pkl"
+    },
+    {
+      "name": "probability_diagnostics_advanced.json",
+      "before_sha256": "0d9f408b456159533ec4045384452d2d78a335dfd73099da251c4e6ee97487e3",
+      "candidate_sha256": "ef3cc9bd2899556be3fe185f52290c3b103fa2b7fec8c052ded37f1b4de6bd1a",
+      "after_sha256": "ef3cc9bd2899556be3fe185f52290c3b103fa2b7fec8c052ded37f1b4de6bd1a",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\probability_diagnostics_advanced.json"
+    },
+    {
+      "name": "probability_oof_advanced.csv",
+      "before_sha256": "bf0430f06770fa0edc32de1ad1d2bbf7644680508c83d5f63c4c6236a62255f4",
+      "candidate_sha256": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763",
+      "after_sha256": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\probability_oof_advanced.csv"
+    },
+    {
+      "name": "selected_features_advanced.json",
+      "before_sha256": "017ef8c8afdb8007368b7d5e00e46b31c8b8230c1a5039df8cd4cec42de6e43b",
+      "candidate_sha256": "2f68413c8f70c8e20ec33cd55579d800d5366f579646c4f0bc4a012e2e2f07e2",
+      "after_sha256": "2f68413c8f70c8e20ec33cd55579d800d5366f579646c4f0bc4a012e2e2f07e2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\selected_features_advanced.json"
+    },
+    {
+      "name": "training_edge_analysis.json",
+      "before_sha256": "b8aa6b95c947d85c83ecaf59e65ed0a42eaf41cd295d5f49f822357a0ae3fbc3",
+      "candidate_sha256": "8715eeea1a5ff46a82ae083864a948093d9c79d129275176423b92345030294b",
+      "after_sha256": "8715eeea1a5ff46a82ae083864a948093d9c79d129275176423b92345030294b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\training_edge_analysis.json"
+    },
+    {
+      "name": "training_probability_analysis.json",
+      "before_sha256": "4da2dbd8b1f377f5ec86fb9389dd66a5c80c1a331d22f2e7dca93dbee1665479",
+      "candidate_sha256": "509f57023528a712982d5f9d3256bf596f14f2d15fcef98d96ef103874bbd735",
+      "after_sha256": "509f57023528a712982d5f9d3256bf596f14f2d15fcef98d96ef103874bbd735",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\training_probability_analysis.json"
+    },
+    {
+      "name": "training_results.json",
+      "before_sha256": "8b516e00a834e6e8c9687669203a4693a74ecade3d805fe34b86955bdad7ee0f",
+      "candidate_sha256": "e413b9917e09ade19360d4ec55a8d163e98e9efb7a05f61f6df7c072b3365dba",
+      "after_sha256": "e413b9917e09ade19360d4ec55a8d163e98e9efb7a05f61f6df7c072b3365dba",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\training_results.json"
+    },
+    {
+      "name": "xgb_ast_advanced.pkl",
+      "before_sha256": "e316fb37a5878850cb7df005763c30b2d10ce2ac3878129c23e586a70ca2eb56",
+      "candidate_sha256": "6cd2eb69003aa4559ca7ef51b2870fb33388f7bf68a1c8f810b4ed929992df4b",
+      "after_sha256": "6cd2eb69003aa4559ca7ef51b2870fb33388f7bf68a1c8f810b4ed929992df4b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_ast_advanced.pkl"
+    },
+    {
+      "name": "xgb_blk_advanced.pkl",
+      "before_sha256": "c26361c24593c004a6063c90e81e1bafc16e73f35beec47317275b0d7bbdfb8b",
+      "candidate_sha256": "4dd3902b32b80166cdec9953f6125c1cb0bf43698cf60831c0515a78f4d97070",
+      "after_sha256": "4dd3902b32b80166cdec9953f6125c1cb0bf43698cf60831c0515a78f4d97070",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_blk_advanced.pkl"
+    },
+    {
+      "name": "xgb_pa_advanced.pkl",
+      "before_sha256": "abdaa0816bd91c559a47f7217f226f5b8244faa33479b1173fd46d671a6902f0",
+      "candidate_sha256": "9edcac1da157be84ad6f39a8dbc61c63a24621d73ba2dd3eed294315eb5d1898",
+      "after_sha256": "9edcac1da157be84ad6f39a8dbc61c63a24621d73ba2dd3eed294315eb5d1898",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_pa_advanced.pkl"
+    },
+    {
+      "name": "xgb_pr_advanced.pkl",
+      "before_sha256": "22fded641a181056cea5a5bf3a59bc669f5551b8c0332a64d1a35d83339ccdbe",
+      "candidate_sha256": "6a8adc2769c0a2b04aac5b1653869945211714cb7f6e3a21951cb7faa20d9bb2",
+      "after_sha256": "6a8adc2769c0a2b04aac5b1653869945211714cb7f6e3a21951cb7faa20d9bb2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_pr_advanced.pkl"
+    },
+    {
+      "name": "xgb_pra_advanced.pkl",
+      "before_sha256": "24056751f7e3e7198c7361af05461d5bf55623778b2cbad05391267cebc61bbf",
+      "candidate_sha256": "add76e1bdae26e024e9a970deb04444f74905caeba6d40fdd660225c6f31f6bb",
+      "after_sha256": "add76e1bdae26e024e9a970deb04444f74905caeba6d40fdd660225c6f31f6bb",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_pra_advanced.pkl"
+    },
+    {
+      "name": "xgb_pts_advanced.pkl",
+      "before_sha256": "9c05a9885dd0748b602525d5ea91850e31371d1ef846f08d5eff840a8c51c3d3",
+      "candidate_sha256": "a295bf76ebec05de646ec1b9f4459a54b5d22d9a5634a86f08cf62e4db6f2fc2",
+      "after_sha256": "a295bf76ebec05de646ec1b9f4459a54b5d22d9a5634a86f08cf62e4db6f2fc2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_pts_advanced.pkl"
+    },
+    {
+      "name": "xgb_stl_advanced.pkl",
+      "before_sha256": "7041e7160ea5556732e470102e189756635833b1534d96ccb3e17f8475f4172d",
+      "candidate_sha256": "bfcfb0422822ccea4a6292423c6cc7d51add5a6428b0d65711f83884b182880e",
+      "after_sha256": "bfcfb0422822ccea4a6292423c6cc7d51add5a6428b0d65711f83884b182880e",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_stl_advanced.pkl"
+    },
+    {
+      "name": "xgb_tov_advanced.pkl",
+      "before_sha256": "38e51041fa60d631f0665de5f7bbaee5ce2319c44066f0c74e4a40cee78c7c81",
+      "candidate_sha256": "44be75a1c144f0bf8d954a31a069eb3515f49998e97fb4bbd73b603d96094578",
+      "after_sha256": "44be75a1c144f0bf8d954a31a069eb3515f49998e97fb4bbd73b603d96094578",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_tov_advanced.pkl"
+    },
+    {
+      "name": "xgb_trb_advanced.pkl",
+      "before_sha256": "93b65e26209150b69c3c46329a6b029e8351d10373642444a2b0af6fa569768c",
+      "candidate_sha256": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806",
+      "after_sha256": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec057_pre_recovery_20261025\\xgb_trb_advanced.pkl"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "timestamp": "2026-08-23T10:05:10.081440",
+  "total_picks_audited": 1422,
+  "props_evaluated": 6,
+  "always_under_threshold": 0.52,
+  "props_losing_to_always_under": [
+    "AST",
+    "PR",
+    "PRA",
+    "PTS",
+    "TRB"
+  ],
+  "props_with_weak_baseline": [],
+  "recommendation": "Gate/disable: ['AST', 'PR', 'PRA', 'PTS', 'TRB']",
+  "results": [
+    {
+      "prop": "AST",
+      "graded_picks": 95,
+      "over_picks": 0,
+      "under_picks": 95,
+      "model_accuracy": 70.5,
+      "model_over_accuracy": null,
+      "model_under_accuracy": 70.5,
+      "always_under_accuracy": 70.5,
+      "edge_vs_always_under": 0.0,
+      "beats_always_under": false,
+      "baseline_status": "OK",
+      "status": "FAIL"
+    },
+    {
+      "prop": "PA",
+      "graded_picks": 296,
+      "over_picks": 118,
+      "under_picks": 178,
+      "model_accuracy": 56.8,
+      "model_over_accuracy": 52.5,
+      "model_under_accuracy": 59.6,
+      "always_under_accuracy": 54.7,
+      "edge_vs_always_under": 2.0,
+      "beats_always_under": true,
+      "baseline_status": "OK",
+      "status": "PASS"
+    },
+    {
+      "prop": "PR",
+      "graded_picks": 304,
+      "over_picks": 134,
+      "under_picks": 170,
+      "model_accuracy": 53.0,
+      "model_over_accuracy": 47.8,
+      "model_under_accuracy": 57.1,
+      "always_under_accuracy": 54.9,
+      "edge_vs_always_under": -2.0,
+      "beats_always_under": false,
+      "baseline_status": "OK",
+      "status": "FAIL"
+    },
+    {
+      "prop": "PRA",
+      "graded_picks": 309,
+      "over_picks": 152,
+      "under_picks": 157,
+      "model_accuracy": 52.1,
+      "model_over_accuracy": 48.0,
+      "model_under_accuracy": 56.1,
+      "always_under_accuracy": 54.0,
+      "edge_vs_always_under": -1.9,
+      "beats_always_under": false,
+      "baseline_status": "OK",
+      "status": "FAIL"
+    },
+    {
+      "prop": "PTS",
+      "graded_picks": 263,
+      "over_picks": 137,
+      "under_picks": 126,
+      "model_accuracy": 50.2,
+      "model_over_accuracy": 46.0,
+      "model_under_accuracy": 54.8,
+      "always_under_accuracy": 54.4,
+      "edge_vs_always_under": -4.2,
+      "beats_always_under": false,
+      "baseline_status": "OK",
+      "status": "FAIL"
+    },
+    {
+      "prop": "TRB",
+      "graded_picks": 93,
+      "over_picks": 12,
+      "under_picks": 81,
+      "model_accuracy": 62.4,
+      "model_over_accuracy": 50.0,
+      "model_under_accuracy": 64.2,
+      "always_under_accuracy": 62.4,
+      "edge_vs_always_under": 0.0,
+      "beats_always_under": false,
+      "baseline_status": "OK",
+      "status": "FAIL"
+    }
+  ]
+}

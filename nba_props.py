@@ -19,6 +19,7 @@ import numpy as np
 import requests
 import json
 import pickle
+import hashlib
 import io
 import os
 import sys
@@ -51,7 +52,9 @@ CONFIG = {
     'output_archive_dir': (_HERE / 'output' / 'archive'),
     
     # API Keys
-    'odds_api_key': '8269e5e566cd8d8f8c294b85244ffab7',
+    'odds_api_key': os.environ.get('ODDS_API_KEY', ''),
+    'allow_live_odds_api_spend': False,
+    'odds_api_credit_reserve': 13436,
     
     # Model settings
     'min_games': 10,           # Minimum games for prediction
@@ -61,17 +64,23 @@ CONFIG = {
     'edge_z_threshold': 0.5,   # Min edge in units of player std dev (primary filter)
     'require_meta_for_live_picks': True,   # Only allow picks supported by the abstention layer
     'allow_structural_micro_props': False, # Disable hardcoded STL/BLK fallback picks by default
+    'excluded_pick_props': [],  # Dynamic evidence policy decides which props are publishable.
     'live_pick_min': 5,        # Minimum number of live picks to publish each day
     'live_pick_target': 5,     # Target size of the final live card
     'live_pick_candidate_pool': 25,  # Pull a deeper pool, then sanitize and diversify
+    'live_pick_max_per_prop': 1,  # Prevent one prop family from taking over the card.
     'live_pick_meta_floor_min': 45.0,      # Final-card hard floor for meta_prob (%)
     'live_pick_meta_floor_max': 60.0,      # Prevent over-tightening on thin slates
     'live_pick_meta_floor_slack': 10.0,    # Allow some slack below prop policy floor
     'live_pick_volatility_ceiling_mult': 1.0,  # 1.0 = use learned p75/high-vol reference directly
     'live_pick_estimated_hit_rate_floor': 54.5,  # Lowered from 65.0: true break-even for PrizePicks
     'live_pick_market_model_only': False,  # Allow all pick sources to compete on merit, not just market_model
-    'allow_structural_micro_props': True,  # STL/BLK structural UNDER: 74%/79% training hit — re-enabled 2026-04-15 (DEC-034)
-
+    'live_line_source_mode': 'prizepicks',  # PrizePicks is the line actually being selected.
+    'live_sportsbook_key': 'prizepicks',
+    'live_fanduel_min_side_prob': 0.50,
+    'live_fanduel_min_residual_edge': 0.05,
+    'live_fanduel_volatility_ceiling_mult': 1.25,
+    'local_timezone': 'America/Chicago',
     # Targets
     'targets': ['pts', 'trb', 'ast', 'pra', 'pr', 'pa'],
 }
@@ -79,6 +88,17 @@ CONFIG = {
 # Ensure directories exist
 for dir_key in ['data_dir', 'line_archive_dir', 'models_dir', 'output_dir', 'output_archive_dir']:
     CONFIG[dir_key].mkdir(parents=True, exist_ok=True)
+
+
+def _excluded_pick_props_upper() -> set:
+    return {str(prop).upper() for prop in CONFIG.get('excluded_pick_props', [])}
+
+
+def _line_source_policy_allows_publish(actual_source: object, expected_source: object) -> bool:
+    """Return whether a live card may be published for the configured market."""
+    actual = str(actual_source or '').strip().lower()
+    expected = str(expected_source or '').strip().lower()
+    return bool(actual and expected and actual == expected)
 
 
 _ODDS_PROP_TO_STAT = {
@@ -1017,6 +1037,62 @@ def _apply_estimated_hit_rates(picks_df: pd.DataFrame,
     return working
 
 
+def _apply_signal_scores(picks_df: pd.DataFrame) -> pd.DataFrame:
+    """Attach a row-level bet-strength score that is not a hit probability."""
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+
+    working = picks_df.copy()
+    idx = working.index
+
+    def numeric_col(name: str, default: float = np.nan) -> pd.Series:
+        return pd.to_numeric(
+            working.get(name, pd.Series(default, index=idx)),
+            errors='coerce',
+        )
+
+    edge_abs = numeric_col('edge', 0.0).abs()
+    market_abs = numeric_col('market_edge', np.nan).abs().fillna(edge_abs)
+    sigma = numeric_col('volatility_metric', np.nan).fillna(numeric_col('sigma', np.nan))
+    sigma = sigma.replace(0, np.nan)
+
+    edge_per_sigma = (edge_abs / sigma).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    market_edge_per_sigma = (market_abs / sigma).replace([np.inf, -np.inf], np.nan).fillna(edge_per_sigma)
+
+    dir_strength = ((numeric_col('dir_prob', 50.0).fillna(50.0) - 50.0) / 18.0).clip(lower=0.0, upper=1.0)
+    meta_strength = ((numeric_col('meta_prob', 50.0).fillna(50.0) - 50.0) / 18.0).clip(lower=0.0, upper=1.0)
+    hist_strength = ((numeric_col('estimated_hit_rate', 50.0).fillna(50.0) - 50.0) / 20.0).clip(lower=0.0, upper=1.0)
+    edge_strength = (edge_per_sigma / 0.75).clip(lower=0.0, upper=1.0)
+    market_strength = (market_edge_per_sigma / 0.85).clip(lower=0.0, upper=1.0)
+
+    consistency = numeric_col('consistency_score', 0.0).fillna(0.0).clip(lower=0.0, upper=1.0)
+    volatility = numeric_col('volatility_score', 0.0).fillna(0.0).clip(lower=0.0, upper=1.0)
+    regime = numeric_col('regime_safety_score', 0.0).fillna(0.0).clip(lower=0.0, upper=1.0)
+    support = numeric_col('support_agreement_score', np.nan)
+    support = support.fillna((numeric_col('support_agreement_count', 0.0).fillna(0.0) / 3.0).clip(lower=0.0, upper=1.0))
+
+    signal = (
+        market_strength * 0.24 +
+        edge_strength * 0.18 +
+        dir_strength * 0.16 +
+        meta_strength * 0.12 +
+        hist_strength * 0.10 +
+        consistency * 0.08 +
+        volatility * 0.06 +
+        support * 0.04 +
+        regime * 0.02
+    )
+    working['edge_per_sigma'] = edge_per_sigma.round(3)
+    working['market_edge_per_sigma'] = market_edge_per_sigma.round(3)
+    working['signal_score'] = (signal.clip(lower=0.0, upper=1.0) * 100.0).round(1)
+    working['signal_grade'] = pd.cut(
+        working['signal_score'],
+        bins=[-0.1, 45.0, 60.0, 75.0, 100.0],
+        labels=['D', 'C', 'B', 'A'],
+    ).astype(str)
+    return working
+
+
 def _apply_top_tier_lane_flags(picks_df: pd.DataFrame,
                                history_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Mark picks that belong to historically strong prop/direction lanes."""
@@ -1059,7 +1135,11 @@ def _live_card_volatility_ceiling(prop: str) -> float:
     """Return the hard volatility ceiling for the final live card."""
     sigma_p25, sigma_p75 = _load_sigma_thresholds()
     _, high_ref = _prop_volatility_refs(str(prop or ''), sigma_p25, sigma_p75)
-    ceiling = float(high_ref) * float(CONFIG.get('live_pick_volatility_ceiling_mult', 1.0))
+    if str(CONFIG.get('live_line_source_mode', 'fanduel') or '').strip().lower() == 'prizepicks':
+        mult = float(CONFIG.get('live_pick_volatility_ceiling_mult', 1.0))
+    else:
+        mult = float(CONFIG.get('live_fanduel_volatility_ceiling_mult', CONFIG.get('live_pick_volatility_ceiling_mult', 1.0)))
+    ceiling = float(high_ref) * mult
     return round(float(ceiling), 3)
 
 
@@ -1072,8 +1152,11 @@ def _apply_live_accuracy_gates(picks_df: pd.DataFrame,
 
     quality = quality_policy or _load_target_quality_policy()
     working = picks_df.copy()
+    if 'estimated_hit_rate' not in working.columns:
+        working = _apply_estimated_hit_rates(working, history_df=history_df)
     if 'top_tier_lane_pass' not in working.columns:
         working = _apply_top_tier_lane_flags(working, history_df=history_df)
+    working = _apply_signal_scores(working)
     working['meta_floor'] = working.get('prop', pd.Series('', index=working.index)).apply(
         lambda prop: _live_card_meta_floor(str(prop), quality)
     )
@@ -1116,9 +1199,64 @@ def _apply_live_accuracy_gates(picks_df: pd.DataFrame,
     return working
 
 
+def _format_live_gate_failures(row: pd.Series) -> str:
+    failures = []
+    if not bool(row.get('meta_gate_pass', False)):
+        meta_val = row.get('meta_prob', np.nan)
+        meta_floor = row.get('meta_floor', np.nan)
+        failures.append(f"meta {float(meta_val):.1f}<{float(meta_floor):.1f}" if pd.notna(meta_val) and pd.notna(meta_floor) else "meta")
+    if not bool(row.get('volatility_gate_pass', False)):
+        vol_val = row.get('volatility_metric', np.nan)
+        vol_ceiling = row.get('volatility_ceiling', np.nan)
+        failures.append(f"vol {float(vol_val):.2f}>{float(vol_ceiling):.2f}" if pd.notna(vol_val) and pd.notna(vol_ceiling) else "vol missing")
+    if not bool(row.get('estimated_hit_rate_pass', False)):
+        hit_val = row.get('estimated_hit_rate', np.nan)
+        hit_floor = row.get('estimated_hit_rate_floor', np.nan)
+        failures.append(f"hit {float(hit_val):.1f}<{float(hit_floor):.1f}" if pd.notna(hit_val) and pd.notna(hit_floor) else "hit")
+    if not bool(row.get('pick_source_gate_pass', False)):
+        failures.append(f"source={row.get('pick_source', '')}")
+    if not failures:
+        failures.append("tier selection/diversity")
+    return ", ".join(failures)
+
+
+def _print_empty_live_card_diagnostics(candidates: pd.DataFrame, history_df: Optional[pd.DataFrame] = None) -> None:
+    if candidates is None or len(candidates) == 0:
+        print("  No candidate picks survived the initial edge/probability filters.")
+        return
+
+    gated = _apply_live_accuracy_gates(candidates, history_df=history_df)
+    gated['gate_failures'] = gated.apply(_format_live_gate_failures, axis=1)
+    sort_cols = [c for c in ['signal_score', 'rank_score', 'estimated_hit_rate', 'confidence', 'edge'] if c in gated.columns]
+    if sort_cols:
+        gated = gated.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+    print("\n  Top rejected live-card candidates:")
+    print(f"  {'PLAYER':<22} {'PROP':<5} {'DIR':<6} {'LINE':>5} {'SRC':<14} {'CONF':>5} {'HIT%':>5}  BLOCKED BY")
+    print("  " + "-" * 96)
+    for _, r in gated.head(8).iterrows():
+        player = str(r.get('player', ''))[:22]
+        prop = str(r.get('prop', ''))
+        direction = str(r.get('direction', ''))
+        source = str(r.get('pick_source', ''))[:14]
+        try:
+            line_s = f"{float(r.get('line')):>5.1f}"
+        except Exception:
+            line_s = "  ?  "
+        try:
+            conf_s = f"{float(r.get('confidence')):>4.0f}%"
+        except Exception:
+            conf_s = " -- "
+        try:
+            hit_s = f"{float(r.get('estimated_hit_rate')):>4.0f}%"
+        except Exception:
+            hit_s = " -- "
+        print(f"  {player:<22} {prop:<5} {direction:<6} {line_s} {source:<14} {conf_s} {hit_s}  {r.get('gate_failures', '')}")
+    print("  " + "-" * 96)
+
+
 def _load_probability_sidecars():
     sidecars = {}
-    for target in ['pts', 'trb', 'ast', 'stl', 'blk', 'tov']:
+    for target in ['pts', 'trb', 'ast', 'pra', 'pr', 'pa', 'stl', 'blk', 'tov']:
         path = CONFIG['models_dir'] / f'prob_sidecar_{target}_advanced.pkl'
         if not path.exists():
             continue
@@ -1130,16 +1268,41 @@ def _load_probability_sidecars():
     return sidecars
 
 
-def _load_probability_calibrators():
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _load_probability_calibrators(probability_sidecars: Dict[str, object]):
+    """Load calibration only when it is bound to the active sidecar files."""
     path = CONFIG['models_dir'] / 'probability_calibrator_advanced.pkl'
     if not path.exists():
+        if probability_sidecars:
+            raise FileNotFoundError(
+                'Probability sidecars are active but probability_calibrator_advanced.pkl is missing'
+            )
         return {}
-    try:
-        with open(path, 'rb') as f:
-            payload = pickle.load(f)
-        return payload.get('calibrators', {})
-    except Exception:
-        return {}
+    with open(path, 'rb') as f:
+        payload = pickle.load(f)
+    contract = payload.get('sidecar_contract') or {}
+    expected = contract.get('sidecar_sha256') or {}
+    actual = {
+        target: _sha256_file(CONFIG['models_dir'] / f'prob_sidecar_{target}_advanced.pkl')
+        for target in sorted(probability_sidecars)
+    }
+    if expected != actual:
+        raise RuntimeError(
+            'Probability model bundle mismatch: the calibrator was not fitted for '
+            'the active probability sidecars. Retrain or rebuild the calibrator bundle.'
+        )
+    calibrators = payload.get('calibrators') or {}
+    missing = sorted(set(probability_sidecars) - set(calibrators))
+    if missing:
+        raise RuntimeError(f'Probability calibrator is missing active targets: {missing}')
+    return calibrators
 
 
 def _attach_probability_outputs(pred_df: pd.DataFrame,
@@ -1258,17 +1421,41 @@ def _projection_type_rank(value: object) -> int:
     return 3
 
 
+def _line_source_priority(value: object) -> int:
+    source = str(value or '').strip().lower()
+    preferred_book = str(CONFIG.get('live_sportsbook_key', 'fanduel') or '').strip().lower()
+    if preferred_book and preferred_book in source:
+        return 3
+    if 'prizepicks' in source:
+        return 2
+    if 'odds_api' in source:
+        return 1
+    return 0
+
+
+def _line_source_matches(value: object, allowed_sources: Optional[List[str]]) -> bool:
+    if not allowed_sources:
+        return True
+    source = str(value or '').strip().lower()
+    return any(str(allowed).strip().lower() in source for allowed in allowed_sources)
+
+
+_LINE_STORE_COLUMNS = [
+    'game_date', 'player', 'player_norm', 'prop', 'line', 'num_books',
+    'source', 'snapshot_ts', 'projection_type', 'is_promo',
+    'bookmaker', 'event_id', 'commence_time', 'requested_snapshot_ts',
+    'over_price', 'under_price',
+]
+
+_LINE_STORE_KEY = ['game_date', 'player_norm', 'prop', 'line', 'source', 'snapshot_ts']
+
+
 def _normalize_historical_lines_frame(df: pd.DataFrame,
                                       game_date: Optional[str] = None,
                                       source: str = 'unknown',
                                       snapshot_ts: Optional[str] = None) -> pd.DataFrame:
     if df is None or len(df) == 0:
-        return pd.DataFrame(
-            columns=[
-                'game_date', 'player', 'player_norm', 'prop', 'line', 'num_books',
-                'source', 'snapshot_ts', 'projection_type', 'is_promo',
-            ]
-        )
+        return pd.DataFrame(columns=_LINE_STORE_COLUMNS)
 
     out = df.copy()
     if game_date is not None:
@@ -1282,7 +1469,9 @@ def _normalize_historical_lines_frame(df: pd.DataFrame,
         out['source'] = out['source'].fillna(source)
     else:
         out['source'] = source
-    snap_value = snapshot_ts or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # Missing legacy timestamps must have a deterministic value. Using ``now``
+    # here makes the same legacy row look like a new snapshot on every load.
+    snap_value = snapshot_ts or 'unknown'
     if 'snapshot_ts' in out.columns:
         out['snapshot_ts'] = out['snapshot_ts'].replace('', pd.NA).fillna(snap_value)
     else:
@@ -1297,10 +1486,11 @@ def _normalize_historical_lines_frame(df: pd.DataFrame,
     else:
         out['is_promo'] = False
 
-    keep_cols = [
-        'game_date', 'player', 'player_norm', 'prop', 'line', 'num_books',
-        'source', 'snapshot_ts', 'projection_type', 'is_promo',
-    ]
+    for numeric_col in ['over_price', 'under_price']:
+        if numeric_col in out.columns:
+            out[numeric_col] = pd.to_numeric(out[numeric_col], errors='coerce')
+
+    keep_cols = _LINE_STORE_COLUMNS
     for col in keep_cols:
         if col not in out.columns:
             out[col] = np.nan
@@ -1313,7 +1503,7 @@ def _normalize_historical_lines_frame(df: pd.DataFrame,
     out['snapshot_ts'] = out['snapshot_ts'].astype(str)
     out['projection_type'] = out['projection_type'].astype(str)
     out['is_promo'] = out['is_promo'].astype(bool)
-    return out.drop_duplicates(subset=['game_date', 'player_norm', 'prop', 'line', 'source', 'snapshot_ts']).reset_index(drop=True)
+    return out.drop_duplicates(subset=_LINE_STORE_KEY, keep='last').reset_index(drop=True)
 
 
 def _load_historical_lines_frame(path: Optional[Path] = None) -> pd.DataFrame:
@@ -1328,6 +1518,13 @@ def _load_historical_lines_frame(path: Optional[Path] = None) -> pd.DataFrame:
 
 
 def _merge_historical_lines(existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
+    """Append snapshots without collapsing books or observation times.
+
+    The store grain is one row per date/player/prop/line/source/snapshot. The
+    line is part of the physical key because some books return alternate lines
+    for the same market. Choosing a main line, preferred book, or latest
+    observation is a read-time concern handled by ``_select_preferred_line_rows``.
+    """
     existing = _normalize_historical_lines_frame(existing)
     incoming = _normalize_historical_lines_frame(incoming)
     if len(existing) == 0:
@@ -1340,14 +1537,97 @@ def _merge_historical_lines(existing: pd.DataFrame, incoming: pd.DataFrame) -> p
     if len(merged) == 0:
         return merged
 
-    merged['snapshot_sort'] = pd.to_datetime(merged['snapshot_ts'], errors='coerce')
-    merged = merged.sort_values(
-        ['game_date', 'player_norm', 'prop', 'num_books', 'snapshot_sort', 'line'],
-        ascending=[True, True, True, True, True, True],
+    merged = merged.drop_duplicates(subset=_LINE_STORE_KEY, keep='last')
+    return merged.sort_values(
+        ['game_date', 'prop', 'player', 'source', 'snapshot_ts'],
+        kind='stable',
+    ).reset_index(drop=True)
+
+
+def _select_preferred_line_rows(lines_df: pd.DataFrame,
+                                allowed_sources: Optional[List[str]] = None,
+                                as_of: Optional[object] = None,
+                                require_known_snapshot: bool = False) -> pd.DataFrame:
+    """Materialize a one-line-per-prop view without admitting time travel.
+
+    When a cutoff is supplied, every retained row must have a parseable
+    snapshot timestamp at or before that cutoff.  Historical callers can also
+    require a known timestamp without supplying one global cutoff because each
+    row may belong to a different slate.
+    """
+    working = _normalize_historical_lines_frame(lines_df)
+    if len(working) == 0:
+        return working
+    if allowed_sources:
+        working = working[
+            working['source'].apply(lambda value: _line_source_matches(value, allowed_sources))
+        ].copy()
+    if len(working) == 0:
+        return working
+
+    working['_snapshot_sort'] = pd.to_datetime(working['snapshot_ts'], errors='coerce', utc=True)
+    if require_known_snapshot:
+        working = working.loc[working['_snapshot_sort'].notna()].copy()
+    if as_of is not None:
+        cutoff = pd.to_datetime(as_of, errors='coerce', utc=True)
+        if pd.isna(cutoff):
+            raise ValueError(f"Invalid line-selection cutoff: {as_of!r}")
+        working = working.loc[
+            working['_snapshot_sort'].notna() & working['_snapshot_sort'].le(cutoff)
+        ].copy()
+
+    # Never select a known post-tip observation for historical evaluation.
+    if 'commence_time' in working.columns:
+        commence = pd.to_datetime(working['commence_time'], errors='coerce', utc=True)
+        pregame = commence.isna() | (
+            working['_snapshot_sort'].notna()
+            & working['_snapshot_sort'].le(commence)
+        )
+        working = working[pregame].copy()
+    if len(working) == 0:
+        return working.drop(columns=['_snapshot_sort'], errors='ignore')
+
+    # Paid sportsbook responses can contain alternate lines. Retain every line
+    # physically, then choose the most balanced paired-price line as the book's
+    # main line for the legacy one-row view. Missing-price legacy rows keep the
+    # deterministic line tie-breaker used previously.
+    over = pd.to_numeric(working.get('over_price'), errors='coerce')
+    under = pd.to_numeric(working.get('under_price'), errors='coerce')
+    paired = over.notna() & under.notna() & over.ne(0) & under.ne(0)
+
+    def _american_implied(series: pd.Series) -> pd.Series:
+        return pd.Series(
+            np.where(series < 0, -series / (-series + 100.0), 100.0 / (series + 100.0)),
+            index=series.index,
+            dtype=float,
+        )
+
+    over_implied = _american_implied(over)
+    under_implied = _american_implied(under)
+    no_vig_over = over_implied / (over_implied + under_implied)
+    working['_main_line_score'] = np.where(paired, -(no_vig_over - 0.5).abs(), -1.0)
+    working = working.sort_values(
+        ['game_date', 'player_norm', 'prop', 'source', '_snapshot_sort',
+         '_main_line_score', 'num_books', 'line'],
+        kind='stable',
+        na_position='first',
+    ).drop_duplicates(
+        subset=['game_date', 'player_norm', 'prop', 'source', 'snapshot_ts'],
+        keep='last',
     )
-    merged = merged.drop_duplicates(subset=['game_date', 'player_norm', 'prop'], keep='last')
-    merged = merged.sort_values(['game_date', 'prop', 'player']).reset_index(drop=True)
-    return merged.drop(columns=['snapshot_sort'], errors='ignore')
+
+    working['_source_priority'] = working['source'].apply(_line_source_priority)
+    working = working.sort_values(
+        ['game_date', 'player_norm', 'prop', '_source_priority', '_snapshot_sort', 'num_books', 'line'],
+        kind='stable',
+        na_position='first',
+    )
+    working = working.drop_duplicates(
+        subset=['game_date', 'player_norm', 'prop'], keep='last'
+    )
+    return working.drop(
+        columns=['_snapshot_sort', '_source_priority', '_main_line_score'], errors='ignore'
+    ).reset_index(drop=True)
 
 
 def _write_historical_lines(df: pd.DataFrame, path: Optional[Path] = None) -> Path:
@@ -1362,6 +1642,9 @@ def _write_historical_lines(df: pd.DataFrame, path: Optional[Path] = None) -> Pa
         drop_unknown=True,
         require_roster=False,
     )
+    # Canonicalization can merge formerly distinct name spellings into the same
+    # store key, so enforce idempotence again after the name pass.
+    clean = _normalize_historical_lines_frame(clean)
     _atomic_csv(clean, Path(path))
     if summary['canonicalized_rows'] or summary['dropped_rows']:
         print(
@@ -1420,7 +1703,7 @@ def _extract_prediction_archive_lines(path: Path) -> pd.DataFrame:
 
 def rebuild_historical_lines_from_local_sources(write: bool = True) -> pd.DataFrame:
     """Rebuild/repair historical_lines.csv from local archives and snapshots."""
-    merged = _load_historical_lines_frame()
+    frames = [_load_historical_lines_frame()]
 
     morning_paths = sorted(CONFIG['data_dir'].glob('lines_morning_*.csv'))
     for path in morning_paths:
@@ -1436,7 +1719,7 @@ def rebuild_historical_lines_from_local_sources(write: bool = True) -> pd.DataFr
             morning.assign(num_books=1, source='morning_snapshot', snapshot_ts=path.stem),
             game_date=game_date,
         )
-        merged = _merge_historical_lines(merged, morning)
+        frames.append(morning)
 
     archive_paths = sorted(CONFIG['line_archive_dir'].rglob('lines_*.csv'))
     for path in archive_paths:
@@ -1448,22 +1731,31 @@ def rebuild_historical_lines_from_local_sources(write: bool = True) -> pd.DataFr
             snap = pd.read_csv(path, low_memory=False)
         except Exception:
             continue
-        snap = _normalize_historical_lines_frame(
-            snap.assign(source='line_archive', snapshot_ts=path.stem),
-            game_date=game_date,
-        )
-        merged = _merge_historical_lines(merged, snap)
+        if 'source' not in snap.columns:
+            snap['source'] = 'line_archive'
+        else:
+            snap['source'] = snap['source'].replace('', pd.NA).fillna('line_archive')
+        if 'snapshot_ts' not in snap.columns:
+            snap['snapshot_ts'] = path.stem
+        else:
+            snap['snapshot_ts'] = snap['snapshot_ts'].replace('', pd.NA).fillna(path.stem)
+        snap = _normalize_historical_lines_frame(snap, game_date=game_date)
+        frames.append(snap)
 
     pred_paths = sorted((CONFIG['output_archive_dir']).rglob('predictions_*.csv'))
     for path in pred_paths:
         extracted = _extract_prediction_archive_lines(path)
         if len(extracted) == 0:
             continue
-        merged = _merge_historical_lines(merged, extracted)
+        frames.append(extracted)
 
     latest_pred = CONFIG['output_dir'] / 'predictions_latest.csv'
     if latest_pred.exists():
-        merged = _merge_historical_lines(merged, _extract_prediction_archive_lines(latest_pred))
+        extracted = _extract_prediction_archive_lines(latest_pred)
+        if len(extracted) > 0:
+            frames.append(extracted)
+
+    merged = _merge_historical_lines(pd.DataFrame(), pd.concat(frames, ignore_index=True))
 
     if write:
         _write_historical_lines(merged)
@@ -1678,15 +1970,15 @@ def fetch_nba_data(seasons: List[str] = None, local_file: str = None) -> pd.Data
     return df
 
 
-def fetch_todays_games() -> pd.DataFrame:
-    """Fetch today's NBA schedule."""
+def fetch_todays_games(slate_date: Optional[object] = None) -> pd.DataFrame:
+    """Fetch an NBA schedule with team abbreviations, never opaque team IDs."""
     try:
         from nba_api.stats.endpoints import scoreboardv2
     except ImportError:
         os.system('pip install nba_api -q')
         from nba_api.stats.endpoints import scoreboardv2
     
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = pd.Timestamp(slate_date or datetime.now()).strftime('%Y-%m-%d')
     
     try:
         scoreboard = scoreboardv2.ScoreboardV2(game_date=today)
@@ -1696,13 +1988,25 @@ def fetch_todays_games() -> pd.DataFrame:
             print(f"  No games scheduled for {today}")
             return pd.DataFrame()
         
+        from nba_api.stats.static import teams as nba_teams
+        id_to_abbreviation = {
+            int(team['id']): str(team['abbreviation']).upper()
+            for team in nba_teams.get_teams()
+        }
+
         # Extract matchups
         matchups = []
         for _, game in games.iterrows():
+            home_value = game.get('HOME_TEAM_ABBREVIATION')
+            away_value = game.get('VISITOR_TEAM_ABBREVIATION')
+            home = str(home_value).upper() if pd.notna(home_value) else id_to_abbreviation.get(int(game.get('HOME_TEAM_ID')))
+            away = str(away_value).upper() if pd.notna(away_value) else id_to_abbreviation.get(int(game.get('VISITOR_TEAM_ID')))
+            if not home or not away:
+                raise ValueError(f"Could not map schedule team IDs for game {game.get('GAME_ID')}")
             matchups.append({
                 'game_id': game.get('GAME_ID'),
-                'home_team': game.get('HOME_TEAM_ABBREVIATION', game.get('HOME_TEAM_ID')),
-                'away_team': game.get('VISITOR_TEAM_ABBREVIATION', game.get('VISITOR_TEAM_ID')),
+                'home_team': home,
+                'away_team': away,
                 'game_date': today
             })
         
@@ -1711,6 +2015,50 @@ def fetch_todays_games() -> pd.DataFrame:
     except Exception as e:
         print(f"  Error fetching schedule: {e}")
         return pd.DataFrame()
+
+
+POINT_IN_TIME_DEFENSE_FEATURES = [
+    'opp_def_rtg_pt', 'opp_pace_pt', 'opp_def_tier_pt',
+]
+
+
+def _attach_live_point_in_time_defense(
+    latest: pd.DataFrame,
+    history: pd.DataFrame,
+    slate_date: object,
+) -> pd.DataFrame:
+    """Attach the scheduled opponent's rigorous pregame rating or fail closed."""
+    schedule = fetch_todays_games(slate_date)
+    if schedule.empty:
+        raise RuntimeError(
+            f"Point-in-time defense features are required, but no schedule was available for {slate_date}"
+        )
+    from scripts.build_pointintime_team_defense import build_live_matchup_ratings
+
+    live = build_live_matchup_ratings(history, schedule, slate_date)
+    live_columns = [
+        'opponent', 'is_home', 'rating_asof_date', 'team_rating_source',
+        'opp_rating_source', 'n_prior_games', 'opp_n_prior_games',
+        'off_rtg_pt', 'def_rtg_pt', 'net_rtg_pt', 'pace_pt',
+        'opp_def_rtg_pt', 'opp_pace_pt', 'opp_def_rank_pt',
+        'opp_def_tier_pt', 'matchup_expected_ortg_pt',
+        'rating_league_avg', 'rating_hca',
+    ]
+    out = latest.copy()
+    team_col = 'team' if 'team' in out.columns else 'TEAM_ABBREVIATION'
+    out[team_col] = out[team_col].astype(str).str.strip().str.upper()
+    replace_columns = ['opp', 'is_home', *[c for c in live_columns if c != 'is_home']]
+    out = out.drop(columns=[c for c in replace_columns if c in out.columns])
+    right = live[['team', *live_columns]].rename(columns={'opponent': 'opp'})
+    out = out.merge(right, left_on=team_col, right_on='team', how='inner', validate='many_to_one')
+    if team_col != 'team':
+        out = out.drop(columns=['team'])
+    missing = out[POINT_IN_TIME_DEFENSE_FEATURES].isna().any(axis=1)
+    if missing.any():
+        raise RuntimeError(f"Live defense adapter left {int(missing.sum())} scheduled players without ratings")
+    if (pd.to_datetime(out['rating_asof_date']) >= pd.Timestamp(slate_date).normalize()).any():
+        raise RuntimeError("Live defense adapter produced a chronology violation")
+    return out
 
 
 def _normalize_name(name: str) -> str:
@@ -1725,6 +2073,11 @@ def _coerce_slate_date(value: object) -> Optional[str]:
     ts = pd.to_datetime(value, errors='coerce')
     if pd.isna(ts):
         return None
+    try:
+        if getattr(ts, 'tzinfo', None) is not None:
+            ts = ts.tz_convert(CONFIG.get('local_timezone', 'America/Chicago'))
+    except Exception:
+        pass
     return ts.strftime('%Y-%m-%d')
 
 
@@ -1783,15 +2136,76 @@ def _select_active_slate_lines(lines_df: pd.DataFrame,
     return active.reset_index(drop=True), slate_date
 
 
-def _infer_line_source(lines_df: pd.DataFrame, default: str = 'cached_unknown') -> str:
+def _infer_line_source(lines_df: pd.DataFrame,
+                       default: str = 'cached_unknown',
+                       preferred_sources: Optional[List[str]] = None) -> str:
     if lines_df is None or len(lines_df) == 0 or 'source' not in lines_df.columns:
         return default
     src_vals = lines_df['source'].dropna().astype(str).tolist()
+    for allowed in preferred_sources or []:
+        normalized = str(allowed).strip().lower()
+        if normalized and any(normalized in source.lower() for source in src_vals):
+            return normalized
+    preferred_book = str(CONFIG.get('live_sportsbook_key', 'fanduel') or '').strip().lower()
+    if preferred_book and any(preferred_book in s.lower() for s in src_vals):
+        return preferred_book
     if any('prizepicks' in s.lower() for s in src_vals):
         return 'prizepicks'
     if any('odds_api' in s.lower() for s in src_vals):
         return 'odds_api'
     return default
+
+
+def _select_cached_lines_for_predict(lines_df: pd.DataFrame,
+                                     today_str: str,
+                                     as_of: Optional[datetime] = None,
+                                     allowed_sources: Optional[List[str]] = None,
+                                     standard_only: bool = False,
+                                     allow_future_slate: bool = True) -> Tuple[pd.DataFrame, Optional[str], str, str]:
+    """Choose the cached slate `predict` should use before attempting a live refresh.
+
+    Prefers an exact slate match for today, then the nearest current/future slate
+    already cached locally. If only stale past slates exist, returns an empty
+    frame so predict can refresh live lines.
+    """
+    if lines_df is None or len(lines_df) == 0:
+        return pd.DataFrame(), None, 'cached_unknown', 'missing'
+
+    working = lines_df.copy()
+    if 'game_date' not in working.columns:
+        return pd.DataFrame(), None, 'cached_unknown', 'missing'
+    if allowed_sources and 'source' in working.columns:
+        working = working[working['source'].apply(lambda value: _line_source_matches(value, allowed_sources))].copy()
+    elif allowed_sources:
+        return pd.DataFrame(), None, 'cached_unknown', 'missing'
+    if standard_only:
+        if 'projection_type' in working.columns:
+            working = working[working['projection_type'].apply(_normalize_projection_type).eq('standard')].copy()
+        if 'is_promo' in working.columns:
+            working = working[~working['is_promo'].fillna(False).astype(bool)].copy()
+    if len(working) == 0:
+        return pd.DataFrame(), None, 'cached_unknown', 'missing'
+
+    exact, exact_date = _select_lines_for_exact_slate_date(working, today_str)
+    if len(exact) > 0:
+        exact = _select_preferred_line_rows(exact, allowed_sources=allowed_sources, as_of=as_of)
+        return exact, exact_date, _infer_line_source(exact, preferred_sources=allowed_sources), 'exact_today'
+    if not allow_future_slate:
+        active, active_date = _select_active_slate_lines(working, as_of=as_of or datetime.now())
+        return pd.DataFrame(), active_date, _infer_line_source(active, preferred_sources=allowed_sources), 'missing_exact_today'
+
+    active, active_date = _select_active_slate_lines(working, as_of=as_of or datetime.now())
+    if len(active) == 0 or not active_date:
+        return pd.DataFrame(), None, 'cached_unknown', 'missing'
+
+    try:
+        if pd.Timestamp(active_date) < pd.Timestamp(today_str):
+            return pd.DataFrame(), active_date, _infer_line_source(active, preferred_sources=allowed_sources), 'stale_past'
+    except Exception:
+        return pd.DataFrame(), active_date, _infer_line_source(active, preferred_sources=allowed_sources), 'stale_past'
+
+    active = _select_preferred_line_rows(active, allowed_sources=allowed_sources, as_of=as_of)
+    return active, active_date, _infer_line_source(active, preferred_sources=allowed_sources), 'active_future'
 
 
 def fetch_prizepicks_lines() -> pd.DataFrame:
@@ -1877,15 +2291,11 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
             return pd.DataFrame()
 
         df = pd.DataFrame(rows)
-        # De-dup per slate; PrizePicks can expose tomorrow's board before the
-        # calendar day rolls over, so the real slate date must survive grouping.
-        df = df.groupby(['game_date', 'player', 'prop'], as_index=False).agg(
-            line=('line', 'median'),
-            odds=('odds', 'first'),
-            num_books=('num_books', 'sum'),
-            projection_type=('projection_type', 'first'),
-            is_promo=('is_promo', 'max'),
-        )
+        # Keep the actual placeable contracts separate.  Standard/goblin/demon
+        # lines are not alternate observations of one number and must never be
+        # combined into a synthetic median.
+        from prizepicks_scraper import _deduplicate_offered_projection_rows
+        df = _deduplicate_offered_projection_rows(df)
         df, summary = sanitize_player_names(
             df,
             player_col='player',
@@ -1906,13 +2316,41 @@ def fetch_prizepicks_lines() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def fetch_vegas_lines() -> tuple:
-    """Fetch current NBA player prop lines. Tries Odds API first, falls back to PrizePicks.
+def fetch_vegas_lines(prefer_prizepicks: bool = False,
+                      preferred_bookmaker: Optional[str] = None,
+                      allow_prizepicks_fallback: bool = True) -> tuple:
+    """Fetch current NBA player prop lines.
+
+    The production default is PrizePicks-only. Odds API calls are possible only
+    when ``CONFIG['allow_live_odds_api_spend']`` is explicitly enabled; this
+    protects the research credit reserve from an implicit live fallback.
 
     Returns:
         (DataFrame, source_label) where source_label is 'odds_api' or 'prizepicks'.
     """
     api_key = CONFIG['odds_api_key']
+    preferred_bookmaker = str(preferred_bookmaker or '').strip().lower()
+    allow_odds_spend = bool(CONFIG.get('allow_live_odds_api_spend', False))
+
+    if prefer_prizepicks:
+        pp_df = fetch_prizepicks_lines()
+        if len(pp_df) > 0:
+            return pp_df, 'prizepicks'
+        if not allow_odds_spend:
+            print(
+                "  PrizePicks unavailable; Odds API fallback is disabled to preserve "
+                f"the {int(CONFIG.get('odds_api_credit_reserve', 0)):,}-credit reserve"
+            )
+            return pd.DataFrame(), 'prizepicks'
+        print("  PrizePicks unavailable — falling back to Odds API")
+
+    if not allow_odds_spend:
+        print(
+            "  Odds API live spend is disabled; using PrizePicks without touching the "
+            f"{int(CONFIG.get('odds_api_credit_reserve', 0)):,}-credit reserve"
+        )
+        pp_df = fetch_prizepicks_lines()
+        return pp_df, 'prizepicks'
 
     # Check if Odds API has remaining credits
     try:
@@ -1934,10 +2372,16 @@ def fetch_vegas_lines() -> tuple:
                 for event in events[:10]:
                     event_game_date = _coerce_slate_date(event.get('commence_time')) or datetime.now().strftime('%Y-%m-%d')
                     props_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/events/{event['id']}/odds"
-                    pr = requests.get(props_url, params={
-                        'apiKey': api_key, 'regions': 'us',
-                        'markets': ','.join(markets), 'oddsFormat': 'american'
-                    })
+                    odds_params = {
+                        'apiKey': api_key,
+                        'markets': ','.join(markets),
+                        'oddsFormat': 'american',
+                    }
+                    if preferred_bookmaker:
+                        odds_params['bookmakers'] = preferred_bookmaker
+                    else:
+                        odds_params['regions'] = 'us'
+                    pr = requests.get(props_url, params=odds_params)
                     if pr.status_code != 200:
                         continue
                     for bookmaker in pr.json().get('bookmakers', []):
@@ -1957,6 +2401,11 @@ def fetch_vegas_lines() -> tuple:
                     consolidated = df.groupby(['game_date', 'player', 'prop'], as_index=False).agg(
                         line=('line', 'median'), odds=('odds', 'first'), num_books=('book', 'count')
                     )
+                    source_label = preferred_bookmaker or 'odds_api'
+                    if preferred_bookmaker:
+                        consolidated['source'] = f'odds_api_{preferred_bookmaker}'
+                    consolidated['projection_type'] = 'standard'
+                    consolidated['is_promo'] = False
                     consolidated, summary = sanitize_player_names(
                         consolidated,
                         player_col='player',
@@ -1968,37 +2417,42 @@ def fetch_vegas_lines() -> tuple:
                     )
                     print(
                         f"  Fetched {len(consolidated)} validated player props "
-                        f"(Odds API, {remaining} credits left; "
+                        f"({source_label} via Odds API, {remaining} credits left; "
                         f"{summary['canonicalized_rows']} canonicalized, {summary['dropped_rows']} dropped)"
                     )
-                    return consolidated, 'odds_api'
+                    return consolidated, source_label
         else:
-            print(f"  Odds API: {remaining} credits remaining — switching to PrizePicks")
+            fallback_msg = "switching to PrizePicks" if allow_prizepicks_fallback else "no sportsbook refresh available"
+            print(f"  Odds API: {remaining} credits remaining — {fallback_msg}")
     except Exception as e:
-        print(f"  Odds API unavailable ({e}) — switching to PrizePicks")
+        fallback_msg = "switching to PrizePicks" if allow_prizepicks_fallback else "no sportsbook refresh available"
+        print(f"  Odds API unavailable ({e}) — {fallback_msg}")
+
+    if prefer_prizepicks or not allow_prizepicks_fallback:
+        return pd.DataFrame(), 'odds_api'
 
     pp_df = fetch_prizepicks_lines()
     return pp_df, 'prizepicks'
 
 
 def save_lines_snapshot(vegas_df: pd.DataFrame, game_date: Optional[str] = None, source: str = 'live_fetch'):
-    """Append fetched lines to data/historical_lines.csv keyed by their real slate date."""
+    """Append a lossless fetched-line snapshot keyed by source and observation time."""
     if vegas_df is None or len(vegas_df) == 0:
         return
     path = CONFIG['data_dir'] / 'historical_lines.csv'
     if 'game_date' in vegas_df.columns:
-        snap_input = vegas_df[
-            [c for c in ['game_date', 'player', 'prop', 'line', 'num_books', 'projection_type', 'is_promo'] if c in vegas_df.columns]
-        ].copy()
+        snap_input = vegas_df[[c for c in _LINE_STORE_COLUMNS if c in vegas_df.columns]].copy()
         snap_input['game_date'] = pd.to_datetime(snap_input['game_date'], errors='coerce').dt.strftime('%Y-%m-%d')
         snap_input = snap_input.dropna(subset=['game_date']).copy()
     else:
         resolved_game_date = game_date or datetime.now().strftime('%Y-%m-%d')
-        snap_input = vegas_df[
-            [c for c in ['player', 'prop', 'line', 'num_books', 'projection_type', 'is_promo'] if c in vegas_df.columns]
-        ].copy()
+        snap_input = vegas_df[[c for c in _LINE_STORE_COLUMNS if c in vegas_df.columns and c != 'game_date']].copy()
         snap_input['game_date'] = resolved_game_date
-    snap = _normalize_historical_lines_frame(snap_input, source=source)
+    snap = _normalize_historical_lines_frame(
+        snap_input,
+        source=source,
+        snapshot_ts=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    )
     if len(snap) == 0:
         return
     combined = _merge_historical_lines(_load_historical_lines_frame(path), snap)
@@ -2007,7 +2461,7 @@ def save_lines_snapshot(vegas_df: pd.DataFrame, game_date: Optional[str] = None,
         slate_snap = snap[snap['game_date'] == slate_date].copy()
         _archive_line_snapshot(slate_snap, slate_date, stem='lines')
         day_total = int((combined['game_date'] == slate_date).sum())
-        print(f"  Saved {len(slate_snap)} lines -> historical_lines.csv ({slate_date}, {day_total} rows kept for day)")
+        print(f"  Saved {len(slate_snap)} snapshots -> historical_lines.csv ({slate_date}, {day_total} raw rows retained for day)")
         morning_path = CONFIG['data_dir'] / f'lines_morning_{slate_date}.csv'
         if not morning_path.exists():
             slate_snap[['player', 'prop', 'line']].assign(
@@ -2016,8 +2470,11 @@ def save_lines_snapshot(vegas_df: pd.DataFrame, game_date: Optional[str] = None,
             print(f"  Morning snapshot saved -> {morning_path.name}")
 
 
-def backfill_historical_lines(days: int = 30):
+def _legacy_backfill_historical_lines_unsafe(days: int = 30):
     """Pull historical prop lines from Odds API and save to historical_lines.csv."""
+    raise RuntimeError(
+        "Legacy uncapped backfill is disabled; use backfill_historical_lines(..., max_credits=...)."
+    )
     api_key = CONFIG['odds_api_key']
     base = "https://api.the-odds-api.com/v4/historical/sports/basketball_nba"
     markets = [
@@ -2089,6 +2546,189 @@ def backfill_historical_lines(days: int = 30):
     return True
 
 
+def _parse_historical_event_odds(payload: object,
+                                 requested_snapshot_ts: str) -> pd.DataFrame:
+    """Convert one historical-event response into one row per book/player/prop."""
+    if not isinstance(payload, dict) or not isinstance(payload.get('data'), dict):
+        return _normalize_historical_lines_frame(pd.DataFrame())
+
+    event = payload['data']
+    event_id = str(event.get('id', '') or '')
+    commence_time = str(event.get('commence_time', '') or '')
+    game_date = _coerce_slate_date(commence_time)
+    api_snapshot_ts = str(payload.get('timestamp') or requested_snapshot_ts)
+    rows = {}
+
+    for bookmaker in event.get('bookmakers', []) or []:
+        if not isinstance(bookmaker, dict):
+            continue
+        book = str(bookmaker.get('key', '') or '').strip().lower()
+        if not book:
+            continue
+        for market in bookmaker.get('markets', []) or []:
+            if not isinstance(market, dict):
+                continue
+            prop = str(market.get('key', '') or '')
+            for outcome in market.get('outcomes', []) or []:
+                if not isinstance(outcome, dict):
+                    continue
+                player = str(outcome.get('description', '') or '').strip()
+                point = pd.to_numeric(outcome.get('point'), errors='coerce')
+                if not player or pd.isna(point) or not game_date:
+                    continue
+                row_key = (book, player, prop, float(point))
+                row = rows.setdefault(row_key, {
+                    'game_date': game_date,
+                    'player': player,
+                    'player_norm': _normalize_name(player),
+                    'prop': prop,
+                    'line': float(point),
+                    'num_books': 1,
+                    'source': f'odds_api_{book}',
+                    'snapshot_ts': api_snapshot_ts,
+                    'projection_type': 'standard',
+                    'is_promo': False,
+                    'bookmaker': book,
+                    'event_id': event_id,
+                    'commence_time': commence_time,
+                    'requested_snapshot_ts': requested_snapshot_ts,
+                    'over_price': np.nan,
+                    'under_price': np.nan,
+                })
+                side = str(outcome.get('name', '') or '').strip().lower()
+                price = pd.to_numeric(outcome.get('price'), errors='coerce')
+                if side == 'over':
+                    row['over_price'] = price
+                elif side == 'under':
+                    row['under_price'] = price
+
+    return _normalize_historical_lines_frame(pd.DataFrame(rows.values()))
+
+
+def _response_json_dict(response: object) -> Optional[Dict]:
+    """Return a JSON object for a successful response, otherwise None."""
+    if getattr(response, 'status_code', None) != 200:
+        return None
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def backfill_historical_lines(days: int = 30, max_credits: int = 0):
+    """Pull noon UTC snapshots with per-event checkpoints and a hard spend cap.
+
+    A positive ``max_credits`` is mandatory. With the default zero value this
+    function prints a conservative cost preview and sends no network request.
+    """
+    api_key = CONFIG['odds_api_key']
+    base = "https://api.the-odds-api.com/v4/historical/sports/basketball_nba"
+    markets = [
+        'player_points', 'player_rebounds', 'player_assists',
+        'player_points_rebounds_assists', 'player_points_rebounds',
+        'player_points_assists', 'player_steals', 'player_blocks', 'player_turnovers'
+    ]
+    if days <= 0:
+        raise ValueError('days must be positive')
+
+    estimated_max = days * (1 + 10 * 10 * len(markets))
+    print(
+        f"  Historical backfill preview: {days} daily snapshots, up to 10 events/day, "
+        f"{len(markets)} markets -> conservative ceiling {estimated_max:,} credits."
+    )
+    if max_credits <= 0:
+        print("  No requests sent. Re-run with an explicit max-credit argument to authorize spend.")
+        return False
+    if not api_key:
+        print("  ODDS_API_KEY is not configured; no requests sent.")
+        return False
+
+    print(f"  Starting capped backfill (hard cap: {max_credits:,} credits)...")
+    path = CONFIG['data_dir'] / 'historical_lines.csv'
+    stored = _load_historical_lines_frame(path)
+    credits_used = 0
+    rows_saved = 0
+
+    def record_cost(response: object, fallback: int) -> int:
+        try:
+            raw_cost = getattr(response, 'headers', {}).get('x-requests-last')
+            return max(0, int(raw_cost)) if raw_cost is not None else fallback
+        except (TypeError, ValueError):
+            return fallback
+
+    for d in range(1, days + 1):
+        dt = datetime.now() - timedelta(days=d)
+        date_str = dt.strftime('%Y-%m-%dT12:00:00Z')
+        game_date = dt.strftime('%Y-%m-%d')
+        if credits_used + 1 > max_credits:
+            print(f"  Credit cap reached before {game_date}; stopping safely.")
+            break
+
+        response = requests.get(
+            f"{base}/events",
+            params={'apiKey': api_key, 'date': date_str},
+            timeout=30,
+        )
+        credits_used += record_cost(response, fallback=1)
+        payload = _response_json_dict(response)
+        if payload is None or not isinstance(payload.get('data'), list):
+            print(f"  {game_date}: HTTP {response.status_code} - skipping")
+            continue
+
+        for event in payload['data'][:10]:
+            if not isinstance(event, dict) or not event.get('id'):
+                continue
+            request_ceiling = 10 * len(markets)
+            if credits_used + request_ceiling > max_credits:
+                print(
+                    f"  Credit cap would be exceeded before event {event.get('id')}; "
+                    f"stopping at {credits_used:,}/{max_credits:,}."
+                )
+                return rows_saved > 0
+            event_response = requests.get(
+                f"{base}/events/{event['id']}/odds",
+                params={
+                    'apiKey': api_key,
+                    'date': date_str,
+                    'regions': 'us',
+                    'markets': ','.join(markets),
+                    'oddsFormat': 'american',
+                },
+                timeout=30,
+            )
+            credits_used += record_cost(event_response, fallback=request_ceiling)
+            event_payload = _response_json_dict(event_response)
+            if event_payload is None:
+                print(f"  {game_date} event {event['id']}: HTTP {event_response.status_code} - checkpoint unchanged")
+                continue
+
+            event_rows = _parse_historical_event_odds(event_payload, date_str)
+            if len(event_rows) == 0:
+                continue
+            before = len(stored)
+            stored = _merge_historical_lines(stored, event_rows)
+            _write_historical_lines(stored, path)
+            rows_saved += max(0, len(stored) - before)
+            for slate_date in sorted(event_rows['game_date'].dropna().unique()):
+                _archive_line_snapshot(
+                    event_rows[event_rows['game_date'] == slate_date],
+                    slate_date,
+                    stem=f"odds_api_backfill_{str(event['id'])[:10]}",
+                )
+            print(
+                f"  {game_date} event {event['id']}: checkpointed {len(event_rows):,} rows "
+                f"({credits_used:,}/{max_credits:,} credits used)"
+            )
+        print(f"  {game_date}: done")
+
+    print(
+        f"  Backfill stopped cleanly - {rows_saved:,} new raw rows; "
+        f"{len(stored):,} total rows; {credits_used:,}/{max_credits:,} credits used."
+    )
+    return rows_saved > 0
+
+
 # =============================================================================
 # INJURY / LINEUP DATA
 # =============================================================================
@@ -2155,20 +2795,41 @@ def fetch_game_totals(game_date: str = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def fetch_player_positions() -> pd.DataFrame:
+def _nba_season_for_date(as_of=None) -> str:
+    """Return the NBA season containing *as_of* using the October rollover."""
+    stamp = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now()
+    start_year = stamp.year if stamp.month >= 10 else stamp.year - 1
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def fetch_player_positions(season: Optional[str] = None) -> pd.DataFrame:
     """Fetch player positions from NBA API. Caches to data/player_positions.csv.
     Returns DataFrame with columns: player_norm, position_group (G/F/C).
+
+    Refreshes are unioned with the existing cache so a partial NBA API response
+    cannot erase historical/current player coverage.
     """
     cache_path = CONFIG['data_dir'] / 'player_positions.csv'
-    # Refresh cache if >7 days old or missing
+    cached = pd.DataFrame(columns=['player_norm', 'position_group'])
+    if cache_path.exists():
+        try:
+            cached = pd.read_csv(cache_path)
+            cached = cached[['player_norm', 'position_group']].dropna(subset=['player_norm'])
+            cached = cached.drop_duplicates('player_norm', keep='first')
+        except Exception as exc:
+            print(f"  Position cache unreadable ({exc}); attempting a fresh fetch")
+            cached = pd.DataFrame(columns=['player_norm', 'position_group'])
+
+    # Refresh cache if >7 days old, implausibly small, or missing.
     if cache_path.exists():
         age_days = (pd.Timestamp.now() - pd.Timestamp(cache_path.stat().st_mtime, unit='s')).days
-        if age_days < 7:
-            return pd.read_csv(cache_path)
+        if age_days < 7 and len(cached) >= 300:
+            return cached
     try:
         from nba_api.stats.endpoints import playerindex
         import time as _time
-        df = playerindex.PlayerIndex(season='2025-26').get_data_frames()[0]
+        active_season = season or _nba_season_for_date()
+        df = playerindex.PlayerIndex(season=active_season).get_data_frames()[0]
         _time.sleep(0.6)
         df['full_name'] = df['PLAYER_FIRST_NAME'] + ' ' + df['PLAYER_LAST_NAME']
         df['player_norm'] = df['full_name'].apply(_normalize_name)
@@ -2183,13 +2844,24 @@ def fetch_player_positions() -> pd.DataFrame:
                 return 'C'
             return 'F'
         df['position_group'] = df['POSITION'].apply(_pos_group)
-        out = df[['player_norm', 'position_group']].drop_duplicates('player_norm')
-        out.to_csv(cache_path, index=False)
-        print(f"  Player positions cached: {len(out)} players")
-        return out
+        fetched = df[['player_norm', 'position_group']].drop_duplicates('player_norm')
+        if len(fetched) < 300:
+            print(
+                f"  Position fetch returned only {len(fetched)} players for {active_season}; "
+                f"preserving {len(cached)} cached rows"
+            )
+            return cached
+        out = pd.concat([fetched, cached], ignore_index=True)
+        out = out.drop_duplicates('player_norm', keep='first').sort_values('player_norm')
+        _atomic_csv(out, cache_path)
+        print(
+            f"  Player positions cached: {len(out)} players "
+            f"({len(fetched)} fetched for {active_season}, {len(out) - len(fetched)} preserved)"
+        )
+        return out.reset_index(drop=True)
     except Exception as e:
         print(f"  Position fetch failed: {e}")
-        return pd.DataFrame(columns=['player_norm', 'position_group'])
+        return cached
 
 
 def apply_injury_adjustments(pred_df, injury_data, df):
@@ -3234,6 +3906,12 @@ def _build_advanced_features(df: pd.DataFrame) -> pd.DataFrame:
     Must be called on the FULL sorted game log (not just latest) so rolling
     windows have history.  Returns df with new columns added.
     """
+    # DEC-051/052: the live scorer must use the same repaired team-level,
+    # per-100-possession context as retraining. This also reconstructs the blank
+    # 2025-26 opp/is_home source fields before any matchup split is computed.
+    from feature_pipeline import FeaturePipeline, _repair_matchup_columns
+    df = _repair_matchup_columns(df)
+    df = FeaturePipeline(ewma_span=5, split_window=15, min_games=10)._create_opponent_context(df)
     df = _build_dynamic_context_features(df)
     df = df.sort_values(['player', 'game_date']).copy()
     stats = ['pts', 'trb', 'ast']
@@ -3592,6 +4270,74 @@ def _build_advanced_features(df: pd.DataFrame) -> pd.DataFrame:
             for s in stats
         )
         df['risk_factor'] = (cv_sum / len(stats)).clip(0, 3.0)
+
+    return df
+
+
+def _align_composite_features_to_training(df: pd.DataFrame) -> pd.DataFrame:
+    """Overwrite {stat}_best_estimate and its Vegas-derived siblings so live
+    inference matches the exact formulas feature_pipeline.py used to build the
+    training data (feature_pipeline.py: FeaturePipeline._create_composite_features
+    best_estimate block and FeaturePipeline._create_vegas_features
+    synthetic_line/edge_vs_avg/vegas_slow/pct_diff block — line numbers shift
+    as that file changes, so this cites the method names, not lines).
+
+    create_features()/_build_advanced_features() build their own independent
+    versions of these columns (different weights, and — for edge_vs_avg — a
+    different base signal entirely: best_estimate live vs. recency_anchor in
+    training). Both are registered model input features
+    (FEATURE_GROUPS['composite'] / ['vegas'] in train_advanced_models.py), so
+    scoring the live models on the live-only formulas means feeding them
+    inputs they were never trained to interpret. This must run after
+    _build_advanced_features() so the five real training-time ingredients
+    (recency_anchor, defense_adj, situational_avg, season_avg, l20) already
+    exist as columns. Logic is deliberately duplicated from feature_pipeline.py
+    rather than imported, to avoid restructuring either existing pipeline —
+    keep the two in sync by hand; tests/test_composite_feature_training_alignment.py
+    asserts they stay identical.
+    """
+    for stat in ['pts', 'trb', 'ast']:
+        # --- best_estimate (feature_pipeline.py:662-687) ---
+        components, weights = [], []
+
+        if f'{stat}_recency_anchor' in df.columns:
+            components.append(df[f'{stat}_recency_anchor']); weights.append(0.40)
+        elif f'{stat}_ewma5' in df.columns:
+            components.append(df[f'{stat}_ewma5']); weights.append(0.35)
+
+        if f'{stat}_defense_adj' in df.columns:
+            components.append(df[f'{stat}_defense_adj']); weights.append(0.20)
+
+        if f'{stat}_situational_avg' in df.columns:
+            components.append(df[f'{stat}_situational_avg']); weights.append(0.15)
+
+        if f'{stat}_season_avg' in df.columns:
+            components.append(df[f'{stat}_season_avg'].fillna(df.get(f'{stat}_l20')))
+            weights.append(0.15)
+
+        if f'{stat}_l20' in df.columns:
+            components.append(df[f'{stat}_l20']); weights.append(0.10)
+
+        if components:
+            total_weight = sum(weights)
+            df[f'{stat}_best_estimate'] = sum(c * w for c, w in zip(components, weights)) / total_weight
+
+        # --- synthetic_line / edge_vs_avg / vegas_slow / pct_diff (feature_pipeline.py:585-600) ---
+        synthetic_source = df.get(
+            f'{stat}_season_avg',
+            df.get(f'{stat}_l20', df.get(f'{stat}_l10'))
+        )
+        df[f'{stat}_synthetic_line'] = synthetic_source
+
+        pred_col = f'{stat}_recency_anchor' if f'{stat}_recency_anchor' in df.columns else (
+            f'{stat}_ewma5' if f'{stat}_ewma5' in df.columns else f'{stat}_l5'
+        )
+
+        if pred_col in df.columns:
+            df[f'{stat}_edge_vs_avg'] = df[pred_col] - df[f'{stat}_synthetic_line']
+            df[f'{stat}_vegas_slow'] = (abs(df[f'{stat}_edge_vs_avg']) > df[f'{stat}_l10'] * 0.1).astype(int)
+            df[f'{stat}_pct_diff'] = df[f'{stat}_edge_vs_avg'] / df[f'{stat}_synthetic_line'].replace(0, np.nan)
+            df[f'{stat}_pct_diff'] = df[f'{stat}_pct_diff'].fillna(0)
 
     return df
 
@@ -4465,7 +5211,9 @@ def train_ou_classifiers(df: pd.DataFrame) -> bool:
         print("  No historical_lines.csv — skipping O/U classifier")
         return False
 
-    hist = pd.read_csv(lines_path)
+    hist = _select_preferred_line_rows(
+        pd.read_csv(lines_path, low_memory=False), require_known_snapshot=True
+    )
     hist['game_date'] = pd.to_datetime(hist['game_date'])
     if 'player_norm' not in hist.columns:
         hist['player_norm'] = hist['player'].apply(_normalize_name)
@@ -4645,7 +5393,10 @@ def _prediction_feature_cache_paths(using_advanced: bool) -> Tuple[Path, Path]:
     )
 
 
-def _prediction_feature_cache_signature(using_advanced: bool) -> Dict[str, object]:
+def _prediction_feature_cache_signature(
+    using_advanced: bool,
+    slate_date: Optional[object] = None,
+) -> Dict[str, object]:
     paths = [
         CONFIG['data_dir'] / 'nba_data.csv',
         CONFIG['data_dir'] / 'pbp_possessions_master.csv',
@@ -4661,18 +5412,173 @@ def _prediction_feature_cache_signature(using_advanced: bool) -> Dict[str, objec
         ])
     return {
         'using_advanced': using_advanced,
+        'slate_date': _coerce_slate_date(slate_date),
         'sources': [_file_signature(path) for path in paths],
     }
+
+
+def _append_upcoming_prediction_rows(
+    history: pd.DataFrame,
+    slate_date: object,
+    schedule: pd.DataFrame,
+) -> pd.DataFrame:
+    """Append one outcome-empty target row per player on the scheduled slate.
+
+    Every training feature is shifted by one game.  Selecting the final
+    completed-game row therefore leaves the live model one game stale.  A
+    synthetic upcoming row gives the shared training pipeline the same
+    semantics it has for every historical target: all completed games are to
+    the left of the row and the target outcome itself is unknown.
+    """
+    if schedule is None or schedule.empty:
+        raise RuntimeError(f"No schedule is available for prediction date {slate_date}")
+
+    from feature_pipeline import _repair_matchup_columns, _season_from_game_date
+
+    out = _repair_matchup_columns(history.copy())
+    out['game_date'] = pd.to_datetime(out['game_date'], errors='raise')
+    out['_prediction_target_row'] = False
+
+    schedule = schedule.copy()
+    required = {'home_team', 'away_team'}
+    missing = sorted(required - set(schedule.columns))
+    if missing:
+        raise ValueError(f"Schedule is missing required columns: {missing}")
+    schedule['home_team'] = schedule['home_team'].astype(str).str.strip().str.upper()
+    schedule['away_team'] = schedule['away_team'].astype(str).str.strip().str.upper()
+    game_id_col = 'game_id' if 'game_id' in schedule.columns else ('GAME_ID' if 'GAME_ID' in schedule.columns else None)
+    if game_id_col is None:
+        raise ValueError("Schedule is missing game_id")
+
+    team_matchups: Dict[str, Dict[str, object]] = {}
+    target_date = pd.Timestamp(slate_date).normalize()
+    for row in schedule.to_dict('records'):
+        home = row['home_team']
+        away = row['away_team']
+        game_id = row[game_id_col]
+        if home in team_matchups or away in team_matchups:
+            raise ValueError("Schedule contains a team more than once on the prediction date")
+        team_matchups[home] = {'GAME_ID': game_id, 'opp': away, 'is_home': 1}
+        team_matchups[away] = {'GAME_ID': game_id, 'opp': home, 'is_home': 0}
+
+    team_col = 'team' if 'team' in out.columns else 'TEAM_ABBREVIATION'
+    out[team_col] = out[team_col].astype(str).str.strip().str.upper()
+    player_key = 'PLAYER_ID' if 'PLAYER_ID' in out.columns else ('player_id' if 'player_id' in out.columns else 'player')
+    latest = (
+        out.sort_values([player_key, 'game_date'])
+        .groupby(player_key, dropna=False, sort=False)
+        .tail(1)
+        .copy()
+    )
+    latest = latest.loc[latest[team_col].isin(team_matchups)].copy()
+    if latest.empty:
+        raise RuntimeError("No historical players matched the scheduled teams")
+
+    preserve = {
+        'PLAYER_ID', 'player_id', 'player', 'NICKNAME', 'TEAM_ID', 'team',
+        'TEAM_ABBREVIATION', 'TEAM_NAME', 'position', 'POSITION',
+    }
+    target = latest.copy()
+    target['_feature_asof_date'] = target['game_date']
+    for column in target.columns:
+        if column not in preserve and column not in {'_feature_asof_date'}:
+            target[column] = np.nan
+
+    target['game_date'] = pd.Series(pd.NaT, index=target.index, dtype='datetime64[ns]')
+    for text_column in ['season', 'SEASON_YEAR', 'opp', 'home_away', 'matchup']:
+        if text_column in target.columns:
+            target[text_column] = pd.Series(pd.NA, index=target.index, dtype='object')
+    target['game_date'] = target_date
+    target['season'] = _season_from_game_date(target_date)
+    if 'SEASON_YEAR' in target.columns:
+        target['SEASON_YEAR'] = target['season']
+    target['_prediction_target_row'] = True
+    for team, matchup in team_matchups.items():
+        mask = target[team_col].eq(team)
+        target.loc[mask, 'GAME_ID'] = matchup['GAME_ID']
+        target.loc[mask, 'opp'] = matchup['opp']
+        target.loc[mask, 'is_home'] = matchup['is_home']
+        if 'home_away' in target.columns:
+            target.loc[mask, 'home_away'] = 'home' if matchup['is_home'] else 'away'
+        if 'matchup' in target.columns:
+            marker = 'vs.' if matchup['is_home'] else '@'
+            target.loc[mask, 'matchup'] = f"{team} {marker} {matchup['opp']}"
+
+    return pd.concat([out, target], ignore_index=True, sort=False)
+
+
+def _align_selected_features_to_training_pipeline(
+    df: pd.DataFrame,
+    source_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Replace active prop inputs with the canonical training implementation.
+
+    ``create_features`` remains in service for the separately-trained minutes
+    model, but active prop-model inputs must come from ``FeaturePipeline`` --
+    the exact builder that materialized the advanced training table.
+    """
+    selected_path = CONFIG['models_dir'] / 'selected_features_advanced.json'
+    if not selected_path.exists():
+        raise FileNotFoundError(f"Missing selected-feature contract: {selected_path}")
+    with open(selected_path) as handle:
+        selected = json.load(handle)
+    selected_features = sorted({feature for features in selected.values() for feature in features})
+    canonical_features = [
+        feature for feature in selected_features
+        if feature not in POINT_IN_TIME_DEFENSE_FEATURES
+    ]
+
+    from feature_pipeline import FeaturePipeline
+    canonical_source = source_df.copy() if source_df is not None else df.copy()
+    canonical = FeaturePipeline(ewma_span=5, split_window=15, min_games=10).fit_transform(canonical_source)
+    missing = sorted(set(canonical_features) - set(canonical.columns))
+    if missing:
+        raise RuntimeError(f"Canonical training pipeline is missing active model features: {missing}")
+
+    key_candidates = [
+        ['GAME_ID', 'PLAYER_ID', 'team'],
+        ['GAME_ID', 'player_id', 'team'],
+        ['game_date', 'player', 'team'],
+    ]
+    keys = next((candidate for candidate in key_candidates if set(candidate).issubset(df.columns) and set(candidate).issubset(canonical.columns)), None)
+    if keys is None:
+        raise RuntimeError("Cannot align canonical features: no stable player-game key")
+
+    left = df.copy()
+    right = canonical[keys + canonical_features].copy()
+    for frame in (left, right):
+        if 'game_date' in keys:
+            frame['game_date'] = pd.to_datetime(frame['game_date'], errors='raise').dt.normalize()
+        if 'team' in keys:
+            frame['team'] = frame['team'].astype(str).str.strip().str.upper()
+    if right.duplicated(keys).any() or left.duplicated(keys).any():
+        raise RuntimeError(f"Canonical feature alignment has duplicate keys: {keys}")
+
+    left['_canonical_row_order'] = np.arange(len(left))
+    replacement_names = {feature: f'__canonical_{feature}' for feature in canonical_features}
+    right = right.rename(columns=replacement_names)
+    aligned = left.merge(right, on=keys, how='left', validate='one_to_one', indicator='_canonical_merge')
+    if not aligned['_canonical_merge'].eq('both').all():
+        raise RuntimeError(
+            f"Canonical feature alignment missed {int(aligned['_canonical_merge'].ne('both').sum())} rows"
+        )
+    for feature, replacement in replacement_names.items():
+        aligned[feature] = aligned[replacement]
+    aligned = aligned.sort_values('_canonical_row_order').drop(
+        columns=['_canonical_row_order', '_canonical_merge', *replacement_names.values()]
+    )
+    return aligned.reset_index(drop=True)
 
 
 def _prepare_latest_prediction_frame(
     df: pd.DataFrame,
     using_advanced: bool,
     use_cache: bool = True,
+    slate_date: Optional[object] = None,
 ) -> pd.DataFrame:
     """Build or load the latest per-player feature frame used at inference."""
     cache_pkl, cache_meta = _prediction_feature_cache_paths(using_advanced)
-    signature = _prediction_feature_cache_signature(using_advanced)
+    signature = _prediction_feature_cache_signature(using_advanced, slate_date=slate_date)
 
     if use_cache and cache_pkl.exists() and cache_meta.exists():
         try:
@@ -4687,6 +5593,10 @@ def _prepare_latest_prediction_frame(
 
     base_feature_cols = ['games_played', 'pts_l10', 'trb_l10', 'ast_l10', 'mp_l10']
     working = df.copy()
+    if using_advanced and slate_date is not None:
+        schedule = fetch_todays_games(slate_date)
+        working = _append_upcoming_prediction_rows(working, slate_date, schedule)
+    canonical_source = working.copy()
     if any(col not in working.columns for col in base_feature_cols):
         print("  Building base rolling features...")
         working = create_features(working)
@@ -4697,10 +5607,15 @@ def _prepare_latest_prediction_frame(
     if using_advanced:
         print("  Building advanced features (rolling splits, defense-adj, best_estimate)...")
         working = _build_advanced_features(working)
+        working = _align_composite_features_to_training(working)
+        working = _align_selected_features_to_training_pipeline(working, canonical_source)
 
     working = working.sort_values('game_date')
     latest_group_col = 'player_id' if 'player_id' in working.columns else ('PLAYER_ID' if 'PLAYER_ID' in working.columns else 'player')
-    latest = working.groupby(latest_group_col).last().reset_index()
+    if '_prediction_target_row' in working.columns and working['_prediction_target_row'].fillna(False).any():
+        latest = working.loc[working['_prediction_target_row'].fillna(False)].copy().reset_index(drop=True)
+    else:
+        latest = working.groupby(latest_group_col, dropna=False, sort=False).tail(1).reset_index(drop=True)
     latest = latest[latest['games_played'] >= CONFIG['min_games']]
     latest = _merge_layer_features(latest)
 
@@ -4723,6 +5638,7 @@ def generate_predictions(
     apply_injury_boosts: bool = True,
     apply_game_totals: bool = True,
     apply_fp_blend: bool = True,
+    slate_date: Optional[object] = None,
 ) -> pd.DataFrame:
     """Generate predictions for upcoming games using minutes-adjusted approach."""
 
@@ -4750,7 +5666,7 @@ def generate_predictions(
         clf_models   = adv_classifiers   # stat -> XGBClassifier P(OVER)
         clf_selected = adv_selected       # stat -> list of selected feature names
         probability_sidecars = _load_probability_sidecars()
-        probability_calibrators = _load_probability_calibrators()
+        probability_calibrators = _load_probability_calibrators(probability_sidecars)
     else:
         clf_models   = {}
         clf_selected = {}
@@ -4781,7 +5697,12 @@ def generate_predictions(
         print("  Using minutes deviation model for adjustments")
 
     print("\nGenerating predictions...")
-    latest = _prepare_latest_prediction_frame(df, using_advanced, use_cache=use_feature_cache)
+    latest = _prepare_latest_prediction_frame(
+        df,
+        using_advanced,
+        use_cache=use_feature_cache,
+        slate_date=slate_date,
+    )
     primitive_fp_integrated = using_advanced and any(
         isinstance(models.get(stat), dict) and models.get(stat, {}).get('kind') == 'positive_ridge_blend_regressor'
         for stat in ['pts', 'trb', 'ast']
@@ -4810,9 +5731,22 @@ def generate_predictions(
         required_feature_cols.extend(minutes_feature_cols)
     required_feature_cols = list(dict.fromkeys(required_feature_cols))
 
+    required_defense = sorted(set(required_feature_cols) & set(POINT_IN_TIME_DEFENSE_FEATURES))
+    if required_defense:
+        if slate_date is None:
+            raise ValueError(
+                f"Models require {required_defense}, but generate_predictions received no slate_date"
+            )
+        latest = _attach_live_point_in_time_defense(latest, df, slate_date)
+
     # Check if feature columns exist in latest
     missing_cols = [c for c in required_feature_cols if c not in latest.columns]
     if missing_cols:
+        missing_defense = sorted(set(missing_cols) & set(POINT_IN_TIME_DEFENSE_FEATURES))
+        if missing_defense:
+            raise RuntimeError(
+                f"Required live point-in-time defense features are missing: {missing_defense}"
+            )
         print(f"  WARNING: {len(missing_cols)} feature columns not found, filling with 0")
         for c in missing_cols:
             latest[c] = 0
@@ -5184,6 +6118,51 @@ def apply_first_principles_adjustments(pred_df: pd.DataFrame, feature_df: Option
     return pred_df
 
 
+def _select_placeable_projection_offers(lines: pd.DataFrame) -> pd.DataFrame:
+    """Choose one real offered contract per player without averaging lines.
+
+    Non-promo standard offers are preferred, followed by non-promo goblin and
+    demon offers.  If the best contract class still exposes multiple distinct
+    lines for a player, that player is dropped as ambiguous rather than scored
+    against an invented or arbitrary value.
+    """
+    if lines is None or lines.empty:
+        return pd.DataFrame() if lines is None else lines.copy()
+    required = {'player', 'line'}
+    missing = sorted(required - set(lines.columns))
+    if missing:
+        raise ValueError(f"Projection offers are missing required columns: {missing}")
+
+    out = lines.copy()
+    if 'projection_type' not in out.columns:
+        out['projection_type'] = 'standard'
+    out['projection_type'] = out['projection_type'].apply(_normalize_projection_type)
+    if 'is_promo' not in out.columns:
+        out['is_promo'] = False
+    out['is_promo'] = out['is_promo'].fillna(False).astype(bool)
+    out['line'] = pd.to_numeric(out['line'], errors='raise')
+    out = out.drop_duplicates(
+        subset=['player', 'line', 'projection_type', 'is_promo'], keep='first'
+    )
+    out['_offer_priority'] = (
+        out['is_promo'].astype(int) * 10
+        + out['projection_type'].apply(_projection_type_rank)
+    )
+    best_priority = out.groupby('player')['_offer_priority'].transform('min')
+    best = out.loc[out['_offer_priority'].eq(best_priority)].copy()
+    ambiguous_players = best.groupby('player')['line'].nunique()
+    ambiguous_players = set(ambiguous_players[ambiguous_players.gt(1)].index)
+    if ambiguous_players:
+        print(
+            f"  WARNING: Dropping {len(ambiguous_players)} players with ambiguous "
+            "same-contract PrizePicks lines"
+        )
+        best = best.loc[~best['player'].isin(ambiguous_players)].copy()
+    return best.drop_duplicates(subset=['player'], keep='first').drop(
+        columns=['_offer_priority'], errors='ignore'
+    ).reset_index(drop=True)
+
+
 def merge_vegas_lines(pred_df: pd.DataFrame, vegas_df: pd.DataFrame) -> pd.DataFrame:
     """Merge Vegas lines with predictions and calculate edges."""
     
@@ -5212,27 +6191,14 @@ def merge_vegas_lines(pred_df: pd.DataFrame, vegas_df: pd.DataFrame) -> pd.DataF
             subset_cols.append('is_promo')
         prop_lines = vegas_df[vegas_df['prop'] == vegas_prop][subset_cols].copy()
 
-        if has_proj_type:
-            # Preserve projection_type alongside the median line dedup
-            pt_map = prop_lines.groupby('player')['projection_type'].first().to_dict()
-        if has_is_promo:
-            promo_map = prop_lines.groupby('player')['is_promo'].max().to_dict()
-        if has_proj_type or has_is_promo:
-            prop_lines = prop_lines.groupby('player', as_index=False)['line'].median()
-            if has_proj_type:
-                prop_lines[f'{our_prop}_projection_type'] = (
-                    prop_lines['player'].map(pt_map).fillna('standard').apply(_normalize_projection_type)
-                )
-            else:
-                prop_lines[f'{our_prop}_projection_type'] = 'standard'
-            if has_is_promo:
-                prop_lines[f'{our_prop}_is_promo'] = prop_lines['player'].map(promo_map).fillna(False).astype(bool)
-            else:
-                prop_lines[f'{our_prop}_is_promo'] = False
-        else:
-            prop_lines = prop_lines.groupby('player', as_index=False)['line'].median()
-            prop_lines[f'{our_prop}_projection_type'] = 'standard'
-            prop_lines[f'{our_prop}_is_promo'] = False
+        prop_lines = _select_placeable_projection_offers(prop_lines)
+        if len(prop_lines) == 0:
+            continue
+        prop_lines[f'{our_prop}_projection_type'] = prop_lines['projection_type']
+        prop_lines[f'{our_prop}_is_promo'] = prop_lines['is_promo']
+        prop_lines = prop_lines[
+            ['player', 'line', f'{our_prop}_projection_type', f'{our_prop}_is_promo']
+        ]
 
         prop_lines = prop_lines.rename(columns={'line': f'{our_prop}_line'})
 
@@ -5527,6 +6493,25 @@ def _build_target_quality_policy(results: Optional[Dict[str, Dict]] = None,
     return policy
 
 
+def _apply_live_line_source_policy_overrides(policy: Dict[str, Dict]) -> Dict[str, Dict]:
+    if str(CONFIG.get('live_line_source_mode', 'fanduel') or '').strip().lower() == 'prizepicks':
+        return policy
+
+    min_prob = float(CONFIG.get('live_fanduel_min_side_prob', 0.50))
+    min_residual_edge = float(CONFIG.get('live_fanduel_min_residual_edge', 0.05))
+    overridden = {}
+    for prop, rules in policy.items():
+        adjusted = dict(rules)
+        adjusted['min_prob'] = min_prob
+        adjusted['min_residual_edge'] = min_residual_edge
+        adjusted['min_edge'] = min(float(adjusted.get('min_edge', min_residual_edge)), min_residual_edge)
+        adjusted['min_edge_under'] = min(float(adjusted.get('min_edge_under', min_residual_edge)), min_residual_edge)
+        if bool(adjusted.get('allow_over', False)):
+            adjusted['min_edge_over'] = min(float(adjusted.get('min_edge_over', min_residual_edge)), min_residual_edge)
+        overridden[prop] = adjusted
+    return overridden
+
+
 def _load_target_quality_policy() -> Dict[str, Dict]:
     """
     Build per-target live-betting policy from the latest training results.
@@ -5537,13 +6522,13 @@ def _load_target_quality_policy() -> Dict[str, Dict]:
     path = CONFIG['models_dir'] / 'training_results.json'
     edge_path = CONFIG['models_dir'] / 'training_edge_analysis.json'
     if not path.exists():
-        return _build_target_quality_policy()
+        return _apply_live_line_source_policy_overrides(_build_target_quality_policy())
 
     try:
         with open(path) as f:
             results = json.load(f)
     except Exception:
-        return _build_target_quality_policy()
+        return _apply_live_line_source_policy_overrides(_build_target_quality_policy())
 
     edge_analysis = {}
     if edge_path.exists():
@@ -5553,7 +6538,9 @@ def _load_target_quality_policy() -> Dict[str, Dict]:
         except Exception:
             edge_analysis = {}
 
-    return _build_target_quality_policy(results=results, edge_analysis=edge_analysis)
+    return _apply_live_line_source_policy_overrides(
+        _build_target_quality_policy(results=results, edge_analysis=edge_analysis)
+    )
 
 
 def _filter_best_picks_legacy(pred_df: pd.DataFrame) -> pd.DataFrame:
@@ -5866,13 +6853,57 @@ def _load_sigma_thresholds() -> Tuple[Dict[str, float], Dict[str, float]]:
         return {}, {}
 
 
+def _row_volatility_context(row: pd.Series,
+                            prop: str,
+                            sigma_p25: Optional[Dict[str, float]] = None,
+                            sigma_p75: Optional[Dict[str, float]] = None,
+                            direction: Optional[str] = None) -> Tuple[Optional[float], Optional[float], str, bool]:
+    sigma_val = row.get(f'{prop}_sigma')
+    sigma_val = float(sigma_val) if sigma_val is not None and not pd.isna(sigma_val) and float(sigma_val) > 0 else None
+    volatility_metric = sigma_val
+    volatility_source = 'sigma'
+    if volatility_metric is None:
+        composite_std_components = {
+            'pra': ['pts_std', 'trb_std', 'ast_std'],
+            'pr':  ['pts_std', 'trb_std'],
+            'pa':  ['pts_std', 'ast_std'],
+        }
+        volatility_source = 'rolling_std'
+        if prop in composite_std_components:
+            comp_stds = [row.get(c) for c in composite_std_components[prop]]
+            valid_stds = [
+                float(s) for s in comp_stds
+                if s is not None and not pd.isna(s) and float(s) > 0
+            ]
+            volatility_metric = sum(valid_stds) if valid_stds else None
+        else:
+            std_fallback = row.get(f'{prop}_std')
+            if std_fallback is None or pd.isna(std_fallback):
+                std_fallback = row.get(f'{prop.split("_")[0]}_std')
+            if std_fallback is not None and not pd.isna(std_fallback) and float(std_fallback) > 0:
+                volatility_metric = float(std_fallback)
+    if volatility_metric is None:
+        volatility_metric = float(_PROP_VOLATILITY_BASELINES.get(prop, 4.0))
+        volatility_source = 'default_std'
+
+    p25_threshold = (sigma_p25 or {}).get(prop)
+    low_sigma_under = (
+        direction == 'UNDER'
+        and sigma_val is not None
+        and p25_threshold is not None
+        and sigma_val < p25_threshold
+    )
+    return sigma_val, volatility_metric, volatility_source, low_sigma_under
+
+
 def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, Dict]] = None,
                       regression_candidates: Optional[dict] = None, max_picks: int = 10) -> pd.DataFrame:
     """Filter to best betting opportunities using validated model edge."""
 
     picks = []
     quality = quality_policy or _load_target_quality_policy()
-    props = [prop for prop, q in quality.items() if q.get('allowed')]
+    excluded_props = {prop.lower() for prop in _excluded_pick_props_upper()}
+    props = [prop for prop, q in quality.items() if q.get('allowed') and prop.lower() not in excluded_props]
     sigma_p25, sigma_p75 = _load_sigma_thresholds()  # p25: {'ast': 1.68, 'trb': 2.10, ...}  p75: {'ast': 2.40, 'trb': 2.87, ...}
 
     for _, row in pred_df.iterrows():
@@ -5897,7 +6928,11 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 combined_edge = model_edge
             if abs(combined_edge) < 1e-9:
                 continue
+            min_residual_edge = float(quality[prop].get('min_residual_edge', 0.0))
             direction = 'OVER' if combined_edge > 0 else 'UNDER'
+            if min_residual_edge > 0 and market_edge_pred is not None:
+                if abs(market_edge_pred) < min_residual_edge or np.sign(market_edge_pred) != np.sign(combined_edge):
+                    continue
             if direction == 'OVER' and not quality[prop].get('allow_over', quality[prop].get('allowed', False)):
                 continue
             if direction == 'UNDER' and not quality[prop].get('allow_under', quality[prop].get('allowed', False)):
@@ -5919,40 +6954,14 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             # σ-context analysis shows that when the model predicts a tight distribution
             # (σ < p25 threshold), the actual OVER hit rate is 31–37% for AST/TRB —
             # a 13–19 point UNDER edge before even considering model prediction direction.
-            sigma_val = row.get(f'{prop}_sigma')
-            sigma_val = float(sigma_val) if sigma_val is not None and not pd.isna(sigma_val) and float(sigma_val) > 0 else None
-            volatility_metric = sigma_val
-            volatility_source = 'sigma'
-            if volatility_metric is None:
-                _composite_std_components = {
-                    'pra': ['pts_std', 'trb_std', 'ast_std'],
-                    'pr':  ['pts_std', 'trb_std'],
-                    'pa':  ['pts_std', 'ast_std'],
-                }
-                volatility_source = 'rolling_std'
-                if prop in _composite_std_components:
-                    comp_stds = [row.get(c) for c in _composite_std_components[prop]]
-                    valid_stds = [
-                        float(s) for s in comp_stds
-                        if s is not None and not pd.isna(s) and float(s) > 0
-                    ]
-                    volatility_metric = sum(valid_stds) if valid_stds else None
-                else:
-                    std_fallback = row.get(f'{prop}_std')
-                    if std_fallback is None or pd.isna(std_fallback):
-                        std_fallback = row.get(f'{prop.split("_")[0]}_std')
-                    if std_fallback is not None and not pd.isna(std_fallback) and float(std_fallback) > 0:
-                        volatility_metric = float(std_fallback)
-            if volatility_metric is None:
-                volatility_metric = float(_PROP_VOLATILITY_BASELINES.get(prop, 4.0))
-                volatility_source = 'default_std'
-            p25_threshold = sigma_p25.get(prop)
-            low_sigma_under = (
-                direction == 'UNDER'
-                and sigma_val is not None
-                and p25_threshold is not None
-                and sigma_val < p25_threshold
+            sigma_val, volatility_metric, volatility_source, low_sigma_under = _row_volatility_context(
+                row,
+                prop,
+                sigma_p25=sigma_p25,
+                sigma_p75=sigma_p75,
+                direction=direction,
             )
+            p25_threshold = sigma_p25.get(prop)
 
             min_edge = float(
                 quality[prop].get('min_edge_over' if direction == 'OVER' else 'min_edge_under',
@@ -5966,7 +6975,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if direction == 'UNDER' and sigma_val is not None:
                 p75_threshold = sigma_p75.get(prop)
                 if p25_threshold is not None and sigma_val < p25_threshold:
-                    min_edge = max(0.50, min_edge * 0.75)
+                    min_edge = max(min_edge, min_edge * 0.75)
                 elif p75_threshold is not None and sigma_val > p75_threshold:
                     min_edge = min_edge * 1.25
             if abs(combined_edge) < min_edge:
@@ -6053,13 +7062,14 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     prob_source = f'{prob_source}+market'
 
             min_prob = float(quality[prop]['min_prob'])
-            if direction == 'OVER':
+            fanduel_mode = str(CONFIG.get('live_line_source_mode', '')).strip().lower() != 'prizepicks'
+            if direction == 'OVER' and not fanduel_mode:
                 min_prob += 0.02
-            if anchor_agrees is False:
+            if anchor_agrees is False and not fanduel_mode:
                 min_prob += 0.01
-            if l10_agrees is False:
+            if l10_agrees is False and not fanduel_mode:
                 min_prob += 0.02
-            if l5_agrees is False:
+            if l5_agrees is False and not fanduel_mode:
                 min_prob += 0.02
             min_meta_prob = float(quality[prop].get('min_meta_prob', 0.55))
             if not use_calibrated_prob and meta_gate_mode != 'off':
@@ -6207,7 +7217,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 'line':           line,
                 'projection_type': proj_type,
                 'is_promo':       is_promo,
-                'prediction':     round(float(pred), 1),
+                'prediction':     round(float(line) + float(combined_edge), 1),
+                'raw_prediction': round(float(pred), 1),
                 'edge':           round(float(combined_edge), 1),
                 'confidence':     conf_pct,
                 'meta_prob':      round(meta_prob * 100, 1) if meta_prob is not None else None,
@@ -6259,6 +7270,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             ('blk', 78.0, 'BLK'),
         ]
         for prop_name, hist_wr, prop_upper in _structural_meta:
+            if prop_upper in _excluded_pick_props_upper():
+                continue
             line_col = f'{prop_name}_line'
             l10_col  = f'{prop_name}_l10'
             l5_col   = f'{prop_name}_l5'
@@ -6345,6 +7358,16 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     if market_edge_pred_fill is not None
                     else model_edge
                 )
+                min_residual_edge_fill = float(quality[prop].get('min_residual_edge', 0.0))
+                if (
+                    min_residual_edge_fill > 0
+                    and market_edge_pred_fill is not None
+                    and (
+                        abs(market_edge_pred_fill) < min_residual_edge_fill
+                        or np.sign(market_edge_pred_fill) != np.sign(combined_edge)
+                    )
+                ):
+                    continue
 
                 # Must be a genuine UNDER signal
                 if combined_edge >= 0:
@@ -6380,7 +7403,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     dir_prob_fill = 1.0 / (1.0 + math.exp(-abs(combined_edge) / rmse_fill))
                     prob_source_fill = 'edge_logistic'
 
-                if dir_prob_fill < 0.53:
+                if dir_prob_fill < float(quality[prop].get('min_prob', 0.53)):
                     continue
 
                 # Reject if meta model actively disagrees
@@ -6423,6 +7446,13 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 if proj_type_fill == 'goblin' or is_promo_fill:
                     continue
                 break_even_prob_fill = round((1.0 / _PP_MULTIPLIERS[2]) ** 0.5, 4)
+                sigma_fill, volatility_metric_fill, volatility_source_fill, low_sigma_under_fill = _row_volatility_context(
+                    row,
+                    prop,
+                    sigma_p25=sigma_p25,
+                    sigma_p75=sigma_p75,
+                    direction='UNDER',
+                )
 
                 picks.append({
                     'player':               row['player'],
@@ -6433,7 +7463,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'line':                 line,
                     'projection_type':      proj_type_fill,
                     'is_promo':             is_promo_fill,
-                    'prediction':           round(float(pred), 1),
+                    'prediction':           round(float(line) + float(combined_edge), 1),
+                    'raw_prediction':       round(float(pred), 1),
                     'edge':                 round(float(combined_edge), 1),
                     'confidence':           conf_pct_fill,
                     'meta_prob':            round(meta_prob_fill * 100, 1) if meta_prob_fill is not None else None,
@@ -6461,8 +7492,10 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'priority_support_gap': None,
                     'selection_priority':   0.0,
                     'lane_rank_bonus':      0.0,
-                    'sigma':                None,
-                    'low_sigma_under':      False,
+                    'sigma':                round(sigma_fill, 3) if sigma_fill is not None else None,
+                    'low_sigma_under':      low_sigma_under_fill,
+                    'volatility_metric':    round(float(volatility_metric_fill), 3) if volatility_metric_fill is not None and not pd.isna(volatility_metric_fill) else None,
+                    'volatility_source':    volatility_source_fill,
                     'break_even_prob':      break_even_prob_fill,
                     'exceeds_ev_threshold': bool(dir_prob_fill >= break_even_prob_fill),
                     **prob_payload_fill,
@@ -6511,6 +7544,16 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     if market_edge_pred is not None
                     else model_edge
                 )
+                min_residual_edge_emergency = float(quality[prop].get('min_residual_edge', 0.0))
+                if (
+                    min_residual_edge_emergency > 0
+                    and market_edge_pred is not None
+                    and (
+                        abs(market_edge_pred) < min_residual_edge_emergency
+                        or np.sign(market_edge_pred) != np.sign(combined_edge)
+                    )
+                ):
+                    continue
                 if abs(combined_edge) < 1e-9:
                     continue
 
@@ -6526,7 +7569,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                         quality[prop]['min_edge'],
                     )
                 )
-                min_edge_emergency = max(0.35, min_edge_base * 0.35)
+                min_edge_emergency = max(float(quality[prop].get('min_residual_edge', 0.0)), min_edge_base * 0.35)
                 if abs(combined_edge) < min_edge_emergency:
                     continue
 
@@ -6548,7 +7591,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     dir_prob_emergency = 1.0 / (1.0 + math.exp(-abs(combined_edge) / rmse_emergency))
                     prob_source_emergency = 'edge_logistic'
 
-                if dir_prob_emergency < 0.50:
+                if dir_prob_emergency < float(quality[prop].get('min_prob', 0.50)):
                     continue
 
                 meta_prob_raw = row.get(f'{prop}_meta_prob')
@@ -6600,7 +7643,8 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     'line':                 line,
                     'projection_type':      proj_type_emergency,
                     'is_promo':             is_promo_emergency,
-                    'prediction':           round(float(pred), 1),
+                    'prediction':           round(float(line) + float(combined_edge), 1),
+                    'raw_prediction':       round(float(pred), 1),
                     'edge':                 round(float(combined_edge), 1),
                     'confidence':           conf_pct_emergency,
                     'meta_prob':            round(meta_prob * 100, 1) if meta_prob is not None else None,
@@ -6646,6 +7690,11 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
     picks_df = pd.DataFrame(picks)
     if len(picks_df) == 0:
         return picks_df
+    excluded_upper = _excluded_pick_props_upper()
+    if excluded_upper and 'prop' in picks_df.columns:
+        picks_df = picks_df[~picks_df['prop'].astype(str).str.upper().isin(excluded_upper)].copy()
+        if len(picks_df) == 0:
+            return picks_df
     if 'projection_type' not in picks_df.columns:
         picks_df['projection_type'] = 'standard'
     picks_df['projection_type'] = picks_df['projection_type'].apply(_normalize_projection_type)
@@ -6711,12 +7760,14 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
         picks_df['lane_rank_bonus'].fillna(0.0)
     ).round(4)
     picks_df = _apply_estimated_hit_rates(picks_df)
+    picks_df = _apply_signal_scores(picks_df)
 
     max_picks = max(1, int(max_picks))
     picks_df = picks_df.sort_values(
         [
-            'estimated_hit_rate',
+            'signal_score',
             'prop_direction_hit_rate',
+            'estimated_hit_rate',
             'meta_prob',
             'dir_prob',
             'consistency_score',
@@ -6753,8 +7804,14 @@ def build_live_pick_card(picks_df: pd.DataFrame,
         return picks_df.iloc[0:0].copy()
 
     working = picks_df.copy()
+    excluded_upper = _excluded_pick_props_upper()
+    if excluded_upper and 'prop' in working.columns:
+        working = working[~working['prop'].astype(str).str.upper().isin(excluded_upper)].copy()
+        if len(working) == 0:
+            return working
     if 'estimated_hit_rate' not in working.columns:
         working = _apply_estimated_hit_rates(working, history_df=history_df)
+    working = _apply_signal_scores(working)
     working = _apply_live_accuracy_gates(working, history_df=history_df)
     working = _apply_postseason_context(
         working,
@@ -6780,6 +7837,7 @@ def build_live_pick_card(picks_df: pd.DataFrame,
         )
     sort_cols.extend([
         c for c in [
+            'signal_score',
             'estimated_hit_rate',
             'prop_direction_hit_rate',
             'meta_bucket_hit_rate',
@@ -6798,6 +7856,9 @@ def build_live_pick_card(picks_df: pd.DataFrame,
     working = working.drop_duplicates(subset=['player', 'prop'], keep='first').reset_index(drop=True)
     if 'pick_source' not in working.columns:
         working['pick_source'] = ''
+    working = working[~working['pick_source'].astype(str).isin(['volume_fill', 'emergency_fill'])].copy()
+    if len(working) == 0:
+        return working
     if 'projection_type' not in working.columns:
         working['projection_type'] = 'standard'
     working['projection_type'] = working['projection_type'].apply(_normalize_projection_type)
@@ -6820,16 +7881,16 @@ def build_live_pick_card(picks_df: pd.DataFrame,
     tier_specs = [
         ('core', working['accuracy_gate_pass']),
         ('market_structured', market_model_mask & working['meta_gate_pass'] & working['volatility_gate_pass']),
-        ('market_meta', market_model_mask & working['meta_gate_pass']),
         ('structured', working['meta_gate_pass'] & working['volatility_gate_pass']),
-        ('meta_only', working['meta_gate_pass']),
     ]
 
     goal = max(target_picks, min_picks)
     selected_rows = []
     seen_players = set()
     seen_pairs = set()
+    prop_counts = {}
     used_indices = set()
+    max_per_prop = max(1, int(CONFIG.get('live_pick_max_per_prop', 1)))
 
     for tier_rank, (tier_name, tier_mask) in enumerate(tier_specs, start=1):
         tier_df = working.loc[tier_mask].copy()
@@ -6842,8 +7903,11 @@ def build_live_pick_card(picks_df: pd.DataFrame,
             if idx in used_indices:
                 continue
             player_key = str(row.get('player', ''))
-            pair_key = (player_key, str(row.get('prop', '')))
+            prop_key = str(row.get('prop', '')).upper()
+            pair_key = (player_key, prop_key)
             if player_key in seen_players or pair_key in seen_pairs:
+                continue
+            if prop_counts.get(prop_key, 0) >= max_per_prop:
                 continue
             selected = row.copy()
             selected['publish_tier'] = tier_name
@@ -6852,6 +7916,7 @@ def build_live_pick_card(picks_df: pd.DataFrame,
             used_indices.add(idx)
             seen_players.add(player_key)
             seen_pairs.add(pair_key)
+            prop_counts[prop_key] = prop_counts.get(prop_key, 0) + 1
             if len(selected_rows) >= goal:
                 break
         if len(selected_rows) >= goal:
@@ -6906,7 +7971,9 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
     lines_path = CONFIG['data_dir'] / 'historical_lines.csv'
     hist_lines = None
     if lines_path.exists():
-        hist_lines = pd.read_csv(lines_path)
+        hist_lines = _select_preferred_line_rows(
+            pd.read_csv(lines_path, low_memory=False), require_known_snapshot=True
+        )
         hist_lines['game_date'] = pd.to_datetime(hist_lines['game_date'])
         if 'player_norm' not in hist_lines.columns:
             hist_lines['player_norm'] = hist_lines['player'].apply(_normalize_name)
@@ -7070,7 +8137,9 @@ def _load_historical_lines_wide_v2(start_date: pd.Timestamp = None) -> Tuple[pd.
     if not lines_path.exists():
         return pd.DataFrame(), pd.DataFrame()
 
-    hist_lines = pd.read_csv(lines_path)
+    hist_lines = _select_preferred_line_rows(
+        pd.read_csv(lines_path, low_memory=False), require_known_snapshot=True
+    )
     hist_lines['game_date'] = pd.to_datetime(hist_lines['game_date'], errors='coerce').dt.normalize()
     hist_lines = hist_lines.dropna(subset=['game_date'])
     if start_date is not None:
@@ -7135,6 +8204,7 @@ def _load_historical_lines_wide_v2(start_date: pd.Timestamp = None) -> Tuple[pd.
 def _build_backtest_feature_frame_v2(df: pd.DataFrame, using_advanced: bool) -> pd.DataFrame:
     """Build historical per-game features for backtesting the current model stack."""
     working = df.copy()
+    canonical_source = working.copy()
     working['game_date'] = pd.to_datetime(working['game_date'], errors='coerce').dt.normalize()
     if 'player_norm' not in working.columns:
         working['player_norm'] = working['player'].apply(_normalize_name)
@@ -7148,6 +8218,8 @@ def _build_backtest_feature_frame_v2(df: pd.DataFrame, using_advanced: bool) -> 
     if using_advanced:
         print("  Building advanced historical features for backtest...")
         working = _build_advanced_features(working)
+        working = _align_composite_features_to_training(working)
+        working = _align_selected_features_to_training_pipeline(working, canonical_source)
         working = _merge_layer_features(working)
 
     if 'player_norm' not in working.columns:
@@ -7561,7 +8633,7 @@ def backtest(df: pd.DataFrame, test_days: int = 30) -> Dict:
         adv_models, _, _, _, live_edge_models, live_meta_models, live_market_sets = _load_advanced_models()
         using_advanced = adv_models is not None
         live_prob_sidecars = _load_probability_sidecars() if using_advanced else {}
-        live_prob_calibrators = _load_probability_calibrators() if using_advanced else {}
+        live_prob_calibrators = _load_probability_calibrators(live_prob_sidecars) if using_advanced else {}
         feature_df = _build_backtest_feature_frame_v2(working, using_advanced=using_advanced)
         feature_df = feature_df[feature_df['game_date'] >= test_start].copy()
         feature_df = feature_df[feature_df['games_played'] >= CONFIG['min_games']].copy()
@@ -7769,6 +8841,10 @@ def _sort_betslip_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
         working.get('estimated_hit_rate', pd.Series(np.nan, index=working.index)),
         errors='coerce',
     ).fillna(0.0)
+    working['_signal_score'] = pd.to_numeric(
+        working.get('signal_score', pd.Series(np.nan, index=working.index)),
+        errors='coerce',
+    ).fillna(0.0)
     working['_selection_priority'] = pd.to_numeric(
         working.get('selection_priority', pd.Series(np.nan, index=working.index)),
         errors='coerce',
@@ -7786,7 +8862,7 @@ def _sort_betslip_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
         errors='coerce',
     ).fillna(0.0).abs()
     working = working.sort_values(
-        ['_postseason_pick_score', '_estimated_hit_rate', '_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
+        ['_postseason_pick_score', '_signal_score', '_estimated_hit_rate', '_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
         ascending=False,
     )
 
@@ -7805,7 +8881,7 @@ def _sort_betslip_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.DataFrame(deduped).reset_index(drop=True)
     return out.drop(
-        columns=['_postseason_pick_score', '_estimated_hit_rate', '_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
+        columns=['_postseason_pick_score', '_signal_score', '_estimated_hit_rate', '_selection_priority', '_dir_prob', '_confidence', '_edge_abs'],
         errors='ignore',
     )
 
@@ -7815,6 +8891,9 @@ def _prepare_betslip_candidate_pool(picks_df: pd.DataFrame,
                                     direction: Optional[str] = None,
                                     allowed_props: Optional[set] = None) -> pd.DataFrame:
     eligible_df = picks_df.copy()
+    excluded_upper = _excluded_pick_props_upper()
+    if excluded_upper and 'prop' in eligible_df.columns:
+        eligible_df = eligible_df[~eligible_df['prop'].astype(str).str.upper().isin(excluded_upper)]
     if 'pick_source' in eligible_df.columns:
         eligible_df = eligible_df[~eligible_df['pick_source'].isin(['volume_fill', 'emergency_fill'])]
     if 'confidence' in eligible_df.columns:
@@ -7918,6 +8997,15 @@ def _grade_power_play_results(results: List[Optional[str]], wager: float) -> Tup
     return 'PUSH', float(wager), effective_picks
 
 
+def _eligible_under_betslip_props() -> set:
+    """Return UNDER props from the same authoritative policy used by live picks."""
+    return {
+        prop.upper()
+        for prop, rules in _load_target_quality_policy().items()
+        if rules.get('allowed') and rules.get('allow_under')
+    } - _excluded_pick_props_upper()
+
+
 def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
     """
     Auto-log suggested PrizePicks Power Play bet slips to betslips_history.csv.
@@ -7960,10 +9048,9 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
         )
 
     # ── UNDER-Only slip track ────────────────────────────────────────────────
-    # Build dedicated slips from UNDER picks on the post-retrain high-signal props.
-    # A hard confidence floor is already applied above, so STL/BLK only enter this
-    # pool when they survive both the live quality policy and the >=70 betslip gate.
-    _under_props = {'AST', 'TRB', 'STL', 'BLK'}
+    # Build dedicated slips from the same dynamic UNDER policy used by the card.
+    # Do not maintain a second hard-coded list that can drift from live selection.
+    _under_props = _eligible_under_betslip_props()
     under_pool = _prepare_betslip_candidate_pool(
         picks_df,
         direction='UNDER',
@@ -8050,7 +9137,7 @@ def backtest_under_only_slips(history_df: Optional[pd.DataFrame] = None, wager: 
         candidate_pool = _prepare_betslip_candidate_pool(
             day_df,
             direction='UNDER',
-            allowed_props={'AST', 'TRB', 'STL', 'BLK'},
+            allowed_props=_eligible_under_betslip_props(),
         )
         for size in [2, 3]:
             candidate_limit = {2: 6, 3: 8}[size]
@@ -8443,8 +9530,18 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
         player_norm = _normalize_name(player)
         status_detail = status_map.get(player_norm, {})
         status_label = str(status_detail.get('status', '') or status_detail.get('bucket', '')).replace('_', ' ').strip().upper()
-        if team in pending_teams:
-            reason = "TEAM STATUS PENDING on official NBA injury report -- skip until that team submits"
+        player_has_known_status = (
+            player_norm in injured_out
+            or player_norm in doubtful_players
+            or player_norm in questionable_players
+            or player_norm in day_to_day_players
+            or player_norm in probable_players
+            or player_norm in status_map
+        )
+        if team in pending_teams and not player_has_known_status and direction != 'UNDER':
+            # Block OVER picks when team report is pending and player has no individual status —
+            # a hidden teammate absence could inflate this player's usage and push them OVER
+            reason = "TEAM STATUS PENDING on official NBA injury report -- skip OVER picks until that team submits"
         elif player_norm in injured_out or player_norm in doubtful_players:
             reason = f"PLAYER {status_label or 'OUT'} on today's injury report -- never bet on players who may not play"
         elif player_norm in questionable_players:
@@ -8582,6 +9679,10 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Option
         ('volatility_source', ''),
         ('support_agreement_count', 0),
         ('consistency_score', np.nan),
+        ('signal_score', np.nan),
+        ('signal_grade', ''),
+        ('edge_per_sigma', np.nan),
+        ('market_edge_per_sigma', np.nan),
         ('estimated_hit_rate', np.nan),
         ('prop_direction_hit_rate', np.nan),
         ('prop_direction_history_n', 0),
@@ -8686,6 +9787,7 @@ def generate_html_report(picks_df: pd.DataFrame, timestamp: str) -> str:
             'publish_tier_rank',
             'projection_type_rank',
             'postseason_pick_score',
+            'signal_score',
             'estimated_hit_rate',
             'prop_direction_hit_rate',
             'meta_prob',
@@ -9305,68 +10407,115 @@ def main():
 
         df = pd.read_csv(data_path, parse_dates=['game_date'])
 
-        # Use the active slate from historical_lines.csv if already fetched (avoids rate limits)
+        # Use the active slate from historical_lines.csv if already fetched.
+        # Do not insist on an exact calendar-day match — PrizePicks often posts
+        # the next actionable slate before midnight, and that cached board is
+        # preferable to refreshing into an Odds API fallback.
         today_str = datetime.now().strftime('%Y-%m-%d')
         lines_path = CONFIG['data_dir'] / 'historical_lines.csv'
         vegas = pd.DataFrame()
         _line_source = 'unknown'
         active_slate_date = today_str
+        line_source_mode = str(CONFIG.get('live_line_source_mode', 'fanduel') or 'fanduel').strip().lower()
+        preferred_bookmaker = str(CONFIG.get('live_sportsbook_key', 'fanduel') or 'fanduel').strip().lower()
+        use_prizepicks_lines = line_source_mode == 'prizepicks'
+        expected_line_source = 'prizepicks' if use_prizepicks_lines else preferred_bookmaker
+        allowed_cached_sources = ['prizepicks'] if use_prizepicks_lines else [preferred_bookmaker]
         if lines_path.exists():
             _hist = pd.read_csv(lines_path)
-            active_hist, hist_slate_date = _select_lines_for_exact_slate_date(_hist, today_str)
+            active_hist, hist_slate_date, hist_source, hist_mode = _select_cached_lines_for_predict(
+                _hist,
+                today_str,
+                allowed_sources=allowed_cached_sources,
+                standard_only=not use_prizepicks_lines,
+                allow_future_slate=use_prizepicks_lines,
+            )
             if len(active_hist) > 0:
                 active_slate_date = hist_slate_date or today_str
-                _line_source = _infer_line_source(active_hist)
-                print(
-                    f"\nUsing {len(active_hist)} cached lines from historical_lines.csv "
-                    f"(active slate {active_slate_date}) [source: {_line_source}]"
-                )
+                _line_source = hist_source
+                if hist_mode == 'exact_today':
+                    print(
+                        f"\nUsing {len(active_hist)} cached lines from historical_lines.csv "
+                        f"(active slate {active_slate_date}) [source: {_line_source}]"
+                    )
+                else:
+                    print(
+                        f"\nCached lines do not contain today's slate ({today_str}); "
+                        f"using nearest cached actionable slate {active_slate_date} "
+                        f"from historical_lines.csv [source: {_line_source}]"
+                    )
                 _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_hist.columns]
                 vegas = active_hist[['player', 'prop', 'line'] + _market_cols].copy()
                 vegas['num_books'] = active_hist['num_books'].values if 'num_books' in active_hist.columns else 1
-            else:
-                nearest_hist, nearest_hist_date = _select_active_slate_lines(_hist)
-                if len(nearest_hist) > 0 and nearest_hist_date:
+            elif hist_slate_date:
+                if hist_mode == 'missing_exact_today':
                     print(
-                        f"\nCached lines do not contain today's slate ({today_str}); "
-                        f"nearest cached slate is {nearest_hist_date}. Refreshing live lines instead."
+                        f"\nCached {expected_line_source} lines do not contain today's slate ({today_str}); "
+                        f"nearest cached slate is {hist_slate_date}. Refreshing live lines instead."
+                    )
+                else:
+                    print(
+                        f"\nCached lines are stale (latest cached slate {hist_slate_date}); "
+                        f"refreshing live lines instead."
                     )
         if len(vegas) == 0:
             print("\nFetching Vegas lines...")
-            vegas_raw, _line_source = fetch_vegas_lines()
+            vegas_raw, _line_source = fetch_vegas_lines(
+                prefer_prizepicks=use_prizepicks_lines,
+                preferred_bookmaker=None if use_prizepicks_lines else preferred_bookmaker,
+                allow_prizepicks_fallback=use_prizepicks_lines,
+            )
             if len(vegas_raw) > 0:
                 save_lines_snapshot(vegas_raw, source=_line_source)
                 active_live, live_slate_date = _select_lines_for_exact_slate_date(vegas_raw, today_str)
-                if len(active_live) == 0:
+                if len(active_live) == 0 and use_prizepicks_lines:
                     active_live, live_slate_date = _select_active_slate_lines(vegas_raw)
                     if len(active_live) > 0 and live_slate_date and live_slate_date != today_str:
                         print(
                             f"\nToday's slate ({today_str}) was not present in live {_line_source} lines; "
                             f"using closest available slate {live_slate_date}."
                         )
+                elif len(active_live) == 0:
+                    available_dates = sorted(
+                        pd.to_datetime(vegas_raw.get('game_date'), errors='coerce')
+                        .dropna()
+                        .dt.strftime('%Y-%m-%d')
+                        .unique()
+                        .tolist()
+                    ) if 'game_date' in vegas_raw.columns else []
+                    print(
+                        f"\nLive {_line_source} lines did not include today's slate ({today_str}). "
+                        f"Available slate dates: {available_dates or 'none'}. Official card will be empty."
+                    )
                 active_slate_date = live_slate_date or today_str
-                _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_live.columns]
-                vegas = active_live[['player', 'prop', 'line'] + _market_cols].copy()
-                vegas['num_books'] = active_live['num_books'].values if 'num_books' in active_live.columns else 1
+                if len(active_live) > 0:
+                    _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_live.columns]
+                    vegas = active_live[['player', 'prop', 'line'] + _market_cols].copy()
+                    vegas['num_books'] = active_live['num_books'].values if 'num_books' in active_live.columns else 1
 
         print(f"\nActive slate date: {active_slate_date}")
 
         # Warn loudly when lines did not come from PrizePicks — picks are bet on PrizePicks,
         # so a line source mismatch corrupts the performance-tracking record.
-        if _line_source != 'prizepicks':
+        line_source_policy_ok = _line_source_policy_allows_publish(
+            _line_source, expected_line_source
+        )
+        if not line_source_policy_ok:
             print(
                 f"\n{'!'*60}\n"
                 f"  LINE SOURCE WARNING: lines sourced from '{_line_source}'\n"
-                f"  PrizePicks lines could not be fetched (Step 2 failed or blocked).\n"
-                f"  Picks below are generated against {_line_source} lines, which may\n"
-                f"  differ from the lines PrizePicks actually offers today.\n"
-                f"  ACTION REQUIRED: verify each pick's line on PrizePicks before betting.\n"
+                f"  This run is configured for '{expected_line_source}' lines.\n"
+                f"  Confidence is valid only when your sportsbook offers the exact same line.\n"
+                f"  ACTION REQUIRED: do not place a pick if the available line differs.\n"
+                f"  PUBLICATION DISABLED: this run will write an empty official card.\n"
                 f"  picks_history.csv will record '{_line_source}' as the line source.\n"
                 f"{'!'*60}"
             )
 
         # Generate predictions
-        pred_df = generate_predictions(df, vegas, use_feature_cache=True)
+        pred_df = generate_predictions(
+            df, vegas, use_feature_cache=True, slate_date=active_slate_date
+        )
 
         # Compute regression-to-mean candidates from historical data
         reg_candidates = compute_regression_candidates(df)
@@ -9385,6 +10534,11 @@ def main():
         # Fetch fresh injury report and remove risky availability picks
         inj_report = fetch_injury_data()
         picks = sanity_check_picks(picks, df, inj_report)
+        pre_card_candidates = _apply_live_accuracy_gates(picks.copy(), history_df=df)
+        if len(pre_card_candidates) > 0:
+            pre_card_candidates['line_source'] = _line_source
+            pre_card_candidates['gate_failures'] = pre_card_candidates.apply(_format_live_gate_failures, axis=1)
+        _atomic_csv(pre_card_candidates, CONFIG['output_dir'] / 'candidates_latest.csv')
         picks = build_live_pick_card(
             picks,
             target_picks=int(CONFIG.get('live_pick_target', 5)),
@@ -9392,6 +10546,9 @@ def main():
             slate_date=active_slate_date,
             history_df=df,
         )
+
+        if not line_source_policy_ok and len(picks) > 0:
+            picks = picks.iloc[0:0].copy()
 
         print(f"\n{len(picks)} picks found after live-card filtering")
         if len(picks) < int(CONFIG.get('live_pick_min', 5)):
@@ -9401,6 +10558,7 @@ def main():
             )
         if len(picks) == 0:
             print("\nNo picks cleared the publish bar today. Official card will be empty.")
+            _print_empty_live_card_diagnostics(pre_card_candidates, history_df=df)
 
         # Stamp the line source onto every pick so picks_history.csv tracks it.
         # This is essential for identifying runs where PrizePicks was unavailable.
@@ -9421,25 +10579,35 @@ def main():
             print("=" * 72)
             print("  TODAY'S PICKS")
             print("=" * 72)
-            print(f"  {'PLAYER':<22} {'PROP':<5} {'DIR':<6} {'LINE':>5} {'PRED':>5} {'EDGE':>5} {'CONF':>5} {'HIT%':>5} {'TIER'}")
-            print("  " + "-" * 68)
+            print(f"  {'PLAYER':<22} {'PROP':<5} {'DIR':<6} {'LINE':>5} {'MODE':<8} {'SRC':<10} {'PRED':>5} {'EDGE':>5} {'SIG':>5} {'CONF':>5} {'HIST':>5} {'TIER'}")
+            print("  " + "-" * 96)
             for _, r in top_display_df.iterrows():
                 player   = str(r.get('player', ''))[:22]
                 prop     = str(r.get('prop', ''))
                 dirn     = str(r.get('direction', ''))
                 line     = r.get('line', '')
+                mode     = str(r.get('projection_type', 'standard'))[:8]
+                source   = str(r.get('line_source', ''))[:10]
                 pred     = r.get('prediction', '')
                 edge     = r.get('edge', '')
+                signal   = r.get('signal_score', '')
                 conf     = r.get('confidence', '')
                 hit      = r.get('estimated_hit_rate', '')
                 tier     = str(r.get('publish_tier', r.get('pick_source', '')))[:14]
                 mkt      = r.get('market_edge', '')
                 sigma    = r.get('sigma', '')
+                raw_pred = r.get('raw_prediction', '')
                 extras = []
                 if mkt is not None and not pd.isna(mkt):
                     extras.append(f"mkt={float(mkt):+.2f}")
                 if sigma is not None and not pd.isna(sigma):
-                    extras.append(f"σ={float(sigma):.2f}")
+                    extras.append(f"sigma={float(sigma):.2f}")
+                if raw_pred is not None and not pd.isna(raw_pred):
+                    try:
+                        if abs(float(raw_pred) - float(pred)) >= 0.05:
+                            extras.append(f"raw={float(raw_pred):.1f}")
+                    except Exception:
+                        pass
                 inj = r.get('injury_adj', False)
                 if inj:
                     extras.append("INJ+")
@@ -9448,11 +10616,12 @@ def main():
                     line_s = f"{float(line):>5.1f}"
                     pred_s = f"{float(pred):>5.1f}"
                     edge_s = f"{float(edge):>+5.1f}"
+                    signal_s = f"{float(signal):>4.0f}" if signal is not None and not pd.isna(signal) else "  --"
                     conf_s = f"{float(conf):>4.0f}%"
                     hit_s  = f"{float(hit):>4.0f}%" if hit is not None and not pd.isna(hit) else "  -- "
                 except Exception:
-                    line_s = pred_s = edge_s = conf_s = hit_s = "  ?  "
-                print(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {pred_s} {edge_s} {conf_s} {hit_s}  {tier}{extras_str}")
+                    line_s = pred_s = edge_s = signal_s = conf_s = hit_s = "  ?  "
+                print(f"  {player:<22} {prop:<5} {dirn:<6} {line_s} {mode:<8} {source:<10} {pred_s} {edge_s} {signal_s} {conf_s} {hit_s}  {tier}{extras_str}")
             print("=" * 72)
             print()
 
@@ -9469,7 +10638,8 @@ def main():
 
     elif command == 'backfill':
         days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
-        backfill_historical_lines(days)
+        max_credits = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+        backfill_historical_lines(days, max_credits=max_credits)
 
     elif command == 'rebuild-lines':
         rebuilt = rebuild_historical_lines_from_local_sources(write=True)

@@ -1,0 +1,121 @@
+{
+  "feature_survival_gate": {
+    "holdout_not_used_for_selection": true,
+    "minimum_mean_auc_lift": 0.0,
+    "minimum_mean_top5_lift_pp": 1.0,
+    "minimum_positive_folds": 3,
+    "minimum_validation_card_rows": 60,
+    "minimum_validation_dates": 12
+  },
+  "generated_at_utc": "2026-08-12T08:40:46.488091Z",
+  "limitations": [
+    "Archived PrizePicks references are not true T-60/T-5 captures; direct forward capture is required.",
+    "Standard non-promo metadata spans only eight T-60 and nine T-5 eligible dates; the resulting two/three-date holdouts are too small for promotion.",
+    "Archived prediction files reproduce the then-live model outputs, not one immutable model version across all dates.",
+    "The overlay is a selection/ranking model; it does not replace the underlying stat regression models."
+  ],
+  "odds_api_credits_reserved": 64120,
+  "odds_api_credits_spent": 0,
+  "policy_definition": {
+    "card_size": 5,
+    "direction": "UNDER",
+    "eligible_props": [
+      "player_assists",
+      "player_points",
+      "player_rebounds"
+    ],
+    "is_promo": false,
+    "minimum_archived_model_under_edge": 0.05,
+    "projection_type": [
+      "standard"
+    ]
+  },
+  "production_policy": {
+    "t_minus_5": {
+      "enabled": false,
+      "model_path": "models/clv_selection_overlay_t_minus_5.pkl",
+      "reason": "research-only: no validated production lift",
+      "selected_feature_groups": []
+    },
+    "t_minus_60": {
+      "enabled": false,
+      "model_path": "models/clv_selection_overlay_t_minus_60.pkl",
+      "reason": "research-only: no validated production lift",
+      "selected_feature_groups": []
+    }
+  },
+  "snapshots": {
+    "t_minus_5": {
+      "development_dates": 6,
+      "development_end": "2026-04-09",
+      "development_start": "2026-04-03",
+      "eligible_dates": 9,
+      "eligible_rows": 902,
+      "forbidden_feature_groups": {},
+      "holdout_dates": 3,
+      "holdout_dates_list": [
+        "2026-04-10",
+        "2026-04-12",
+        "2026-05-06"
+      ],
+      "holdout_end": "2026-05-06",
+      "holdout_rows": 82,
+      "holdout_selected_standard_n": 10,
+      "holdout_start": "2026-04-10",
+      "minimum_production_holdout_dates": 15,
+      "minimum_production_holdout_picks": 100,
+      "minimum_production_standard_picks": 20,
+      "model_path": "models/clv_selection_overlay_t_minus_5.pkl",
+      "production_gate_pass": false,
+      "random_repetitions": 2000,
+      "research_holdout_lift_pass": false,
+      "selected_feature_groups": [],
+      "selected_features": [
+        "model_under_edge",
+        "model_prediction",
+        "archived_l10",
+        "archived_clf_prob",
+        "archived_market_edge_pred",
+        "archived_meta_prob"
+      ]
+    },
+    "t_minus_60": {
+      "development_dates": 6,
+      "development_end": "2026-04-09",
+      "development_start": "2026-04-03",
+      "eligible_dates": 8,
+      "eligible_rows": 889,
+      "forbidden_feature_groups": {
+        "market_withdrawal": "not known until T-5",
+        "t60_to_t5_movement": "not known until T-5"
+      },
+      "holdout_dates": 2,
+      "holdout_dates_list": [
+        "2026-04-10",
+        "2026-04-12"
+      ],
+      "holdout_end": "2026-04-12",
+      "holdout_rows": 82,
+      "holdout_selected_standard_n": 9,
+      "holdout_start": "2026-04-10",
+      "minimum_production_holdout_dates": 15,
+      "minimum_production_holdout_picks": 100,
+      "minimum_production_standard_picks": 20,
+      "model_path": "models/clv_selection_overlay_t_minus_60.pkl",
+      "production_gate_pass": false,
+      "random_repetitions": 2000,
+      "research_holdout_lift_pass": true,
+      "selected_feature_groups": [],
+      "selected_features": [
+        "model_under_edge",
+        "model_prediction",
+        "archived_l10",
+        "archived_clf_prob",
+        "archived_market_edge_pred",
+        "archived_meta_prob"
+      ]
+    }
+  },
+  "source_feature_rows": 16989,
+  "source_feature_table": "data/clv_features_2026_live.csv"
+}

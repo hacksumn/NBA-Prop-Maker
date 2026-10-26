@@ -1,0 +1,50 @@
+{
+  "AST_UNDER": {
+    "prop": "AST",
+    "direction": "UNDER",
+    "p25_threshold": 1.506,
+    "p75_threshold": 2.337,
+    "buckets": [
+      {
+        "tier": "all",
+        "n": 45,
+        "win_rate": 0.7333,
+        "mean_confidence": 69.18,
+        "mean_edge": -0.747,
+        "mean_sigma": 2.016
+      },
+      {
+        "tier": "mid_sigma",
+        "n": 37,
+        "win_rate": 0.7297,
+        "mean_confidence": 68.92,
+        "mean_edge": -0.759,
+        "mean_sigma": 2.002
+      }
+    ]
+  },
+  "TRB_UNDER": {
+    "prop": "TRB",
+    "direction": "UNDER",
+    "p25_threshold": 2.185,
+    "p75_threshold": 2.904,
+    "buckets": [
+      {
+        "tier": "all",
+        "n": 28,
+        "win_rate": 0.6786,
+        "mean_confidence": 64.83,
+        "mean_edge": -0.886,
+        "mean_sigma": 2.518
+      },
+      {
+        "tier": "mid_sigma",
+        "n": 21,
+        "win_rate": 0.619,
+        "mean_confidence": 63.61,
+        "mean_edge": -0.819,
+        "mean_sigma": 2.497
+      }
+    ]
+  }
+}

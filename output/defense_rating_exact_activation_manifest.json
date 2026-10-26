@@ -1,0 +1,405 @@
+{
+  "status": "activated_by_operator_direction",
+  "activated_at_utc": "2026-08-14T02:23:00.924420+00:00",
+  "source": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\defense_rating_retrain_exact",
+  "destination": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models",
+  "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation",
+  "files_activated": 54,
+  "production_selected_defense_features": {
+    "pts": [],
+    "trb": [],
+    "ast": [],
+    "pra": [],
+    "pr": [],
+    "pa": [],
+    "stl": [
+      "opp_def_rtg_pt"
+    ],
+    "blk": [
+      "opp_pace_pt"
+    ],
+    "tov": []
+  },
+  "reason": "Jake explicitly directed that the corrected team-defense logic be active and not reverted because the OOF betting-direction comparison was null.",
+  "evidence_caveat": "DEC-051 found no positive same-row OOF betting-direction interval and no reserved future holdout exists; activation is a data-contract correctness decision, not a validated performance-improvement claim.",
+  "files": [
+    {
+      "name": "bias_advanced.json",
+      "before_sha256": "16c116176b4efbe1e01387377978012a3f8c36d0237b6aeacb6e35b93b6f1d13",
+      "candidate_sha256": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c",
+      "after_sha256": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\bias_advanced.json"
+    },
+    {
+      "name": "clf_ast_advanced.pkl",
+      "before_sha256": "d7340e1715e4796b2b226909a3c9131499f0f7533da0d563b8255d823fee9d03",
+      "candidate_sha256": "0b19acb67f3b8918b393f84816af9b37fe6b57462622a22aa105fbd3fdacc02b",
+      "after_sha256": "0b19acb67f3b8918b393f84816af9b37fe6b57462622a22aa105fbd3fdacc02b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_ast_advanced.pkl"
+    },
+    {
+      "name": "clf_blk_advanced.pkl",
+      "before_sha256": "b8537639f06bd2b1c7abac116dc10f22c0f8d2bc19aa459ed12a9b210dc30702",
+      "candidate_sha256": "e51344021985ffd21fe39f5c83d07d60d4bfb54813473443b5fa204f6651ef9c",
+      "after_sha256": "e51344021985ffd21fe39f5c83d07d60d4bfb54813473443b5fa204f6651ef9c",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_blk_advanced.pkl"
+    },
+    {
+      "name": "clf_pa_advanced.pkl",
+      "before_sha256": "02aa55971f02c142b01c683e13bd6f5791739b072bd01a302c41cf47ad4f187d",
+      "candidate_sha256": "2acc3b0f97591ba8f28c2dc93785691f00dfa3a26f11b777b8d116e3be4bb4c0",
+      "after_sha256": "2acc3b0f97591ba8f28c2dc93785691f00dfa3a26f11b777b8d116e3be4bb4c0",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_pa_advanced.pkl"
+    },
+    {
+      "name": "clf_pr_advanced.pkl",
+      "before_sha256": "73b5718cc5e3f7722b908b7d6e292bd3bfbe01b04a4e4e69473fa595922aa53c",
+      "candidate_sha256": "2014b8cf59c6b861cd5b7297f24f6c6f3bbb4758abb6adf9a1b9a162b343c9bc",
+      "after_sha256": "2014b8cf59c6b861cd5b7297f24f6c6f3bbb4758abb6adf9a1b9a162b343c9bc",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_pr_advanced.pkl"
+    },
+    {
+      "name": "clf_pra_advanced.pkl",
+      "before_sha256": "95c1b73b6ef2cb2025d6926cf830c95761fcfd7b05e491573387a35b34bf83ab",
+      "candidate_sha256": "7b6926b671c2765b71e3d0695db4481a75c5a41a4c96c156d903215d323b6ce8",
+      "after_sha256": "7b6926b671c2765b71e3d0695db4481a75c5a41a4c96c156d903215d323b6ce8",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_pra_advanced.pkl"
+    },
+    {
+      "name": "clf_pts_advanced.pkl",
+      "before_sha256": "410ef3954de6979f56539d3df115e562792cc716927043474883fbe8f6380f86",
+      "candidate_sha256": "8b35b0a022683606fed90aa862f2702f591fc9baa157274e6b0b94679cffa8e2",
+      "after_sha256": "8b35b0a022683606fed90aa862f2702f591fc9baa157274e6b0b94679cffa8e2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_pts_advanced.pkl"
+    },
+    {
+      "name": "clf_stl_advanced.pkl",
+      "before_sha256": "40affd48ac541e2ad681e47667603ed3f6a37e38d64ab631850cec7bdb5ab3dc",
+      "candidate_sha256": "0e7392829d72d9de71fe43c9ac50f2dda331b5ceac7a7d62732c52e4d7c0211d",
+      "after_sha256": "0e7392829d72d9de71fe43c9ac50f2dda331b5ceac7a7d62732c52e4d7c0211d",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_stl_advanced.pkl"
+    },
+    {
+      "name": "clf_tov_advanced.pkl",
+      "before_sha256": "fa5179e75af1e41182d40740dcbe70a8806ac12aba98b1d75af1c0061881e8ba",
+      "candidate_sha256": "03696c3438216e8ce873301b1eb3baa7cd9d740ac4be70342104c73e5882892b",
+      "after_sha256": "03696c3438216e8ce873301b1eb3baa7cd9d740ac4be70342104c73e5882892b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_tov_advanced.pkl"
+    },
+    {
+      "name": "clf_trb_advanced.pkl",
+      "before_sha256": "4f78ad192c3a02e32bdbbc7150890b555c72e9bf6da22a8d1232990d25703db6",
+      "candidate_sha256": "40f0ad871de0392860efbee019f15c4fb590ca1daa09d5b84dcb5dc839950b08",
+      "after_sha256": "40f0ad871de0392860efbee019f15c4fb590ca1daa09d5b84dcb5dc839950b08",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\clf_trb_advanced.pkl"
+    },
+    {
+      "name": "defense_rating_feature_contract.json",
+      "before_sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06",
+      "candidate_sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06",
+      "after_sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\defense_rating_feature_contract.json"
+    },
+    {
+      "name": "edge_xgb_ast_advanced.pkl",
+      "before_sha256": "b8c9abc3d6c45d1c3cfbd8e7c91cb4f3edcd96d807f211b91a3698bb199e029a",
+      "candidate_sha256": "6e1db1b19f7fce2a0eccbd37e85c4f72001a8875e0d61b21495a53771356427a",
+      "after_sha256": "6e1db1b19f7fce2a0eccbd37e85c4f72001a8875e0d61b21495a53771356427a",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_ast_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_blk_advanced.pkl",
+      "before_sha256": "b80f1800454c962dae3918a4b54781ded2a48284fc2dd9c32353914e24503269",
+      "candidate_sha256": "025c9a3aa89efd52a03998a88327edb36fc95d35b4e3472e0a941335271933f7",
+      "after_sha256": "025c9a3aa89efd52a03998a88327edb36fc95d35b4e3472e0a941335271933f7",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_blk_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pa_advanced.pkl",
+      "before_sha256": "cbfe2dfe0b2b0c68408abb5c236cf2bd1d4fc6bbe3433d05a05d491cd7862d10",
+      "candidate_sha256": "b5d37f2b7e2e7ca315e2633e2f8f2d6d63100c62e0302877d2014ecf55e2f8ae",
+      "after_sha256": "b5d37f2b7e2e7ca315e2633e2f8f2d6d63100c62e0302877d2014ecf55e2f8ae",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_pa_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pr_advanced.pkl",
+      "before_sha256": "b1a71ce285091b62a086ab976bc1c0f160e978dfc0351a405aaf7952ea5389ed",
+      "candidate_sha256": "814bcf9830ffb43221e13e7bcdd1200012a046bfe6b473bebbfa23ea334b340d",
+      "after_sha256": "814bcf9830ffb43221e13e7bcdd1200012a046bfe6b473bebbfa23ea334b340d",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_pr_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pra_advanced.pkl",
+      "before_sha256": "02328364e64e06f484e67880464db7d4d0a54b5f159e9ab3019b7f08c70d582e",
+      "candidate_sha256": "939adfe04c51d00f5e43b9572b6270b40345525e621a22e038ff23ba6edc9fb8",
+      "after_sha256": "939adfe04c51d00f5e43b9572b6270b40345525e621a22e038ff23ba6edc9fb8",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_pra_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_pts_advanced.pkl",
+      "before_sha256": "71299fb69a722bc0a3577be687cd549110dc3b22f09aa2d3aa48504e3feaff54",
+      "candidate_sha256": "980e977b997bad5ee3d264a73baa4cd9b39a4587e31172556a56e0235d4ee6d0",
+      "after_sha256": "980e977b997bad5ee3d264a73baa4cd9b39a4587e31172556a56e0235d4ee6d0",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_pts_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_stl_advanced.pkl",
+      "before_sha256": "ec6947f1f384d1ad5de431471d1a6f86b402913407f19c9688906e131c50c3f1",
+      "candidate_sha256": "dd869075b6e25b82b6cc2174256b624eaa3f416db75f9aa8b4030c3d976c3c74",
+      "after_sha256": "dd869075b6e25b82b6cc2174256b624eaa3f416db75f9aa8b4030c3d976c3c74",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_stl_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_tov_advanced.pkl",
+      "before_sha256": "b155449bc1c7738777857d970f395cc890c9da9cfd49116e62604c9d28dcaf71",
+      "candidate_sha256": "ae33380263aa32cc15614bae8864d3c07432c2cdd89e36ac0390458eb3baf515",
+      "after_sha256": "ae33380263aa32cc15614bae8864d3c07432c2cdd89e36ac0390458eb3baf515",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_tov_advanced.pkl"
+    },
+    {
+      "name": "edge_xgb_trb_advanced.pkl",
+      "before_sha256": "45786837c0a66cac86c323d709897628ab11e07554b90695952e987f9d6af470",
+      "candidate_sha256": "0063536100c083ec77e18d53bb6815418a26ec916583d531f148fa30c66ffd01",
+      "after_sha256": "0063536100c083ec77e18d53bb6815418a26ec916583d531f148fa30c66ffd01",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\edge_xgb_trb_advanced.pkl"
+    },
+    {
+      "name": "feature_importance_advanced.json",
+      "before_sha256": "de5bc3da2b5b18bffac49b5dc5f686690555908023705b801974f2c1a69c51fa",
+      "candidate_sha256": "347b076d667e2a0f65bbbb2aece1ce0d97285d6d5b7f8395569ff392d8c30aa7",
+      "after_sha256": "347b076d667e2a0f65bbbb2aece1ce0d97285d6d5b7f8395569ff392d8c30aa7",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\feature_importance_advanced.json"
+    },
+    {
+      "name": "market_feature_sets_advanced.json",
+      "before_sha256": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41",
+      "candidate_sha256": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41",
+      "after_sha256": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\market_feature_sets_advanced.json"
+    },
+    {
+      "name": "meta_clf_ast_advanced.pkl",
+      "before_sha256": "8ee1ec83021fe13f1cc45021292f36e8290a08d1445fb787c43958b4d7d49347",
+      "candidate_sha256": "cdcae8fde41534aa16c8d77e0ddd8c0aca1a3be0e249c3d8ee4516ad752f5b50",
+      "after_sha256": "cdcae8fde41534aa16c8d77e0ddd8c0aca1a3be0e249c3d8ee4516ad752f5b50",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_ast_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_blk_advanced.pkl",
+      "before_sha256": "658802b3974645fe6923c7e286116aa98f40797b94ba7649bc4985e445ec8077",
+      "candidate_sha256": "1fe1f8b93b174262948ac3b171f4904dfd6a48a87d3aa3d359af30d23fdfff75",
+      "after_sha256": "1fe1f8b93b174262948ac3b171f4904dfd6a48a87d3aa3d359af30d23fdfff75",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_blk_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pa_advanced.pkl",
+      "before_sha256": "ebcf3efb5dc121a1bbd9879f88c8746af26397d016c945faa92dece7ae87dd61",
+      "candidate_sha256": "3c6e5d6f0788c7dc26d3f981fba147e965ba74582b397c4892f79147a8e0fae1",
+      "after_sha256": "3c6e5d6f0788c7dc26d3f981fba147e965ba74582b397c4892f79147a8e0fae1",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_pa_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pr_advanced.pkl",
+      "before_sha256": "aa5da7824ed32d6c79d08281a9cb2e7cfc746e933ab61dd0d27c9079ff571677",
+      "candidate_sha256": "68f1a449a5496f2287e74560570bbd3e12d3040f7161ac5774e2d222a5d4b905",
+      "after_sha256": "68f1a449a5496f2287e74560570bbd3e12d3040f7161ac5774e2d222a5d4b905",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_pr_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pra_advanced.pkl",
+      "before_sha256": "af1203d5687ba3aab87facc8a0e1b8001ddb0faf62d12e706f9160e8735aa0ea",
+      "candidate_sha256": "a0e4da4c6a73f6d3eed7aa6ea52e7a9db9fe6c53fec5c6ca57f9c2190bdc353b",
+      "after_sha256": "a0e4da4c6a73f6d3eed7aa6ea52e7a9db9fe6c53fec5c6ca57f9c2190bdc353b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_pra_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_pts_advanced.pkl",
+      "before_sha256": "4ca56f8f316bdcf1bb1baa46ac684e5debc4d169710f5982377d762a04497dc4",
+      "candidate_sha256": "7c3b8360f996430b8019c270e3ecf3165aa9fabc8a5fea4167cb35389e1fa990",
+      "after_sha256": "7c3b8360f996430b8019c270e3ecf3165aa9fabc8a5fea4167cb35389e1fa990",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_pts_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_stl_advanced.pkl",
+      "before_sha256": "d8ef71c6079dbffa515d5b13e21089e8988a2cfc6302a09782e7335616dba426",
+      "candidate_sha256": "754b97309ba1da097841167b18f7e0c8237db31e490eca9524d8b5298fe45f18",
+      "after_sha256": "754b97309ba1da097841167b18f7e0c8237db31e490eca9524d8b5298fe45f18",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_stl_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_tov_advanced.pkl",
+      "before_sha256": "a3d2de854887bc3565c7bcc1ca2dc05a2749e45e17b39f1961df346f2c0a220c",
+      "candidate_sha256": "357656a1da10bb7d521ec000b0146280b1c377199dcf85649bc83f23a93cffd2",
+      "after_sha256": "357656a1da10bb7d521ec000b0146280b1c377199dcf85649bc83f23a93cffd2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_tov_advanced.pkl"
+    },
+    {
+      "name": "meta_clf_trb_advanced.pkl",
+      "before_sha256": "c511f9c70e1c3c58b1bc0a3645b651ace5596fdc8a48227673c404f701cc7885",
+      "candidate_sha256": "5d8cd186b513c0c70723a57c8116ccc8ac390be34bcc18263c8ae70dcc1d06e5",
+      "after_sha256": "5d8cd186b513c0c70723a57c8116ccc8ac390be34bcc18263c8ae70dcc1d06e5",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\meta_clf_trb_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_ast_advanced.pkl",
+      "before_sha256": "b477b18e1733a358298afdd009332447404f9faef75e0fdb1992495d605e6e85",
+      "candidate_sha256": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0",
+      "after_sha256": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_ast_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_blk_advanced.pkl",
+      "before_sha256": "37e0e7fbe5187f793b86efb75fbd3f3b5d2d6985fcc2259cf3958d30f6dca1f3",
+      "candidate_sha256": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224",
+      "after_sha256": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_blk_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pa_advanced.pkl",
+      "before_sha256": "4efae1d28d4a38ccc0c60ae8c34be6eef85b46e847f56db6ba596b1f958e1ecd",
+      "candidate_sha256": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633",
+      "after_sha256": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_pa_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pr_advanced.pkl",
+      "before_sha256": "cf2647944242bb50dde4d892c62a1c3d1003ed6d6382014150447864628475cb",
+      "candidate_sha256": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2",
+      "after_sha256": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_pr_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pra_advanced.pkl",
+      "before_sha256": "36109064351096695e5e4148714d4022ee959fea9175d0cc4ba25a6abb1f68b0",
+      "candidate_sha256": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f",
+      "after_sha256": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_pra_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_pts_advanced.pkl",
+      "before_sha256": "312662b62a3505739bf30828471b78143734fcf4acbfb8a32e3b0007fa9d9de6",
+      "candidate_sha256": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415",
+      "after_sha256": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_pts_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_stl_advanced.pkl",
+      "before_sha256": "e3e3d0e3523ae13f5f0aabd476fadf77ce3e573785ce47f806ed81121ae6f453",
+      "candidate_sha256": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5",
+      "after_sha256": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_stl_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_tov_advanced.pkl",
+      "before_sha256": "3dd71409d03efd9af1ada676d672168bd7098db1d7455ef659a22b61e9b89736",
+      "candidate_sha256": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9",
+      "after_sha256": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_tov_advanced.pkl"
+    },
+    {
+      "name": "prob_sidecar_trb_advanced.pkl",
+      "before_sha256": "750e061c13e4190015367411a949358feaf7370cca79f6e20c34f010c1d53608",
+      "candidate_sha256": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e",
+      "after_sha256": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\prob_sidecar_trb_advanced.pkl"
+    },
+    {
+      "name": "probability_oof_advanced.csv",
+      "before_sha256": "1943dca8a7137a681dd66528c91379f519e426055db599953193e6ffbdcc3cb6",
+      "candidate_sha256": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763",
+      "after_sha256": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\probability_oof_advanced.csv"
+    },
+    {
+      "name": "selected_features_advanced.json",
+      "before_sha256": "3ff320397abddae9e82e1f4bf940f01df65d8602bd08e7f5dbf4e12518efde4c",
+      "candidate_sha256": "2f68413c8f70c8e20ec33cd55579d800d5366f579646c4f0bc4a012e2e2f07e2",
+      "after_sha256": "2f68413c8f70c8e20ec33cd55579d800d5366f579646c4f0bc4a012e2e2f07e2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\selected_features_advanced.json"
+    },
+    {
+      "name": "training_edge_analysis.json",
+      "before_sha256": "619ca58f5a964b48a0484f017205cf4c37c64b841f3e06f9076e1a36998999ee",
+      "candidate_sha256": "8715eeea1a5ff46a82ae083864a948093d9c79d129275176423b92345030294b",
+      "after_sha256": "8715eeea1a5ff46a82ae083864a948093d9c79d129275176423b92345030294b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\training_edge_analysis.json"
+    },
+    {
+      "name": "training_probability_analysis.json",
+      "before_sha256": "48414dbd34446e5a7de369c892965bd16c0f09f70cee1b5a0639a0347e399228",
+      "candidate_sha256": "509f57023528a712982d5f9d3256bf596f14f2d15fcef98d96ef103874bbd735",
+      "after_sha256": "509f57023528a712982d5f9d3256bf596f14f2d15fcef98d96ef103874bbd735",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\training_probability_analysis.json"
+    },
+    {
+      "name": "training_results.json",
+      "before_sha256": "a15877e343c237817c266fb47fa0e2f44c9906531eabf3eed276e354c0396789",
+      "candidate_sha256": "e413b9917e09ade19360d4ec55a8d163e98e9efb7a05f61f6df7c072b3365dba",
+      "after_sha256": "e413b9917e09ade19360d4ec55a8d163e98e9efb7a05f61f6df7c072b3365dba",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\training_results.json"
+    },
+    {
+      "name": "xgb_ast_advanced.pkl",
+      "before_sha256": "a6733c73d1e093345a351491136ef89e822c365eb8038cb76946427c222c3db0",
+      "candidate_sha256": "6cd2eb69003aa4559ca7ef51b2870fb33388f7bf68a1c8f810b4ed929992df4b",
+      "after_sha256": "6cd2eb69003aa4559ca7ef51b2870fb33388f7bf68a1c8f810b4ed929992df4b",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_ast_advanced.pkl"
+    },
+    {
+      "name": "xgb_blk_advanced.pkl",
+      "before_sha256": "fc9f634300fd483cf16e1288ce62ccdb0de515cb5c82626f2d365f3b8d443788",
+      "candidate_sha256": "4dd3902b32b80166cdec9953f6125c1cb0bf43698cf60831c0515a78f4d97070",
+      "after_sha256": "4dd3902b32b80166cdec9953f6125c1cb0bf43698cf60831c0515a78f4d97070",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_blk_advanced.pkl"
+    },
+    {
+      "name": "xgb_pa_advanced.pkl",
+      "before_sha256": "72d960ba1c4c27663fcd89a33ab2e53928255ef4a8cc137e1ec4af7026e4edd0",
+      "candidate_sha256": "9edcac1da157be84ad6f39a8dbc61c63a24621d73ba2dd3eed294315eb5d1898",
+      "after_sha256": "9edcac1da157be84ad6f39a8dbc61c63a24621d73ba2dd3eed294315eb5d1898",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_pa_advanced.pkl"
+    },
+    {
+      "name": "xgb_pr_advanced.pkl",
+      "before_sha256": "02fbf1a51fae8e7256afd2dfee6c81f9c5839dcc72edf329d839b49f6b838334",
+      "candidate_sha256": "6a8adc2769c0a2b04aac5b1653869945211714cb7f6e3a21951cb7faa20d9bb2",
+      "after_sha256": "6a8adc2769c0a2b04aac5b1653869945211714cb7f6e3a21951cb7faa20d9bb2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_pr_advanced.pkl"
+    },
+    {
+      "name": "xgb_pra_advanced.pkl",
+      "before_sha256": "8acf588fe0abf59f817105bd956862fc5bf93256b9d67e7d473170d8f59b4470",
+      "candidate_sha256": "add76e1bdae26e024e9a970deb04444f74905caeba6d40fdd660225c6f31f6bb",
+      "after_sha256": "add76e1bdae26e024e9a970deb04444f74905caeba6d40fdd660225c6f31f6bb",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_pra_advanced.pkl"
+    },
+    {
+      "name": "xgb_pts_advanced.pkl",
+      "before_sha256": "b4416a603585d2c2d5377863497c31c312ea50c6d7ec80cdd86b2cd8e6a92465",
+      "candidate_sha256": "a295bf76ebec05de646ec1b9f4459a54b5d22d9a5634a86f08cf62e4db6f2fc2",
+      "after_sha256": "a295bf76ebec05de646ec1b9f4459a54b5d22d9a5634a86f08cf62e4db6f2fc2",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_pts_advanced.pkl"
+    },
+    {
+      "name": "xgb_stl_advanced.pkl",
+      "before_sha256": "1bcbf54e4da742af0ead2c3b997b788d4056cbd3be969958487d37af3c6c6613",
+      "candidate_sha256": "bfcfb0422822ccea4a6292423c6cc7d51add5a6428b0d65711f83884b182880e",
+      "after_sha256": "bfcfb0422822ccea4a6292423c6cc7d51add5a6428b0d65711f83884b182880e",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_stl_advanced.pkl"
+    },
+    {
+      "name": "xgb_tov_advanced.pkl",
+      "before_sha256": "3edc3f537c9331de795cce6475e2e50d483b24016219d561dd04a9262c161c35",
+      "candidate_sha256": "44be75a1c144f0bf8d954a31a069eb3515f49998e97fb4bbd73b603d96094578",
+      "after_sha256": "44be75a1c144f0bf8d954a31a069eb3515f49998e97fb4bbd73b603d96094578",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_tov_advanced.pkl"
+    },
+    {
+      "name": "xgb_trb_advanced.pkl",
+      "before_sha256": "370f676fbc909398ae67dcf97ce9b67b712eb8942f9f7bb7bd3ae8d3ab0a944c",
+      "candidate_sha256": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806",
+      "after_sha256": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806",
+      "backup": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\backups\\dec052_pre_exact_orb_activation\\xgb_trb_advanced.pkl"
+    }
+  ]
+}

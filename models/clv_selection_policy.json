@@ -1,0 +1,14 @@
+{
+  "t_minus_5": {
+    "enabled": false,
+    "model_path": "models/clv_selection_overlay_t_minus_5.pkl",
+    "reason": "research-only: no validated production lift",
+    "selected_feature_groups": []
+  },
+  "t_minus_60": {
+    "enabled": false,
+    "model_path": "models/clv_selection_overlay_t_minus_60.pkl",
+    "reason": "research-only: no validated production lift",
+    "selected_feature_groups": []
+  }
+}

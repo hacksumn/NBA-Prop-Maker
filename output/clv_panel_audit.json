@@ -1,0 +1,76 @@
+{
+  "by_snapshot_kind": {
+    "decision": {
+      "bookmakers": 8,
+      "event_snapshots": 100,
+      "games": 100,
+      "markets": 8,
+      "rows": 55352
+    },
+    "t_minus_5": {
+      "bookmakers": 8,
+      "event_snapshots": 184,
+      "games": 184,
+      "markets": 8,
+      "rows": 99611
+    },
+    "t_minus_60": {
+      "bookmakers": 8,
+      "event_snapshots": 185,
+      "games": 185,
+      "markets": 8,
+      "rows": 98762
+    }
+  },
+  "credits": {
+    "remaining": 64120,
+    "used": 35880
+  },
+  "empty_manifest_keys": [
+    "0022501187:t_minus_60",
+    "0022501194:t_minus_60",
+    "0022501187:t_minus_5",
+    "0022501194:t_minus_5",
+    "0042500222:t_minus_5"
+  ],
+  "joins": {
+    "box_score_join_rate": 0.9527929836953323,
+    "box_score_joined_keys": 16187,
+    "unique_player_prop_date_keys": 16989
+  },
+  "manifest": {
+    "blocked_rows": 87,
+    "completed_empty": 5,
+    "completed_rows": 474,
+    "completed_with_data": 469,
+    "ready_rows": 474,
+    "total_rows": 561
+  },
+  "market_never_returned": [
+    "player_turnovers"
+  ],
+  "markets_returned": [
+    "player_assists",
+    "player_points",
+    "player_rebounds",
+    "player_points_rebounds_assists",
+    "player_points_rebounds",
+    "player_points_assists",
+    "player_blocks",
+    "player_steals"
+  ],
+  "rows": {
+    "date_mismatches": 0,
+    "master": 412328,
+    "paid": 253725,
+    "paired_price_rate": 0.9998226426248892,
+    "paired_prices": 253680,
+    "physical_duplicates": 0
+  },
+  "timing": {
+    "actual_after_request": 0,
+    "actual_at_or_after_tip": 0,
+    "max_lag_seconds": 299.0,
+    "median_lag_seconds": 262.0
+  }
+}

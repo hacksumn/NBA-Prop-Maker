@@ -1,0 +1,42 @@
+{
+  "enabled": true,
+  "rows": 52775,
+  "date_min": "2024-03-08",
+  "date_max": "2026-05-18",
+  "chronology_violations": 0,
+  "feature_columns": [
+    "availability_probability",
+    "conditional_minutes_prediction",
+    "expected_minutes_prediction"
+  ],
+  "prediction_splits": [
+    "untouched_holdout",
+    "walk_forward_1",
+    "walk_forward_2",
+    "walk_forward_3",
+    "walk_forward_4"
+  ],
+  "input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\model_data_availability_advanced.csv",
+  "targets_requested": [
+    "pts",
+    "trb",
+    "ast",
+    "pra",
+    "pr",
+    "pa",
+    "stl",
+    "blk",
+    "tov"
+  ],
+  "targets_trained": [
+    "ast",
+    "blk",
+    "pa",
+    "pr",
+    "pra",
+    "pts",
+    "stl",
+    "tov",
+    "trb"
+  ]
+}

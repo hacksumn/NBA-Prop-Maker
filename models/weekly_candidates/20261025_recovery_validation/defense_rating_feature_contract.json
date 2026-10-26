@@ -1,0 +1,39 @@
+{
+  "enabled": true,
+  "rows": 74254,
+  "date_min": "2023-11-12",
+  "date_max": "2026-10-24",
+  "chronology_violations": 0,
+  "feature_columns": [
+    "opp_def_rtg_pt",
+    "opp_pace_pt",
+    "opp_def_tier_pt"
+  ],
+  "rating_source_counts": {
+    "current_season_expanding": 70603,
+    "prior_season_final": 3651
+  },
+  "input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\model_data_defenserating_advanced.csv",
+  "targets_requested": [
+    "pts",
+    "trb",
+    "ast",
+    "pra",
+    "pr",
+    "pa",
+    "stl",
+    "blk",
+    "tov"
+  ],
+  "targets_trained": [
+    "ast",
+    "blk",
+    "pa",
+    "pr",
+    "pra",
+    "pts",
+    "stl",
+    "tov",
+    "trb"
+  ]
+}

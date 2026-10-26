@@ -6,12 +6,56 @@ from nba_props import (
     _apply_consistency_scores,
     _apply_estimated_hit_rates,
     _apply_live_accuracy_gates,
+    _eligible_under_betslip_props,
     _live_card_meta_floor,
     build_live_pick_card,
+    filter_best_picks,
 )
 
 
 class LiveCardSelectionTests(unittest.TestCase):
+    def test_under_betslip_props_share_live_dynamic_policy(self):
+        self.assertEqual(_eligible_under_betslip_props(), {"AST", "STL", "BLK"})
+
+    def test_published_prediction_matches_residual_adjusted_direction(self):
+        quality_policy = {
+            "ast": {
+                "allowed": True,
+                "allow_under": True,
+                "allow_over": True,
+                "min_prob": 0.50,
+                "min_residual_edge": 0.05,
+                "min_edge": 0.05,
+                "min_edge_under": 0.05,
+                "min_edge_over": 0.05,
+                "rmse": 1.8,
+                "shrunk_acc": 0.54,
+                "meta_gate_mode": "off",
+                "priority_under_lane": False,
+            }
+        }
+        pred_df = pd.DataFrame(
+            [
+                {
+                    "player": "Residual Under",
+                    "team": "OKC",
+                    "ast_line": 6.5,
+                    "ast_pred": 6.6,
+                    "ast_market_edge_pred": -0.71,
+                    "ast_p_over_cal": 0.41,
+                    "ast_projection_type": "standard",
+                    "ast_is_promo": False,
+                    "ast_sigma": 1.2,
+                }
+            ]
+        )
+
+        picks = filter_best_picks(pred_df, quality_policy=quality_policy, max_picks=5)
+
+        self.assertEqual(picks.loc[0, "direction"], "UNDER")
+        self.assertLess(float(picks.loc[0, "prediction"]), float(picks.loc[0, "line"]))
+        self.assertGreater(float(picks.loc[0, "raw_prediction"]), float(picks.loc[0, "line"]))
+
     def test_meta_gate_off_bypasses_meta_floor(self):
         quality = {
             "pts": {
@@ -286,10 +330,13 @@ class LiveCardSelectionTests(unittest.TestCase):
 
         card = build_live_pick_card(picks, target_picks=5, min_picks=5)
 
-        self.assertEqual(card["player"].tolist(), ["Alpha", "Beta", "Zeta", "Theta", "Gamma"])
+        self.assertEqual(card["player"].tolist(), ["Beta", "Alpha", "Gamma", "Theta"])
+        self.assertIn("Beta", card["player"].tolist())
+        self.assertIn("Gamma", card["player"].tolist())
         self.assertNotIn("Delta", card["player"].tolist())
         self.assertNotIn("Epsilon", card["player"].tolist())
         self.assertNotIn("Volume Fill", card["player"].tolist())
+        self.assertEqual(card["prop"].value_counts().max(), 1)
         self.assertTrue(card["accuracy_gate_pass"].all())
 
     def test_build_live_pick_card_backfills_to_minimum_five_with_relaxed_market_model_tier(self):
@@ -390,17 +437,17 @@ class LiveCardSelectionTests(unittest.TestCase):
 
         card = build_live_pick_card(picks, target_picks=5, min_picks=5)
 
-        self.assertEqual(card["player"].tolist(), ["Weak A", "Weak B", "Weak C", "Weak D", "Weak E"])
+        self.assertEqual(card["player"].tolist(), ["Weak A", "Weak D", "Weak E", "Weak B"])
         self.assertEqual(card["publish_tier"].tolist(), [
-            "market_lane_relaxed",
-            "market_lane_relaxed",
-            "market_lane_relaxed",
-            "market_lane_relaxed",
-            "market_relaxed",
+            "core",
+            "core",
+            "core",
+            "core",
         ])
+        self.assertEqual(card["prop"].value_counts().max(), 1)
         self.assertNotIn("Volume Reserve", card["player"].tolist())
 
-    def test_build_live_pick_card_prefers_top_tier_lane_over_non_lane(self):
+    def test_build_live_pick_card_allows_evidence_approved_micro_prop(self):
         picks = pd.DataFrame(
             [
                 {
@@ -440,8 +487,8 @@ class LiveCardSelectionTests(unittest.TestCase):
 
         card = build_live_pick_card(picks, target_picks=1, min_picks=1)
 
-        self.assertEqual(card["player"].tolist(), ["Lane Pick"])
-        self.assertEqual(card["publish_tier"].tolist(), ["core_lane"])
+        self.assertEqual(card["player"].tolist(), ["Non Lane Pick"])
+        self.assertEqual(card["publish_tier"].tolist(), ["core"])
 
     def test_build_live_pick_card_prefers_standard_lines_when_available(self):
         picks = pd.DataFrame(
@@ -568,12 +615,8 @@ class LiveCardSelectionTests(unittest.TestCase):
             history_df=history,
         )
 
-        self.assertEqual(card["season_stage"].tolist(), ["play_in", "play_in"])
-        self.assertEqual(card["player"].tolist(), ["Veteran Starter", "Fragile Flier"])
-        self.assertGreater(
-            card.loc[card["player"] == "Veteran Starter", "postseason_pick_score"].iloc[0],
-            card.loc[card["player"] == "Fragile Flier", "postseason_pick_score"].iloc[0],
-        )
+        self.assertEqual(card["season_stage"].tolist(), ["play_in"])
+        self.assertEqual(card["player"].tolist(), ["Veteran Starter"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,19 @@
+{
+  "blocked_manifest_rows": 87,
+  "completed_empty": 5,
+  "completed_rows": 474,
+  "completed_with_data": 469,
+  "credits_used": 35880,
+  "dry_run": false,
+  "failures": [],
+  "last_api_balance": {
+    "requests_remaining": 64120,
+    "requests_used": 35880
+  },
+  "manifest_rows": 561,
+  "paired_price_rows": 253680,
+  "parsed_line_rows": 253725,
+  "ready_manifest_rows": 474,
+  "requests_sent_this_run": 592,
+  "updated_at_utc": "2026-08-12T07:02:50.889718Z"
+}

@@ -1,0 +1,204 @@
+{
+  "status": "same_row_oof_complete_not_a_reserved_future_holdout",
+  "comparison_projection": "persisted probability-sidecar q50",
+  "line_contract": "production real line frozen on identical player/date/prop/actual rows",
+  "pushes_excluded": true,
+  "bootstrap": {
+    "method": "game-date clustered percentile bootstrap",
+    "draws": 5000,
+    "seed": 5051
+  },
+  "production_real_rows": 37242,
+  "aligned_nonpush_rows": 36009,
+  "date_min": "2026-02-19",
+  "date_max": "2026-05-18",
+  "new_feature_survival": {
+    "pts": [],
+    "trb": [],
+    "ast": [],
+    "pra": [],
+    "pr": [],
+    "pa": [],
+    "stl": [
+      "opp_def_tier_pt"
+    ],
+    "blk": [
+      "opp_def_tier_pt",
+      "opp_pace_pt"
+    ],
+    "tov": []
+  },
+  "production_defense_features": {
+    "pts": [],
+    "trb": [
+      "trb_defense_adj"
+    ],
+    "ast": [],
+    "pra": [],
+    "pr": [],
+    "pa": [],
+    "stl": [
+      "ast_defense_adj"
+    ],
+    "blk": [
+      "opp_trb_allowed_l10"
+    ],
+    "tov": [
+      "ast_defense_adj"
+    ]
+  },
+  "results": [
+    {
+      "target": "ast",
+      "rows": 4213,
+      "dates": 80,
+      "production_hit_rate": 0.6199857583669595,
+      "candidate_hit_rate": 0.6126275812959886,
+      "always_under_hit_rate": 0.6309043436980774,
+      "candidate_minus_production": -0.007358177070970862,
+      "candidate_minus_production_ci_low": -0.014767979818807972,
+      "candidate_minus_production_ci_high": 0.0004671732384006446,
+      "candidate_minus_under": -0.018276762402088753,
+      "candidate_minus_under_ci_low": -0.031196648339376236,
+      "candidate_minus_under_ci_high": -0.006311535623979274,
+      "new_features_selected": [],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "blk",
+      "rows": 2854,
+      "dates": 80,
+      "production_hit_rate": 0.7585844428871759,
+      "candidate_hit_rate": 0.7585844428871759,
+      "always_under_hit_rate": 0.7585844428871759,
+      "candidate_minus_production": 0.0,
+      "candidate_minus_production_ci_low": 0.0,
+      "candidate_minus_production_ci_high": 0.0,
+      "candidate_minus_under": 0.0,
+      "candidate_minus_under_ci_low": 0.0,
+      "candidate_minus_under_ci_high": 0.0,
+      "new_features_selected": [
+        "opp_def_tier_pt",
+        "opp_pace_pt"
+      ],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "pa",
+      "rows": 4100,
+      "dates": 80,
+      "production_hit_rate": 0.5290243902439025,
+      "candidate_hit_rate": 0.5282926829268293,
+      "always_under_hit_rate": 0.5392682926829269,
+      "candidate_minus_production": -0.0007317073170731714,
+      "candidate_minus_production_ci_low": -0.008557599733613986,
+      "candidate_minus_production_ci_high": 0.007315902137176038,
+      "candidate_minus_under": -0.01097560975609757,
+      "candidate_minus_under_ci_low": -0.032227218307920955,
+      "candidate_minus_under_ci_high": 0.010542139872477103,
+      "new_features_selected": [],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "pr",
+      "rows": 4744,
+      "dates": 80,
+      "production_hit_rate": 0.5185497470489039,
+      "candidate_hit_rate": 0.5236087689713322,
+      "always_under_hit_rate": 0.5345699831365935,
+      "candidate_minus_production": 0.005059021922428353,
+      "candidate_minus_production_ci_low": -0.0025361811962703114,
+      "candidate_minus_production_ci_high": 0.01282051282051282,
+      "candidate_minus_under": -0.010961214165261302,
+      "candidate_minus_under_ci_low": -0.027895821999782397,
+      "candidate_minus_under_ci_high": 0.006051661407759949,
+      "new_features_selected": [],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "pra",
+      "rows": 4680,
+      "dates": 80,
+      "production_hit_rate": 0.5138888888888888,
+      "candidate_hit_rate": 0.5119658119658119,
+      "always_under_hit_rate": 0.5361111111111111,
+      "candidate_minus_production": -0.0019230769230769162,
+      "candidate_minus_production_ci_low": -0.009321988628850985,
+      "candidate_minus_production_ci_high": 0.00486033446030513,
+      "candidate_minus_under": -0.02414529914529917,
+      "candidate_minus_under_ci_low": -0.04153319533567522,
+      "candidate_minus_under_ci_high": -0.007194408104072517,
+      "new_features_selected": [],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "pts",
+      "rows": 5053,
+      "dates": 80,
+      "production_hit_rate": 0.5165248367306551,
+      "candidate_hit_rate": 0.5198891747476746,
+      "always_under_hit_rate": 0.5283989709083713,
+      "candidate_minus_production": 0.003364338017019519,
+      "candidate_minus_production_ci_low": -0.002507079583273406,
+      "candidate_minus_production_ci_high": 0.008963059550264968,
+      "candidate_minus_under": -0.008509796160696692,
+      "candidate_minus_under_ci_low": -0.024063715515049617,
+      "candidate_minus_under_ci_high": 0.006354089295205815,
+      "new_features_selected": [],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "stl",
+      "rows": 3050,
+      "dates": 80,
+      "production_hit_rate": 0.7039344262295082,
+      "candidate_hit_rate": 0.7039344262295082,
+      "always_under_hit_rate": 0.7039344262295082,
+      "candidate_minus_production": 0.0,
+      "candidate_minus_production_ci_low": 0.0,
+      "candidate_minus_production_ci_high": 0.0,
+      "candidate_minus_under": 0.0,
+      "candidate_minus_under_ci_low": 0.0,
+      "candidate_minus_under_ci_high": 0.0,
+      "new_features_selected": [
+        "opp_def_tier_pt"
+      ],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "tov",
+      "rows": 2455,
+      "dates": 54,
+      "production_hit_rate": 0.5230142566191446,
+      "candidate_hit_rate": 0.5230142566191446,
+      "always_under_hit_rate": 0.5230142566191446,
+      "candidate_minus_production": 0.0,
+      "candidate_minus_production_ci_low": 0.0,
+      "candidate_minus_production_ci_high": 0.0,
+      "candidate_minus_under": 0.0,
+      "candidate_minus_under_ci_low": 0.0,
+      "candidate_minus_under_ci_high": 0.0,
+      "new_features_selected": [],
+      "passes_oof_evidence_gate": false
+    },
+    {
+      "target": "trb",
+      "rows": 4860,
+      "dates": 80,
+      "production_hit_rate": 0.584156378600823,
+      "candidate_hit_rate": 0.5853909465020576,
+      "always_under_hit_rate": 0.5925925925925926,
+      "candidate_minus_production": 0.0012345679012345512,
+      "candidate_minus_production_ci_low": -0.004001930364503913,
+      "candidate_minus_production_ci_high": 0.006444501123033393,
+      "candidate_minus_under": -0.007201646090534974,
+      "candidate_minus_under_ci_low": -0.022517190620672933,
+      "candidate_minus_under_ci_high": 0.007700463060368356,
+      "new_features_selected": [],
+      "passes_oof_evidence_gate": false
+    }
+  ],
+  "props_passing_oof_evidence_gate": [],
+  "promotion_authorized": false,
+  "promotion_blocker": "This is chronological OOF evidence, not a newly reserved future period. No production model may be replaced from this result."
+}

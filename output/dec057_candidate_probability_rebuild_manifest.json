@@ -1,0 +1,49 @@
+{
+  "status": "activated",
+  "activated_at_utc": "2026-10-25T22:42:21.812332+00:00",
+  "model_dir": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\recovery_dec057_20261025",
+  "holdout_dates": 20,
+  "split": {
+    "method": "chronological_latest_dates_holdout",
+    "fit_rows": 44787,
+    "fit_dates": 64,
+    "fit_date_min": "2026-02-19",
+    "fit_date_max": "2026-04-26",
+    "holdout_rows": 5391,
+    "holdout_dates": 20,
+    "holdout_date_min": "2026-04-27",
+    "holdout_date_max": "2026-05-18"
+  },
+  "contract": {
+    "schema_version": 1,
+    "targets": [
+      "ast",
+      "blk",
+      "pa",
+      "pr",
+      "pra",
+      "pts",
+      "stl",
+      "tov",
+      "trb"
+    ],
+    "sidecar_sha256": {
+      "ast": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0",
+      "blk": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224",
+      "pa": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633",
+      "pr": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2",
+      "pra": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f",
+      "pts": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415",
+      "stl": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5",
+      "tov": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9",
+      "trb": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e"
+    },
+    "oof_sha256": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763"
+  },
+  "before": {},
+  "after": {
+    "probability_calibrator_advanced.pkl": "959a64f5879fbf48342896b1f4067002e0ae2eccf6fcddfa32c28bd3c461231b",
+    "probability_diagnostics_advanced.json": "ef3cc9bd2899556be3fe185f52290c3b103fa2b7fec8c052ded37f1b4de6bd1a"
+  },
+  "regression_or_sidecar_models_changed": false
+}

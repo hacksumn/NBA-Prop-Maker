@@ -28,6 +28,7 @@ class PtsShotQualityFeatureTests(unittest.TestCase):
                     "mp": 30 + idx,
                     "fga": fga_vals[idx],
                     "fta": fta_vals[idx],
+                    "orb": 2 + (idx % 2),
                     "3pa": 5 + (idx % 2),
                     "tov": 2 + (idx % 2),
                     "stl": 1,

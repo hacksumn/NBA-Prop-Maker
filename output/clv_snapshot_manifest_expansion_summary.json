@@ -1,0 +1,30 @@
+{
+  "blocked_reasons": {
+    "final_daily_card_missing": 264
+  },
+  "blocked_rows": 264,
+  "full_panel_event_list_credit_ceiling": 105,
+  "full_panel_event_odds_credit_ceiling": 71280,
+  "game_dates": 35,
+  "games": 264,
+  "generated_at_utc": "2026-08-13T03:58:33.246594Z",
+  "manifest_path": "data/clv_snapshot_manifest_2026_expansion.csv",
+  "manifest_rows": 792,
+  "odds_api_requests_sent": 0,
+  "ready_event_list_credit_ceiling": 70,
+  "ready_event_odds_credit_ceiling": 47520,
+  "ready_rows": 528,
+  "ready_rows_by_snapshot": {
+    "t_minus_5": 264,
+    "t_minus_60": 264
+  },
+  "ready_total_credit_ceiling": 47590,
+  "rows_by_snapshot": {
+    "decision": 264,
+    "t_minus_5": 264,
+    "t_minus_60": 264
+  },
+  "schedule_cache_path": "data/clv_schedule_2026-02-23_2026-03-29.json",
+  "window_end": "2026-03-29",
+  "window_start": "2026-02-23"
+}

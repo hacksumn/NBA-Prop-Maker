@@ -11,7 +11,8 @@
       "Bash(rg *)",
       "Read(*)",
       "Edit(*)",
-      "Write(*)"
+      "Write(*)",
+      "Bash(python -c ' *)"
     ],
     "deny": [
       "Read(./.env)",
