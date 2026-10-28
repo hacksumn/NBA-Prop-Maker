@@ -6,6 +6,7 @@ from scripts.train_availability_minutes_model import (
     FEATURE_COLUMNS,
     build_candidate_table,
     make_expanding_date_folds,
+    select_complete_holdout_season,
 )
 
 
@@ -96,6 +97,22 @@ class AvailabilityMinutesModelTests(unittest.TestCase):
     def test_model_features_exclude_identity_and_outcomes(self):
         forbidden = {"game_date", "game_id", "player_id", "player", "available", "minutes"}
         self.assertFalse(forbidden & set(FEATURE_COLUMNS))
+
+    def test_latest_incomplete_season_cannot_become_holdout(self):
+        candidates = pd.DataFrame(
+            {
+                "season": ["2024-25"] * 120 + ["2025-26"] * 130 + ["2026-27"] * 2,
+                "game_date": (
+                    list(pd.date_range("2024-10-20", periods=120, freq="D"))
+                    + list(pd.date_range("2025-10-20", periods=130, freq="D"))
+                    + list(pd.date_range("2026-10-20", periods=2, freq="D"))
+                ),
+            }
+        )
+        season, profile = select_complete_holdout_season(candidates)
+        self.assertEqual("2025-26", season)
+        current = profile[profile["season"].eq("2026-27")].iloc[0]
+        self.assertEqual(2, int(current["unique_dates"]))
 
 
 if __name__ == "__main__":

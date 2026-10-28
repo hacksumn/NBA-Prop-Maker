@@ -97,7 +97,8 @@ def _validate_oof(oof: pd.DataFrame) -> None:
 def build_training_table(
     prop: pd.DataFrame,
     oof: pd.DataFrame,
-    min_window_coverage: float = 0.90,
+    min_window_coverage: float = 0.85,
+    min_rotation_coverage: float = 0.95,
 ) -> tuple[pd.DataFrame, dict]:
     """Join the two inputs and return the conditional prop-training table and QA summary."""
     _require_columns(prop, PROP_REQUIRED, "Prop training input")
@@ -143,10 +144,19 @@ def build_training_table(
     window_rows = int(in_window.sum())
     matched_window_rows = int((in_window & matched).sum())
     coverage = matched_window_rows / window_rows if window_rows else 0.0
-    if coverage < min_window_coverage:
+    if "mp_l10" in prop.columns:
+        rotation_mask = in_window & pd.to_numeric(prop["mp_l10"], errors="coerce").ge(15)
+    else:
+        rotation_mask = pd.Series(False, index=prop.index)
+    rotation_rows = int(rotation_mask.sum())
+    rotation_matches = int((rotation_mask & matched).sum())
+    rotation_coverage = rotation_matches / rotation_rows if rotation_rows else 0.0
+    if coverage < min_window_coverage or rotation_coverage < min_rotation_coverage:
         raise ValueError(
-            f"Availability OOF coverage {coverage:.2%} is below required "
-            f"{min_window_coverage:.2%} ({matched_window_rows}/{window_rows})"
+            f"Availability OOF coverage failed: all rows {coverage:.2%} "
+            f"(required {min_window_coverage:.2%}; {matched_window_rows}/{window_rows}), "
+            f"rotation proxy {rotation_coverage:.2%} "
+            f"(required {min_rotation_coverage:.2%}; {rotation_matches}/{rotation_rows})"
         )
 
     matched_rows = merged.loc[matched].copy()
@@ -181,12 +191,6 @@ def build_training_table(
     if output[AVAILABILITY_MINUTES_PROP_FEATURES].isna().any().any():
         raise RuntimeError("Output contains null availability/minutes features")
 
-    if "mp_l10" in prop.columns:
-        rotation_mask = in_window & pd.to_numeric(prop["mp_l10"], errors="coerce").ge(15)
-    else:
-        rotation_mask = pd.Series(False, index=prop.index)
-    rotation_rows = int(rotation_mask.sum())
-    rotation_matches = int((rotation_mask & matched).sum())
     summary = {
         "status": "ready_for_prop_retraining",
         "join_key": PROP_KEY,
@@ -202,7 +206,9 @@ def build_training_table(
         "window_match_rate": coverage,
         "rotation_proxy_rows": rotation_rows,
         "rotation_proxy_matched_rows": rotation_matches,
-        "rotation_proxy_match_rate": rotation_matches / rotation_rows if rotation_rows else None,
+        "rotation_proxy_match_rate": rotation_coverage if rotation_rows else None,
+        "minimum_window_match_rate": min_window_coverage,
+        "minimum_rotation_proxy_match_rate": min_rotation_coverage,
         "excluded_before_oof_window": int((prop["game_date"] < oof_min).sum()),
         "excluded_unmatched_in_window": int((in_window & ~matched).sum()),
         "excluded_nonappearances": int((~appearance).sum()),
@@ -221,11 +227,17 @@ def build_from_files(
     oof_input: Path = DEFAULT_OOF_INPUT,
     output_path: Path = DEFAULT_OUTPUT,
     summary_path: Path = DEFAULT_SUMMARY,
-    min_window_coverage: float = 0.90,
+    min_window_coverage: float = 0.85,
+    min_rotation_coverage: float = 0.95,
 ) -> dict:
     prop = pd.read_csv(prop_input, low_memory=False)
     oof = pd.read_csv(oof_input, low_memory=False)
-    output, summary = build_training_table(prop, oof, min_window_coverage=min_window_coverage)
+    output, summary = build_training_table(
+        prop,
+        oof,
+        min_window_coverage=min_window_coverage,
+        min_rotation_coverage=min_rotation_coverage,
+    )
     summary.update(
         {
             "prop_input": str(prop_input),
@@ -253,7 +265,8 @@ def main() -> int:
     parser.add_argument("--availability-oof", type=Path, default=DEFAULT_OOF_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
-    parser.add_argument("--min-window-coverage", type=float, default=0.90)
+    parser.add_argument("--min-window-coverage", type=float, default=0.85)
+    parser.add_argument("--min-rotation-coverage", type=float, default=0.95)
     args = parser.parse_args()
 
     summary = build_from_files(
@@ -262,6 +275,7 @@ def main() -> int:
         output_path=args.output,
         summary_path=args.summary,
         min_window_coverage=args.min_window_coverage,
+        min_rotation_coverage=args.min_rotation_coverage,
     )
     print(json.dumps(summary, indent=2))
     return 0

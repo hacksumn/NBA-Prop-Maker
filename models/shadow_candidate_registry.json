@@ -1,0 +1,28 @@
+{
+  "active": {
+    "candidate_id": "full_layers_20261027_150127",
+    "created_at": "2026-10-27T15:01:53.091833-05:00",
+    "future_holdout_start": "2026-10-28",
+    "minimum_dates": 15,
+    "minimum_rows": 100,
+    "model_dir": "models/weekly_candidates/full_layers_20261027_150127",
+    "probability_holdout_summary": "output/full_layers_20261027_150127_probability_holdout_summary.json",
+    "same_row_oof_summary": "output/full_layers_20261027_150127_same_row_oof_summary.json",
+    "status": "shadow_pending_future_results"
+  },
+  "history": [
+    {
+      "candidate_id": "full_layers_20261027_150127",
+      "created_at": "2026-10-27T15:01:53.091833-05:00",
+      "future_holdout_start": "2026-10-28",
+      "minimum_dates": 15,
+      "minimum_rows": 100,
+      "model_dir": "models/weekly_candidates/full_layers_20261027_150127",
+      "probability_holdout_summary": "output/full_layers_20261027_150127_probability_holdout_summary.json",
+      "same_row_oof_summary": "output/full_layers_20261027_150127_same_row_oof_summary.json",
+      "status": "shadow_pending_future_results"
+    }
+  ],
+  "updated_at": "2026-10-27T15:17:12.178211-05:00",
+  "version": 1
+}

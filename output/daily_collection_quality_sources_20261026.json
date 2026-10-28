@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "completed-game-coverage",
+      "title": "All 43 completed 2026-27 games are present in the three core game feeds",
+      "queries": [
+        {
+          "id": "core-game-reconciliation",
+          "source": {
+            "label": "Local NBA game stores",
+            "files": [
+              "data/nba_data.csv",
+              "data/nba_team_game_logs.csv",
+              "data/pbp_index.csv",
+              "data/pbp_possessions_master.csv"
+            ],
+            "filters": [
+              "Season: 2026-27",
+              "Completed games through October 25, 2026"
+            ],
+            "caveats": [
+              "Coverage establishes that each completed game is stored; it does not establish that downstream training tables have been rebuilt from those rows."
+            ]
+          },
+          "reportingPeriod": "October 20-25, 2026",
+          "columns": [
+            {"field": "store", "label": "Store"},
+            {"field": "games", "label": "Distinct games"},
+            {"field": "missing_vs_player_log", "label": "Missing vs player log"},
+            {"field": "latest_date", "label": "Latest game date"}
+          ],
+          "rows": [
+            {"store": "Player box scores", "games": 43, "missing_vs_player_log": 0, "latest_date": "2026-10-25"},
+            {"store": "Exact team logs", "games": 43, "missing_vs_player_log": 0, "latest_date": "2026-10-25"},
+            {"store": "Play-by-play", "games": 43, "missing_vs_player_log": 0, "latest_date": "2026-10-25"}
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Aggregate reconciliation by normalized NBA game ID.",
+            "totalRows": 3
+          },
+          "evidenceFlow": [
+            {"kind": "validation", "title": "Game-ID reconciliation", "text": "Normalized game IDs from the team and play-by-play stores were compared with the 43 distinct IDs in the player box-score store; neither source was missing a game."}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "training-feature-freshness",
+      "title": "Raw game capture is current, but training and layer-feature consumption are not fully current",
+      "queries": [
+        {
+          "id": "training-table-freshness",
+          "source": {
+            "label": "Training and projection tables",
+            "files": [
+              "data/training_dataset_enriched.csv",
+              "data/model_data_advanced.csv",
+              "data/model_data_defenserating_advanced.csv",
+              "data/player_projections_today.csv",
+              "models/selected_features_advanced.json"
+            ],
+            "filters": [
+              "Current season: 2026-27",
+              "Production selected-feature manifest"
+            ],
+            "caveats": [
+              "Early-season minimum-game rules make some live-layer sparsity expected, especially the luck layer; missing values should not be fabricated."
+            ]
+          },
+          "reportingPeriod": "State observed October 26, 2026",
+          "columns": [
+            {"field": "artifact", "label": "Artifact"},
+            {"field": "latest_game_date", "label": "Latest game date"},
+            {"field": "current_season_rows", "label": "2026-27 rows"},
+            {"field": "finding", "label": "Finding"}
+          ],
+          "rows": [
+            {"artifact": "training_dataset_enriched.csv", "latest_game_date": "2026-04-07", "current_season_rows": 0, "finding": "Stale source used first by live layer merge"},
+            {"artifact": "model_data_advanced.csv", "latest_game_date": "2026-10-24", "current_season_rows": 723, "finding": "One completed date behind raw logs"},
+            {"artifact": "model_data_defenserating_advanced.csv", "latest_game_date": "2026-10-24", "current_season_rows": 723, "finding": "One completed date behind raw logs"},
+            {"artifact": "player_projections_today.csv", "latest_game_date": "not applicable", "current_season_rows": 848, "finding": "Live projection table is current-season stamped"}
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Freshness and season-row profile of downstream artifacts.",
+            "totalRows": 4
+          },
+          "evidenceFlow": [
+            {"kind": "validation", "title": "Production feature use", "text": "The production selected-feature manifest contains no historical PBP, season-PPP, blowout, usage-profile, or luck-layer fields for seven of nine prop models; STL selects point-in-time opponent defense and BLK selects point-in-time opponent pace."}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "automation-and-market-history",
+      "title": "Collection is manual and current-season FanDuel history begins only on October 26",
+      "queries": [
+        {
+          "id": "automation-and-lines-check",
+          "source": {
+            "label": "Operator workflow and local market store",
+            "files": [
+              "scripts/project_operator.ps1",
+              "run_daily.py",
+              "run_morning.bat",
+              "data/historical_lines.csv"
+            ],
+            "filters": [
+              "FanDuel bookmaker",
+              "Game dates October 20-26, 2026"
+            ],
+            "caveats": [
+              "A FanDuel snapshot is recorded only when the workflow is run; one snapshot does not measure T-60-to-T-5 movement."
+            ]
+          },
+          "reportingPeriod": "October 20-26, 2026",
+          "columns": [
+            {"field": "check", "label": "Check"},
+            {"field": "result", "label": "Observed result"}
+          ],
+          "rows": [
+            {"check": "Installed NBA scheduled tasks", "result": "0"},
+            {"check": "Current-season FanDuel game dates stored", "result": "1 (October 26)"},
+            {"check": "October 26 exact FanDuel contracts", "result": "565"},
+            {"check": "October 26 FanDuel players / games", "result": "113 / 9"}
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Local scheduled-task check and current-season market-store profile.",
+            "totalRows": 4
+          },
+          "evidenceFlow": [
+            {"kind": "validation", "title": "Workflow behavior", "text": "PicksNow passes both --skip-layers and --skip-weekly-retrain. DailySafe refreshes live layers but also passes --skip-weekly-retrain. No matching Windows scheduled task is installed."}
+          ]
+        }
+      ]
+    }
+  ]
+}

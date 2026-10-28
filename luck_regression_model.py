@@ -108,6 +108,14 @@ K_EFG = 250   # stabilization point for eFG%
 # Minimum games played to include in luck analysis
 MIN_GP = 15
 
+PLAYER_LUCK_COLUMNS = [
+    "player_id", "player_name", "team_abbr", "gp", "pts_pg",
+    "fg3_pct", "fg3a_pg", "fg3_regressed", "fg3_luck_score",
+    "ft_pct", "fta_pg", "ft_regressed", "ft_luck_score",
+    "actual_efg", "xefg", "efg_luck_score", "efg_regressed",
+    "pts_luck_adj", "fg3_pts_luck_adj", "total_luck_score", "luck_label",
+]
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -534,7 +542,12 @@ def build_player_luck_scores(season: str = SEASON, min_gp: int = MIN_GP) -> pd.D
             "luck_label":        label,
         })
 
-    df = pd.DataFrame(rows).sort_values("total_luck_score", ascending=False)
+    # Early in a season no player may meet the minimum-games contract. Return a
+    # schema-valid empty frame so the orchestrator can disable this optional
+    # layer cleanly instead of throwing an opaque KeyError while sorting.
+    df = pd.DataFrame(rows, columns=PLAYER_LUCK_COLUMNS)
+    if not df.empty:
+        df = df.sort_values("total_luck_score", ascending=False)
     log.info(f"Built luck scores for {len(df)} players")
     return df.reset_index(drop=True)
 

@@ -78,6 +78,16 @@ PRODUCTION_MODEL_PATTERNS = (
     "meta_clf_*_advanced.pkl",
     "prob_sidecar_*_advanced.pkl",
     "probability_calibrator_advanced.pkl",
+    "bias_advanced.json",
+    "defense_rating_feature_contract.json",
+    "feature_importance_advanced.json",
+    "market_feature_sets_advanced.json",
+    "probability_oof_advanced.csv",
+    "selected_features_advanced.json",
+    "probability_diagnostics_advanced.json",
+    "training_edge_analysis.json",
+    "training_probability_analysis.json",
+    "training_results.json",
 )
 
 
@@ -107,6 +117,29 @@ def records(paths: Iterable[Path]) -> list[dict[str, object]]:
     return [record(path) for path in unique]
 
 
+def git_blob_record(path: Path, commit: str) -> dict[str, object]:
+    """Hash the exact blob bytes stored for ``path`` in ``commit``."""
+    relative = path.relative_to(ROOT).as_posix()
+    result = subprocess.run(
+        ["git", "show", f"{commit}:{relative}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    payload = result.stdout
+    return {
+        "path": relative,
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def git_blob_records(paths: Iterable[Path], commit: str) -> list[dict[str, object]]:
+    """Build records from immutable Git blobs instead of mutable worktree files."""
+    unique = sorted(set(paths), key=lambda item: item.as_posix().lower())
+    return [git_blob_record(path, commit) for path in unique]
+
+
 def git_text(*args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -134,20 +167,26 @@ def production_model_paths() -> list[Path]:
     paths: list[Path] = []
     for pattern in PRODUCTION_MODEL_PATTERNS:
         paths.extend((ROOT / "models").glob(pattern))
-    if len(set(paths)) < 46:
+    if len(set(paths)) < 56:
         raise RuntimeError(
-            f"Production bundle is incomplete: found only {len(set(paths))} binary artifacts"
+            f"Production bundle is incomplete: found only {len(set(paths))} protected artifacts"
         )
     return paths
 
 
-def build_manifest() -> dict[str, object]:
+def build_manifest(release_commit: str = "") -> dict[str, object]:
     """Assemble the complete release manifest and validate core contracts."""
     diagnostics_path = ROOT / "models" / "probability_diagnostics_advanced.json"
     diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
     sidecar_contract = diagnostics.get("sidecar_contract") or {}
+    split = diagnostics.get("split") or {}
     if not sidecar_contract.get("sidecar_sha256") or not sidecar_contract.get("oof_sha256"):
         raise RuntimeError("Probability diagnostics are missing the bound sidecar/OOF hash contract")
+    source = (
+        git_blob_records(source_paths(), release_commit)
+        if release_commit
+        else records(source_paths())
+    )
 
     return {
         "schema_version": 1,
@@ -157,18 +196,23 @@ def build_manifest() -> dict[str, object]:
             "head": git_text("rev-parse", "HEAD"),
             "branch": git_text("branch", "--show-current"),
             "working_tree_clean": not bool(git_text("status", "--porcelain")),
+            "reviewed_release_commit": release_commit or None,
+            "source_hash_basis": "git_blob_contents" if release_commit else "working_tree_bytes",
         },
         "contracts": {
             "production_models_are_immutable_during_daily_operations": True,
             "automatic_model_promotion": False,
             "odds_api_spend_default": False,
             "prizepicks_capture_windows": ["T-60", "T-5"],
-            "calibration_fit_rows": diagnostics.get("calibration_fit_rows"),
-            "calibration_holdout_rows": diagnostics.get("calibration_holdout_rows"),
-            "calibration_holdout_dates": diagnostics.get("calibration_holdout_dates"),
+            "calibration_fit_rows": split.get("fit_rows"),
+            "calibration_fit_dates": split.get("fit_dates"),
+            "calibration_holdout_rows": split.get("holdout_rows"),
+            "calibration_holdout_dates": split.get("holdout_dates"),
+            "calibration_holdout_date_min": split.get("holdout_date_min"),
+            "calibration_holdout_date_max": split.get("holdout_date_max"),
             "probability_sidecar_contract": sidecar_contract,
         },
-        "source": records(source_paths()),
+        "source": source,
         "canonical_data": records(ROOT / name for name in CANONICAL_DATA_FILES),
         "production_models": records(production_model_paths()),
         "policies": records(ROOT / name for name in POLICY_FILES),
@@ -179,9 +223,14 @@ def build_manifest() -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--release-commit",
+        default="",
+        help="Reviewed source release commit recorded alongside the in-place data/model hashes",
+    )
     args = parser.parse_args()
     output = args.output if args.output.is_absolute() else ROOT / args.output
-    manifest = build_manifest()
+    manifest = build_manifest(release_commit=args.release_commit)
     output.parent.mkdir(parents=True, exist_ok=True)
     temp = output.with_suffix(output.suffix + ".tmp")
     temp.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

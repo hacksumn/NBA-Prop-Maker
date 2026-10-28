@@ -3455,3 +3455,129 @@ Before replacement, all four active cache files were copied to `data/backups/zip
 - Full repository suite: `134 passed, 1 subtest passed`.
 
 ---
+
+## DEC-059 — Replace Manual Operations with Guarded Commands and Disarm Cross-Season Luck Leakage
+
+- **Date:** 2026-10-25
+- **Status:** Implemented and verified
+- **Decision owner:** Jake
+
+### Context
+
+The repaired repository still required the operator to remember a collection of low-level flags and scripts. That was an unsafe handoff: an omitted weekly-retrain flag or a direct call to the paid watcher could bypass the intended operating boundary. The first protected layer refresh also exposed a separate early-season defect. `build_player_luck_scores()` filtered to players with at least 15 games, produced zero rows on October 25, then attempted to sort an empty frame by a nonexistent `total_luck_score` column. `run_daily.py` caught that opaque `KeyError` and silently reused a 3,824-hour-old prior-season luck file in current 2026-27 projections.
+
+### Decision
+
+1. Make `scripts/project_operator.ps1` the supported human entry point for routine operation. It exposes named actions for preflight, layer refresh, capture planning, PrizePicks-only watcher launch, safe daily operation, and release-manifest generation.
+2. Hash the complete 56-artifact production bundle before and after any non-promotion daily/layer action. A changed hash makes the command fail. These actions never train or promote models.
+3. Keep live Odds API spend disabled by default. Paid T-60 pairing may be requested only through `DailySafe -PairSportsbookT60`, and `run_daily.py` must still approve it through the independent `allow_live_odds_api_spend` configuration gate and configured credit cap.
+4. Treat the luck layer as season-scoped optional context. An early-season empty result is schema-valid, not an exception. Successful outputs are written to `data/season_snapshots/player_luck_scores_<season>.csv`; Step 8 accepts only a nonempty snapshot for the active season that is no more than 168 hours old. If that contract is not met, luck is neutralized. A prior-season or arbitrarily old active cache is never merged.
+5. Record the release state in `output/release_manifest_20261025.json`, including SHA-256 hashes for reviewed source, canonical data, all protected production artifacts, calibration lineage, policies, and decision evidence.
+
+### Execution Evidence
+
+- Operator preflight compiled the active runtime and found all 56 protected production artifacts.
+- Protected layer refresh completed in 147.3 seconds with no retraining, promotion, pick generation, snapshot watcher, or paid Odds API request.
+- Play-by-play fetch: 36 succeeded, zero failed; master output is 138,289 player-game rows over 3,726 possession files.
+- Opponent-adjusted PPP: 7,053 team-game observations, 30 team ratings, 999 player ratings.
+- Live availability: 84 injury statuses across 27 teams; final projection output contains 845 unique players.
+- Repaired early-season luck run returned zero eligible players cleanly, explicitly disabled Layer 4, rebuilt the projection output with neutral luck, and returned `errors=[]`.
+- All 56 protected production hashes were identical before and after the layer refresh.
+- Release manifest covers 100 source files, 11 canonical data files, and 56 production artifacts.
+
+### Consequences and Limits
+
+- Jake no longer needs to assemble or remember the safe flags for ordinary work; the wrapper enforces them.
+- The active model bundle is unchanged. This decision improves operational correctness and live feature freshness; it is not a claim of new predictive lift.
+- Luck adjustments will remain neutral early in 2026-27 until players satisfy the declared 15-game minimum and a current-season snapshot is built. This is preferable to importing stale 2025-26 variance estimates.
+- Direct PrizePicks capture still depends on an authenticated user browser session. Repository code can launch and monitor the watcher, but it cannot supply Jake's personal login.
+- The working tree was already extensively staged when this release work began. The release commit is therefore created with a separate Git index/branch so the user's current index and working tree are not rewritten.
+
+### Verification
+
+- Focused release/luck/runtime suite: `14 passed, 1 subtest passed`.
+- Full repository suite: `139 passed, 330 warnings, 1 subtest passed`.
+- Warnings are the existing pandas fragmentation/performance warnings; there were no test failures.
+- Python compilation and PowerShell parser validation passed.
+
+---
+
+## DEC-060 — Make FanDuel the Authoritative Live Market and Produce the First Protected Card
+
+- **Date:** 2026-10-26
+- **Status:** Implemented and verified
+- **Decision owner:** Jake
+
+### Context
+
+The live workflow was still configured for PrizePicks even though the operator places bets only at FanDuel. The first attempted run also proved that the configured Odds API key was deactivated, not merely out of credits. After the active key was installed, the provider reported 490 credits remaining and 10 used. The first paid pull exposed a second ingest defect: event requests had no timeout and successful responses remained only in memory until the entire batch completed. That interrupted pull moved the provider balance from 490 to 428 without producing a saved snapshot.
+
+The successful retry then exposed three independent live-scoring defects: NBA Stats repeated the final schedule row verbatim; leading-zero schedule game IDs could not be assigned into a float-typed synthetic target column; and canonical alignment compared unnormalized game/player identifiers. Finally, the exact team-game file lagged player logs by the seven October 25 games, so the fail-closed feature pipeline rejected partial coverage.
+
+### Decision and Implementation
+
+1. FanDuel is the only authoritative live line source. `live_line_source_mode` and `live_sportsbook_key` are both `fanduel`; no PrizePicks fallback or watcher is allowed in the normal FanDuel daily path.
+2. Live Odds API responses preserve every exact FanDuel line and pair Over/Under prices only at identical book/player/market/line grain. Alternate lines are never medianed into a synthetic contract. The read view selects the most price-balanced real line.
+3. Paid event requests are limited to the current local slate, use a 20-second timeout, report per-event HTTP failures, and retain completed events when another fails. Each successful paid response is now atomically checkpointed under `data/line_archive/live_raw/<slate-date>/` before the next event is requested.
+4. Provider response headers are the authority for credits. The hard-coded reserve field is no longer treated as an account balance. API authentication errors now report the provider error code instead of being mislabeled as zero credits.
+5. Daily operation refreshes exact NBA team-game logs immediately after player logs. Exact duplicate schedule rows are removed, while conflicting team reuse still fails closed. Synthetic target IDs and canonical alignment keys are normalized without losing leading-zero NBA IDs.
+6. `scripts/project_operator.ps1` now provides `ConfigureOddsKey` (hidden input plus validation), `PicksNow` (fresh FanDuel pull plus protected scoring), and `PredictCached` (no paid call, exact cached FanDuel board). All preserve the 56-artifact production hash invariant.
+
+### Live Result
+
+- FanDuel snapshot: 565 exact rows, 113 players, eight available prop markets, nine games.
+- Price completeness: 565/565 rows have paired Over and Under prices; zero duplicate physical store keys.
+- Provider balance after the interrupted and successful pulls: 366 remaining / 134 used. The two pulls consumed 124 total credits from the new key; the first 62-credit interrupted batch is the incident that motivated raw per-event checkpoints.
+- Exact team-game source: 8,004 team rows / 4,002 games through 2026-10-25, zero duplicate keys and zero required nulls.
+- Official 2026-10-26 card: Brandin Podziemski AST UNDER 3.5 and Jarrett Allen BLK UNDER 1.5. Only two picks cleared the gates; no five-pick slip was created.
+- Production bundle: all 56 protected artifacts byte-hash unchanged.
+
+### Verification
+
+- Full repository suite: `150 passed, 330 warnings, 1 subtest passed`.
+- Focused FanDuel, schedule, runtime, and canonical-key tests passed.
+- Python compilation and PowerShell parser validation passed.
+- Warnings are the existing pandas fragmentation/performance warnings; there were no test failures.
+
+### Same-day operator follow-up
+
+An already-open PowerShell terminal retained the canceled process-level key even after the validated replacement was stored at Windows user scope. The operator wrapper now synchronizes the persisted user key before launching Python, without printing it. A deliberate stale-process-key test recovered to HTTP 200 and the expected 366-credit provider balance. The additional regression raises the full result to `151 passed, 330 warnings, 1 subtest passed`.
+
+---
+
+## DEC-061 — Automate Daily Collection and Freeze Full-Layer Retraining Behind a Future Holdout
+
+- **Date:** 2026-10-27
+- **Status:** Implemented and verified; future holdout accumulating
+- **Decision owner:** Jake
+
+### Context
+
+The project had working components but no complete operating loop. Play-by-play index keys mixed padded and unpadded game IDs; live scoring could merge stale historical layer data; availability/minutes fields could be absent at prediction time; completed games did not automatically rebuild the combined training table; and FanDuel did not have dedicated T-60/T-5 capture. The first protected refresh also found that availability validation used the newest season label blindly, making two October 2026 dates appear to be an untouched holdout.
+
+### Decision and Implementation
+
+1. Normalize PBP game IDs to canonical 10-character NBA IDs on read, fetch, rebuild, and index write. The repaired index contains 223 distinct games and preserves all 43 current-season games.
+2. Prefer `data/player_projections_today.csv` for current live layer features, retain the historical enriched table only as history, and include the current artifact in cache invalidation. Build and score availability/minutes features from strictly prior games at live prediction time; required fields fail closed instead of becoming zeros.
+3. Select the availability acceptance holdout as the latest season with at least 100 unique game dates. The frozen holdout is 2025-26 (35,444 candidates, 193 dates); 2026-27 is scored only by models trained through the completed holdout. The resulting 75,208 OOF/forward rows have zero chronology violations.
+4. Gate the availability join on both broad coverage (at least 85%) and the prop-relevant rotation proxy (at least 95%). Actual coverage is 89.42% overall and 95.33% for players with `mp_l10 >= 15`.
+5. Rebuild `data/model_data_full_advanced.csv` after completed slates. It contains 52,975 rows through 2026-10-25; point-in-time defense joins every row with zero duplicates, required nulls, or chronology violations.
+6. Train candidates only in timestamped `models/weekly_candidates/` directories. Compare candidate and production on identical frozen real-line OOF rows, require at least 99% overlap, report excluded rows, compare against always-UNDER with game-date-clustered confidence intervals, and never auto-promote.
+7. Capture FanDuel at T-60 and T-5 for every local-slate event. Only FanDuel and the nine prop markets are requested; exact alternate lines and paired prices are retained; each response is saved raw before parsing; checkpoints prevent re-spend; daily/provider reserve gates fail closed.
+8. Install guarded Windows tasks for daily scoring, completed-slate refresh, closing capture, and weekly isolated candidate training.
+
+### Evidence and Outcome
+
+- Availability beat its rolling/last-status baselines in all four walk-forward folds and on the 2025-26 untouched holdout. Holdout bootstrap confidence intervals are positive for availability Brier gain, conditional-minutes MAE gain, hard-gated MAE gain, and soft expected-minutes MSE gain.
+- The isolated candidate `full_layers_20261027_150127` completed all nine props. New features survived selection for PRA and PR (`conditional_minutes_prediction`), STL (conditional/expected minutes plus point-in-time defense and pace), and BLK (point-in-time pace).
+- Same-row comparison covers 49,966/50,178 production real-line rows (99.58%); 49,301 remain after push exclusion. No prop has a positive 95% confidence interval against both production and always-UNDER. Promotion is therefore not authorized.
+- The candidate is registered for a genuinely future shadow holdout beginning 2026-10-28 with minimum gates of 15 dates and 100 graded rows. Completion still requires manual review.
+- The October 27 FanDuel watcher is running with four games/eight target windows queued. Before its first T-60 window, the checkpoint shows no paid capture and the last provider balance remains 366 remaining / 134 used.
+- All 56 protected production artifacts remained byte-hash unchanged.
+- Full repository suite: `160 passed, 330 warnings, 1 subtest passed`.
+
+### Consequences
+
+The repository can now improve continuously without conflating data collection, candidate training, and production promotion. Better minutes and defense logic are present in the candidate path and must earn promotion on future executable FanDuel observations. A null candidate result is retained as evidence rather than hidden, and scheduled collection continues regardless of whether the current candidate wins.
+
+---

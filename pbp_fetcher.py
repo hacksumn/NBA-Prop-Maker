@@ -352,6 +352,9 @@ def fetch_game(game_id: str, game_date: str, home_team: str,
     save raw PBP and possession summary CSVs.
     Returns True on success, False on failure.
     """
+    game_id = _normalize_game_id(game_id)
+    if not game_id:
+        raise ValueError("game_id must contain an NBA game identifier")
     PBP_RAW_DIR.mkdir(parents=True, exist_ok=True)
     PBP_POSS_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = PBP_RAW_DIR / f"{game_id}.csv"
@@ -412,6 +415,48 @@ def fetch_game(game_id: str, game_date: str, home_team: str,
 
 
 # ---------------------------------------------------------------------------
+# Index key normalization
+# ---------------------------------------------------------------------------
+
+def _normalize_game_id(value) -> str:
+    """Return the canonical 10-character NBA game identifier.
+
+    CSV inference turns identifiers such as ``0022600118`` into the integer
+    ``22600118``. Normalizing before every index comparison/write prevents the
+    same game from being fetched and indexed twice under two spellings.
+    """
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    digits = re.sub(r"\D", "", text)
+    return digits.zfill(10) if digits else ""
+
+
+def _normalize_pbp_index(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=[
+            "game_id", "game_date", "home_team", "away_team", "season", "fetched"
+        ])
+    out = frame.copy()
+    if "game_id" not in out.columns:
+        raise ValueError("PBP index is missing game_id")
+    out["game_id"] = out["game_id"].map(_normalize_game_id)
+    out = out.loc[out["game_id"].ne("")].copy()
+    return out.drop_duplicates(subset="game_id", keep="last").reset_index(drop=True)
+
+
+def normalize_index_file(path: Path = PBP_INDEX_FILE) -> pd.DataFrame:
+    """Repair an existing index in place using the canonical game-ID key."""
+    if not path.exists():
+        return _normalize_pbp_index(pd.DataFrame())
+    repaired = _normalize_pbp_index(pd.read_csv(path, dtype={"game_id": "string"}))
+    repaired.to_csv(path, index=False)
+    return repaired
+
+
+# ---------------------------------------------------------------------------
 # Core: Fetch all games for a season
 # ---------------------------------------------------------------------------
 
@@ -455,7 +500,7 @@ def fetch_season(season: str, start_date: str = None, end_date: str = None,
     processed_since_cooldown = 0
 
     for _, row in games.iterrows():
-        game_id = row["GAME_ID"]
+        game_id = _normalize_game_id(row["GAME_ID"])
         game_date = row["GAME_DATE"].strftime("%Y-%m-%d")
         matchup = row["MATCHUP"]  # e.g. "BKN vs. NYK" or "BKN @ NYK"
 
@@ -506,15 +551,13 @@ def fetch_season(season: str, start_date: str = None, end_date: str = None,
         time.sleep(REQUEST_DELAY)
 
     # Save/update index
-    new_index = pd.DataFrame(index_rows)
+    new_index = _normalize_pbp_index(pd.DataFrame(index_rows))
     if PBP_INDEX_FILE.exists():
         try:
-            existing = pd.read_csv(PBP_INDEX_FILE)
+            existing = pd.read_csv(PBP_INDEX_FILE, dtype={"game_id": "string"})
         except Exception:
             existing = pd.DataFrame()
-        combined = pd.concat([existing, new_index]).drop_duplicates(
-            subset="game_id", keep="last"
-        )
+        combined = _normalize_pbp_index(pd.concat([existing, new_index], ignore_index=True))
         combined.to_csv(PBP_INDEX_FILE, index=False)
     else:
         new_index.to_csv(PBP_INDEX_FILE, index=False)
@@ -538,12 +581,15 @@ def rebuild_summaries():
     log.info(f"Rebuilding summaries for {len(raw_files)} games...")
 
     try:
-        index = pd.read_csv(PBP_INDEX_FILE) if PBP_INDEX_FILE.exists() else pd.DataFrame()
+        index = (
+            _normalize_pbp_index(pd.read_csv(PBP_INDEX_FILE, dtype={"game_id": "string"}))
+            if PBP_INDEX_FILE.exists() else pd.DataFrame()
+        )
     except Exception:
         index = pd.DataFrame()
 
     for raw_path in raw_files:
-        game_id = raw_path.stem
+        game_id = _normalize_game_id(raw_path.stem)
         df = pd.read_csv(raw_path)
 
         # Get metadata from index
@@ -631,12 +677,18 @@ def main():
                         help="Rebuild possession summaries from existing raw files")
     parser.add_argument("--merge", action="store_true",
                         help="Merge all possession summaries into master CSV")
+    parser.add_argument("--normalize-index", action="store_true",
+                        help="Canonicalize and deduplicate data/pbp_index.csv without fetching")
     args = parser.parse_args()
 
     # Create output directories
     PBP_RAW_DIR.mkdir(parents=True, exist_ok=True)
     PBP_POSS_DIR.mkdir(parents=True, exist_ok=True)
 
+    if args.normalize_index:
+        repaired = normalize_index_file()
+        log.info(f"Normalized PBP index: {len(repaired):,} distinct games")
+        return
     if args.rebuild_summaries:
         rebuild_summaries()
     elif args.merge:
@@ -674,3 +726,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

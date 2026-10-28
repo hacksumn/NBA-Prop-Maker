@@ -22,6 +22,21 @@ def test_record_fails_closed_for_missing_file(tmp_path: Path):
         release.record(tmp_path / "missing.csv")
 
 
+def test_git_blob_record_hashes_exact_committed_bytes(tmp_path: Path):
+    payload = b"git-blob\n"
+    completed = type("Completed", (), {"stdout": payload})()
+    path = tmp_path / "source.py"
+    with (
+        patch.object(release, "ROOT", tmp_path),
+        patch.object(release.subprocess, "run", return_value=completed) as run,
+    ):
+        item = release.git_blob_record(path, "abc123")
+    assert item["path"] == "source.py"
+    assert item["bytes"] == len(payload)
+    assert item["sha256"] == release.hashlib.sha256(payload).hexdigest()
+    run.assert_called_once()
+
+
 def test_build_manifest_rejects_unbound_calibration(tmp_path: Path):
     model_dir = tmp_path / "models"
     model_dir.mkdir()

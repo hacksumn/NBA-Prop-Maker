@@ -57,6 +57,7 @@ MAX_CANDIDATE_DAYS_SINCE_PLAYED = 45
 MIN_PRIOR_TEAM_APPEARANCES = 2
 MIN_ROTATION_MINUTES = 8.0
 RANDOM_STATE = 42
+MIN_COMPLETE_SEASON_DATES = 100
 
 
 FEATURE_COLUMNS = [
@@ -140,8 +141,9 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_game_logs(path: Path = DEFAULT_INPUT) -> pd.DataFrame:
-    frame = pd.read_csv(path, low_memory=False)
+def prepare_game_logs(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a game-log frame to the availability model's canonical grain."""
+    frame = frame.copy()
     rename = {
         "GAME_ID": "game_id",
         "PLAYER_ID": "player_id",
@@ -164,6 +166,22 @@ def load_game_logs(path: Path = DEFAULT_INPUT) -> pd.DataFrame:
     if duplicate_count:
         raise RuntimeError(f"NBA game log contains {duplicate_count} duplicate player-game rows")
     return frame.sort_values(["game_date", "game_id", "team", "player_id"]).reset_index(drop=True)
+
+
+def load_game_logs(path: Path = DEFAULT_INPUT) -> pd.DataFrame:
+    return prepare_game_logs(pd.read_csv(path, low_memory=False))
+
+
+def _season_progress(game_date: pd.Timestamp, season: str) -> float:
+    """Return a pregame-known calendar progress value without dataset-end leakage."""
+    try:
+        start_year = int(str(season).split("-")[0])
+    except (TypeError, ValueError):
+        start_year = int(pd.Timestamp(game_date).year)
+    season_start = pd.Timestamp(year=start_year, month=10, day=1)
+    season_end = pd.Timestamp(year=start_year + 1, month=4, day=30)
+    span = max(1, (season_end - season_start).days)
+    return float(np.clip((pd.Timestamp(game_date) - season_start).days / span, 0.0, 1.0))
 
 
 def _player_features(
@@ -229,10 +247,6 @@ def build_candidate_table(logs: pd.DataFrame) -> pd.DataFrame:
     for season, season_schedule in schedule.groupby("season", sort=False):
         team_states: dict[str, TeamState] = {}
         global_last_team: dict[str, str] = {}
-        season_start = pd.Timestamp(season_schedule["game_date"].min())
-        season_end = pd.Timestamp(season_schedule["game_date"].max())
-        season_span = max(1, (season_end - season_start).days)
-
         for game_date, date_schedule in season_schedule.groupby("game_date", sort=True):
             pending_global_updates: dict[str, str] = {}
             for game in date_schedule.itertuples(index=False):
@@ -244,7 +258,7 @@ def build_candidate_table(logs: pd.DataFrame) -> pd.DataFrame:
                     if float(row["mp"]) > 0
                 }
                 team_state = team_states.setdefault(str(game.team), TeamState())
-                season_progress = (pd.Timestamp(game_date) - season_start).days / season_span
+                season_progress = _season_progress(pd.Timestamp(game_date), str(season))
                 game_rows: list[dict] = []
 
                 for player_id, state in list(team_state.players.items()):
@@ -340,6 +354,56 @@ def build_candidate_table(logs: pd.DataFrame) -> pd.DataFrame:
     candidates = candidates.sort_values(["game_date", "game_id", "team", "player_id"])
     candidates = candidates.reset_index(drop=True)
     return candidates
+
+
+def build_live_feature_frame(
+    logs: pd.DataFrame,
+    schedule: pd.DataFrame,
+    target_date: object,
+) -> pd.DataFrame:
+    """Reconstruct pregame availability features for every current rotation player.
+
+    Synthetic zero-minute marker rows add the scheduled team-games without
+    adding a fake player to the candidate pool.  ``build_candidate_table`` then
+    advances state chronologically and emits the target-date feature rows using
+    only games strictly before the scheduled game.
+    """
+    history = prepare_game_logs(logs)
+    target = pd.Timestamp(target_date).normalize()
+    if schedule is None or schedule.empty:
+        raise ValueError("A non-empty schedule is required for live availability features")
+    required = {"home_team", "away_team"}
+    missing = sorted(required - set(schedule.columns))
+    if missing:
+        raise ValueError(f"Schedule is missing required columns: {missing}")
+    game_id_col = "game_id" if "game_id" in schedule.columns else (
+        "GAME_ID" if "GAME_ID" in schedule.columns else None
+    )
+    if game_id_col is None:
+        raise ValueError("Schedule is missing game_id")
+    season = str(history.loc[history["game_date"].le(target), "season"].iloc[-1])
+    markers = []
+    for game in schedule.to_dict("records"):
+        for team, is_home in [
+            (str(game["home_team"]).strip().upper(), 1.0),
+            (str(game["away_team"]).strip().upper(), 0.0),
+        ]:
+            markers.append({
+                "game_id": str(game[game_id_col]),
+                "player_id": f"__schedule_marker__{team}",
+                "player": f"__schedule_marker__{team}",
+                "team": team,
+                "game_date": target,
+                "mp": 0.0,
+                "season": season,
+                "is_home": is_home,
+            })
+    extended = pd.concat([history, pd.DataFrame(markers)], ignore_index=True, sort=False)
+    candidates = build_candidate_table(extended)
+    if candidates.empty:
+        return candidates
+    live = candidates.loc[candidates["game_date"].eq(target)].copy()
+    return live.drop(columns=LABEL_COLUMNS, errors="ignore").reset_index(drop=True)
 
 
 def make_expanding_date_folds(
@@ -617,6 +681,36 @@ def generate_oof_predictions(
     return output.sort_values(["game_date", "game_id", "team", "player_id"]).reset_index(drop=True)
 
 
+def select_complete_holdout_season(
+    candidates: pd.DataFrame,
+    minimum_unique_dates: int = MIN_COMPLETE_SEASON_DATES,
+) -> tuple[str, pd.DataFrame]:
+    """Choose the latest season with enough calendar coverage to be a holdout.
+
+    The active season must never become the acceptance holdout merely because
+    it is the latest label in the file.  A 100-date floor is deliberately well
+    below a normal NBA regular season while excluding an opening-week fragment.
+    """
+    profile = (
+        candidates.groupby("season", as_index=False)
+        .agg(
+            rows=("game_date", "size"),
+            unique_dates=("game_date", "nunique"),
+            start_date=("game_date", "min"),
+            end_date=("game_date", "max"),
+        )
+        .sort_values(["end_date", "season"])
+        .reset_index(drop=True)
+    )
+    complete = profile[profile["unique_dates"].ge(int(minimum_unique_dates))]
+    if complete.empty:
+        raise RuntimeError(
+            f"No season has the required {minimum_unique_dates} unique dates for an untouched holdout"
+        )
+    holdout_season = str(complete.iloc[-1]["season"])
+    return holdout_season, profile
+
+
 def json_ready(value):
     if isinstance(value, dict):
         return {str(key): json_ready(item) for key, item in value.items()}
@@ -672,11 +766,15 @@ def train_and_validate(
     if candidates[FEATURE_COLUMNS].isna().any().any():
         raise RuntimeError("Candidate feature table contains unexpected nulls")
 
-    latest_season = str(logs.sort_values("game_date")["season"].iloc[-1])
-    development = candidates[candidates["season"].ne(latest_season)].copy()
-    holdout = candidates[candidates["season"].eq(latest_season)].copy()
+    holdout_season, season_profile = select_complete_holdout_season(candidates)
+    holdout_start = candidates.loc[
+        candidates["season"].eq(holdout_season), "game_date"
+    ].min()
+    development = candidates[candidates["game_date"].lt(holdout_start)].copy()
+    holdout = candidates[candidates["season"].eq(holdout_season)].copy()
+    forward = candidates[candidates["game_date"].gt(holdout["game_date"].max())].copy()
     if development.empty or holdout.empty:
-        raise RuntimeError("Need at least two development seasons and one latest-season holdout")
+        raise RuntimeError("Need development seasons before the latest complete-season holdout")
 
     availability_name, minutes_name, fold_results = walk_forward_select(development)
     availability_factory = availability_models()[availability_name]
@@ -693,6 +791,32 @@ def train_and_validate(
         probability,
         conditional_minutes,
     )
+    forward_metrics = None
+    if not forward.empty:
+        forward_train = pd.concat([development, holdout], ignore_index=True)
+        forward_metrics, forward_probability, forward_conditional, _, _ = evaluate_model_pair(
+            forward_train,
+            forward,
+            availability_factory,
+            minutes_factory,
+        )
+        forward_predictions = _prediction_frame(
+            forward, forward_probability, forward_conditional
+        )
+        forward_predictions["prediction_split"] = "forward_current_season"
+        forward_predictions["model_train_end"] = (
+            forward_train["game_date"].max().date().isoformat()
+        )
+        oof_predictions = pd.concat(
+            [oof_predictions, forward_predictions], ignore_index=True
+        ).sort_values(["game_date", "game_id", "team", "player_id"]).reset_index(drop=True)
+        if not (
+            pd.to_datetime(oof_predictions["model_train_end"])
+            < pd.to_datetime(oof_predictions["game_date"])
+        ).all():
+            raise RuntimeError("Forward availability predictions violate chronology")
+        if oof_predictions.duplicated(["game_id", "team", "player_id"]).any():
+            raise RuntimeError("Availability prediction keys are not unique after forward scoring")
 
     selected_folds = fold_results[
         fold_results["availability_model"].eq(availability_name)
@@ -776,9 +900,21 @@ def train_and_validate(
         "candidate_feature_null_cells": int(candidates[FEATURE_COLUMNS].isna().sum().sum()),
         "development_rows": int(len(development)),
         "holdout_rows": int(len(holdout)),
-        "holdout_season": latest_season,
+        "holdout_season": holdout_season,
         "holdout_start": holdout["game_date"].min().date().isoformat(),
         "holdout_end": holdout["game_date"].max().date().isoformat(),
+        "holdout_minimum_unique_dates": MIN_COMPLETE_SEASON_DATES,
+        "season_profile": season_profile.assign(
+            start_date=season_profile["start_date"].dt.date.astype(str),
+            end_date=season_profile["end_date"].dt.date.astype(str),
+        ).to_dict("records"),
+        "forward_rows": int(len(forward)),
+        "forward_start": (
+            forward["game_date"].min().date().isoformat() if not forward.empty else None
+        ),
+        "forward_end": (
+            forward["game_date"].max().date().isoformat() if not forward.empty else None
+        ),
         "oof_rows": int(len(oof_predictions)),
         "oof_start": pd.to_datetime(oof_predictions["game_date"]).min().date().isoformat(),
         "oof_end": pd.to_datetime(oof_predictions["game_date"]).max().date().isoformat(),
@@ -827,6 +963,7 @@ def train_and_validate(
             ]
         },
         "untouched_holdout": holdout_metrics,
+        "forward_current_season": forward_metrics,
         "source": {
             "path": str(input_path.relative_to(ROOT)).replace("\\", "/"),
             "sha256": file_sha256(input_path),
@@ -838,7 +975,7 @@ def train_and_validate(
         "enabled_for_live": False,
         "availability_model": availability_name,
         "minutes_model": minutes_name,
-        "holdout_season": latest_season,
+        "holdout_season": holdout_season,
         "feature_columns": FEATURE_COLUMNS,
         "integration_rule": (
             "May be used as an input to the next prop-model retraining only when "

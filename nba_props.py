@@ -53,8 +53,8 @@ CONFIG = {
     
     # API Keys
     'odds_api_key': os.environ.get('ODDS_API_KEY', ''),
-    'allow_live_odds_api_spend': False,
-    'odds_api_credit_reserve': 13436,
+    'allow_live_odds_api_spend': True,
+    'odds_api_credit_reserve': 0,  # Informational only; provider response headers are authoritative.
     
     # Model settings
     'min_games': 10,           # Minimum games for prediction
@@ -75,8 +75,8 @@ CONFIG = {
     'live_pick_volatility_ceiling_mult': 1.0,  # 1.0 = use learned p75/high-vol reference directly
     'live_pick_estimated_hit_rate_floor': 54.5,  # Lowered from 65.0: true break-even for PrizePicks
     'live_pick_market_model_only': False,  # Allow all pick sources to compete on merit, not just market_model
-    'live_line_source_mode': 'prizepicks',  # PrizePicks is the line actually being selected.
-    'live_sportsbook_key': 'prizepicks',
+    'live_line_source_mode': 'fanduel',  # Exact FanDuel contracts are the only publishable live lines.
+    'live_sportsbook_key': 'fanduel',
     'live_fanduel_min_side_prob': 0.50,
     'live_fanduel_min_residual_edge': 0.05,
     'live_fanduel_volatility_ceiling_mult': 1.25,
@@ -1464,7 +1464,10 @@ def _normalize_historical_lines_frame(df: pd.DataFrame,
     if 'player_norm' not in out.columns and 'player' in out.columns:
         out['player_norm'] = out['player'].apply(_normalize_name)
     out['line'] = pd.to_numeric(out.get('line'), errors='coerce')
-    out['num_books'] = pd.to_numeric(out.get('num_books', 1), errors='coerce').fillna(1).clip(lower=1)
+    if 'num_books' in out.columns:
+        out['num_books'] = pd.to_numeric(out['num_books'], errors='coerce').fillna(1).clip(lower=1)
+    else:
+        out['num_books'] = 1
     if 'source' in out.columns:
         out['source'] = out['source'].fillna(source)
     else:
@@ -1970,6 +1973,48 @@ def fetch_nba_data(seasons: List[str] = None, local_file: str = None) -> pd.Data
     return df
 
 
+ESPN_NBA_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+ESPN_TEAM_ABBR_ALIASES = {
+    "GS": "GSW", "NO": "NOP", "NY": "NYK", "SA": "SAS", "UTAH": "UTA",
+}
+
+
+def _fetch_espn_games(slate_date: object) -> pd.DataFrame:
+    """Fetch the scheduled slate from ESPN when NBA Stats is unavailable."""
+    today = pd.Timestamp(slate_date).strftime('%Y-%m-%d')
+    response = requests.get(
+        ESPN_NBA_SCOREBOARD_URL,
+        params={"dates": pd.Timestamp(today).strftime('%Y%m%d'), "limit": 100},
+        timeout=20,
+    )
+    response.raise_for_status()
+    matchups = []
+    for event in response.json().get("events", []):
+        competitions = event.get("competitions") or []
+        if not competitions:
+            continue
+        competitors = competitions[0].get("competitors") or []
+        by_side = {str(item.get("homeAway", "")).lower(): item for item in competitors}
+        if "home" not in by_side or "away" not in by_side:
+            continue
+
+        def _abbr(item: dict) -> str:
+            value = str((item.get("team") or {}).get("abbreviation") or "").strip().upper()
+            return ESPN_TEAM_ABBR_ALIASES.get(value, value)
+
+        home = _abbr(by_side["home"])
+        away = _abbr(by_side["away"])
+        if not home or not away:
+            continue
+        matchups.append({
+            "game_id": event.get("id"),
+            "home_team": home,
+            "away_team": away,
+            "game_date": today,
+        })
+    return pd.DataFrame(matchups)
+
+
 def fetch_todays_games(slate_date: Optional[object] = None) -> pd.DataFrame:
     """Fetch an NBA schedule with team abbreviations, never opaque team IDs."""
     try:
@@ -2010,15 +2055,35 @@ def fetch_todays_games(slate_date: Optional[object] = None) -> pd.DataFrame:
                 'game_date': today
             })
         
-        return pd.DataFrame(matchups)
+        # NBA Stats occasionally repeats the final scoreboard row verbatim.
+        # Remove only exact game/matchup duplicates; conflicting reuse of a
+        # team remains visible to the downstream fail-closed schedule guard.
+        return pd.DataFrame(matchups).drop_duplicates(
+            subset=['game_id', 'home_team', 'away_team'], keep='first'
+        ).reset_index(drop=True)
         
-    except Exception as e:
-        print(f"  Error fetching schedule: {e}")
-        return pd.DataFrame()
+    except Exception as nba_error:
+        print(f"  NBA Stats schedule unavailable ({nba_error}); trying ESPN fallback...")
+        try:
+            games = _fetch_espn_games(today)
+            if games.empty:
+                print(f"  ESPN returned no games scheduled for {today}")
+            else:
+                print(f"  ESPN schedule fallback loaded {len(games)} games for {today}")
+            return games
+        except Exception as espn_error:
+            print(f"  Error fetching schedule from NBA Stats and ESPN: {espn_error}")
+            return pd.DataFrame()
 
 
 POINT_IN_TIME_DEFENSE_FEATURES = [
     'opp_def_rtg_pt', 'opp_pace_pt', 'opp_def_tier_pt',
+]
+
+LIVE_AVAILABILITY_FEATURES = [
+    'availability_probability',
+    'conditional_minutes_prediction',
+    'expected_minutes_prediction',
 ]
 
 
@@ -2059,6 +2124,66 @@ def _attach_live_point_in_time_defense(
     if (pd.to_datetime(out['rating_asof_date']) >= pd.Timestamp(slate_date).normalize()).any():
         raise RuntimeError("Live defense adapter produced a chronology violation")
     return out
+
+
+def _attach_live_availability_minutes(
+    latest: pd.DataFrame,
+    history: pd.DataFrame,
+    slate_date: object,
+) -> pd.DataFrame:
+    """Attach pregame availability/minutes features using only prior games."""
+    schedule = fetch_todays_games(slate_date)
+    if schedule.empty:
+        raise RuntimeError(
+            f"Availability/minutes features are required, but no schedule was available for {slate_date}"
+        )
+    from scripts.train_availability_minutes_model import (
+        build_live_feature_frame,
+        predict_availability_minutes_features,
+    )
+
+    feature_frame = build_live_feature_frame(history, schedule, slate_date)
+    if feature_frame.empty:
+        raise RuntimeError("Live availability adapter produced no eligible rotation players")
+    model_path = CONFIG['models_dir'] / 'availability_minutes_model.pkl'
+    if not model_path.exists():
+        fallback = _HERE / 'models' / 'availability_minutes_model.pkl'
+        model_path = fallback if fallback.exists() else model_path
+    if not model_path.exists():
+        raise FileNotFoundError(f"Availability/minutes deployment model is missing: {model_path}")
+    scored = predict_availability_minutes_features(feature_frame, model_path=model_path)
+
+    out = latest.copy()
+    out_id = 'player_id' if 'player_id' in out.columns else 'PLAYER_ID'
+    out_team = 'team' if 'team' in out.columns else 'TEAM_ABBREVIATION'
+    out['_availability_player_id'] = (
+        out[out_id].astype(str).str.replace(r'\.0$', '', regex=True)
+    )
+    out['_availability_team'] = out[out_team].astype(str).str.strip().str.upper()
+    scored['_availability_player_id'] = (
+        scored['player_id'].astype(str).str.replace(r'\.0$', '', regex=True)
+    )
+    scored['_availability_team'] = scored['team'].astype(str).str.strip().str.upper()
+    scored = scored.drop_duplicates(
+        ['_availability_player_id', '_availability_team'], keep='last'
+    )
+    out = out.drop(columns=[c for c in LIVE_AVAILABILITY_FEATURES if c in out.columns])
+    before = len(out)
+    out = out.merge(
+        scored[['_availability_player_id', '_availability_team', *LIVE_AVAILABILITY_FEATURES]],
+        on=['_availability_player_id', '_availability_team'],
+        how='inner',
+        validate='many_to_one',
+    )
+    dropped = before - len(out)
+    if dropped:
+        print(
+            f"  [Availability] Excluded {dropped} scheduled players outside the "
+            "validated rotation-player feature contract"
+        )
+    if out.empty or out[LIVE_AVAILABILITY_FEATURES].isna().any().any():
+        raise RuntimeError("Live availability adapter left no complete scoring rows")
+    return out.drop(columns=['_availability_player_id', '_availability_team'])
 
 
 def _normalize_name(name: str) -> str:
@@ -2358,18 +2483,43 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
             'https://api.the-odds-api.com/v4/sports/basketball_nba/events',
             params={'apiKey': api_key}, timeout=10
         )
-        remaining = int(check.headers.get('x-requests-remaining', 0))
+        if check.status_code != 200:
+            try:
+                error_payload = check.json()
+            except (TypeError, ValueError):
+                error_payload = {}
+            error_code = str(error_payload.get('error_code') or error_payload.get('code') or '').strip()
+            error_message = str(error_payload.get('message') or error_payload.get('error') or '').strip()
+            detail = ': '.join(part for part in [error_code, error_message] if part)
+            raise RuntimeError(
+                f"Odds API authentication/request failed (HTTP {check.status_code}"
+                f"{'; ' + detail if detail else ''})"
+            )
+        remaining_header = check.headers.get('x-requests-remaining')
+        if remaining_header is None:
+            raise RuntimeError("Odds API response omitted the remaining-credit header")
+        remaining = int(remaining_header)
         if check.status_code == 200 and remaining > 50:
             events = check.json()
             if events:
                 all_lines = []
+                target_slate_date = datetime.now().strftime('%Y-%m-%d')
+                slate_events = [
+                    event for event in events
+                    if _coerce_slate_date(event.get('commence_time')) == target_slate_date
+                ]
+                if not slate_events:
+                    print(f"  Odds API returned no NBA events for today's slate ({target_slate_date})")
+                    return pd.DataFrame(), (preferred_bookmaker or 'odds_api')
                 markets = [
                     'player_points', 'player_rebounds', 'player_assists',
                     'player_points_rebounds_assists', 'player_points_rebounds',
                     'player_points_assists', 'player_steals', 'player_blocks',
                     'player_turnovers'
                 ]
-                for event in events[:10]:
+                failed_events = 0
+                snapshot_ts = datetime.now().astimezone().isoformat()
+                for event in slate_events:
                     event_game_date = _coerce_slate_date(event.get('commence_time')) or datetime.now().strftime('%Y-%m-%d')
                     props_url = f"https://api.the-odds-api.com/v4/sports/basketball_nba/events/{event['id']}/odds"
                     odds_params = {
@@ -2381,14 +2531,34 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
                         odds_params['bookmakers'] = preferred_bookmaker
                     else:
                         odds_params['regions'] = 'us'
-                    pr = requests.get(props_url, params=odds_params)
-                    if pr.status_code != 200:
+                    try:
+                        pr = requests.get(props_url, params=odds_params, timeout=20)
+                    except requests.RequestException as exc:
+                        failed_events += 1
+                        print(f"  Odds API event {event['id']} timed out/failed ({exc}); retaining completed events")
                         continue
-                    for bookmaker in pr.json().get('bookmakers', []):
+                    if pr.status_code != 200:
+                        failed_events += 1
+                        print(
+                            f"  Odds API event {event['id']} returned HTTP {pr.status_code}; "
+                            "retaining completed events"
+                        )
+                        continue
+                    event_payload = pr.json()
+                    _write_live_odds_checkpoint(
+                        event_payload,
+                        event_id=str(event.get('id', '') or ''),
+                        slate_date=event_game_date,
+                        bookmaker=preferred_bookmaker or 'all_us',
+                        snapshot_ts=snapshot_ts,
+                    )
+                    for bookmaker in event_payload.get('bookmakers', []):
                         for market in bookmaker.get('markets', []):
                             for outcome in market.get('outcomes', []):
                                 all_lines.append({
                                     'game_date': event_game_date,
+                                    'event_id': event.get('id', ''),
+                                    'commence_time': event.get('commence_time', ''),
                                     'player': outcome.get('description', ''),
                                     'prop': market['key'],
                                     'line': outcome.get('point', 0),
@@ -2398,14 +2568,51 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
                                 })
                 if all_lines:
                     df = pd.DataFrame(all_lines)
-                    consolidated = df.groupby(['game_date', 'player', 'prop'], as_index=False).agg(
-                        line=('line', 'median'), odds=('odds', 'first'), num_books=('book', 'count')
-                    )
+                    # Preserve each offered sportsbook contract exactly. FanDuel can
+                    # return alternate lines for one player/market; taking their median
+                    # creates a number the user cannot actually bet. Pair prices only
+                    # when book, player, market, and line are identical.
+                    exact_rows = {}
+                    for row in df.to_dict('records'):
+                        point = pd.to_numeric(row.get('line'), errors='coerce')
+                        player = str(row.get('player', '') or '').strip()
+                        prop = str(row.get('prop', '') or '').strip()
+                        book = str(row.get('book', '') or '').strip().lower()
+                        if not player or not prop or not book or pd.isna(point):
+                            continue
+                        key = (
+                            str(row.get('game_date', '')),
+                            str(row.get('event_id', '')),
+                            book,
+                            player,
+                            prop,
+                            float(point),
+                        )
+                        paired = exact_rows.setdefault(key, {
+                            'game_date': row.get('game_date'),
+                            'player': player,
+                            'prop': prop,
+                            'line': float(point),
+                            'num_books': 1,
+                            'source': f'odds_api_{book}',
+                            'snapshot_ts': snapshot_ts,
+                            'projection_type': 'standard',
+                            'is_promo': False,
+                            'bookmaker': book,
+                            'event_id': row.get('event_id', ''),
+                            'commence_time': row.get('commence_time', ''),
+                            'over_price': np.nan,
+                            'under_price': np.nan,
+                        })
+                        price = pd.to_numeric(row.get('odds'), errors='coerce')
+                        direction = str(row.get('direction', '') or '').strip().lower()
+                        if direction == 'over':
+                            paired['over_price'] = price
+                        elif direction == 'under':
+                            paired['under_price'] = price
+
+                    consolidated = pd.DataFrame(exact_rows.values())
                     source_label = preferred_bookmaker or 'odds_api'
-                    if preferred_bookmaker:
-                        consolidated['source'] = f'odds_api_{preferred_bookmaker}'
-                    consolidated['projection_type'] = 'standard'
-                    consolidated['is_promo'] = False
                     consolidated, summary = sanitize_player_names(
                         consolidated,
                         player_col='player',
@@ -2417,10 +2624,11 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
                     )
                     print(
                         f"  Fetched {len(consolidated)} validated player props "
-                        f"({source_label} via Odds API, {remaining} credits left; "
+                        f"({source_label} via Odds API, {len(slate_events) - failed_events}/"
+                        f"{len(slate_events)} events completed, {remaining} credits before prop requests; "
                         f"{summary['canonicalized_rows']} canonicalized, {summary['dropped_rows']} dropped)"
                     )
-                    return consolidated, source_label
+                    return consolidated.reset_index(drop=True), source_label
         else:
             fallback_msg = "switching to PrizePicks" if allow_prizepicks_fallback else "no sportsbook refresh available"
             print(f"  Odds API: {remaining} credits remaining — {fallback_msg}")
@@ -2433,6 +2641,31 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
 
     pp_df = fetch_prizepicks_lines()
     return pp_df, 'prizepicks'
+
+
+def _write_live_odds_checkpoint(payload: object,
+                                event_id: str,
+                                slate_date: str,
+                                bookmaker: str,
+                                snapshot_ts: str) -> Path:
+    """Atomically preserve each paid live response before parsing the next event."""
+    safe_event = re.sub(r'[^A-Za-z0-9_-]+', '_', str(event_id or 'unknown'))
+    safe_book = re.sub(r'[^A-Za-z0-9_-]+', '_', str(bookmaker or 'unknown'))
+    safe_stamp = re.sub(r'[^0-9]+', '', str(snapshot_ts))[:14] or datetime.now().strftime('%Y%m%d%H%M%S')
+    directory = Path(CONFIG['line_archive_dir']) / 'live_raw' / str(slate_date)
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / f'{safe_stamp}_{safe_event}_{safe_book}.json'
+    temporary = destination.with_suffix(destination.suffix + '.tmp')
+    record = {
+        'snapshot_ts': snapshot_ts,
+        'slate_date': slate_date,
+        'event_id': event_id,
+        'bookmaker': bookmaker,
+        'payload': payload,
+    }
+    temporary.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
+    temporary.replace(destination)
+    return destination
 
 
 def save_lines_snapshot(vegas_df: pd.DataFrame, game_date: Optional[str] = None, source: str = 'live_fetch'):
@@ -4580,6 +4813,7 @@ def _merge_layer_features(df: pd.DataFrame) -> pd.DataFrame:
     if len(already) == len(LAYER_COLS):
         return df
 
+    current_projection_path = _HERE / 'data' / 'player_projections_today.csv'
     enriched_path = _HERE / 'data' / 'training_dataset_enriched.csv'
     cache_dir     = _HERE / 'data' / 'hist_cache'
 
@@ -4613,15 +4847,55 @@ def _merge_layer_features(df: pd.DataFrame) -> pd.DataFrame:
             agg[col] = pd.to_numeric(agg[col], errors='coerce')
         return agg.groupby(group_keys, dropna=False)[avail].mean().reset_index()
 
+    source_frames = []
+
+    # The live projection artifact is the authoritative same-season layer
+    # snapshot.  The historical enriched table currently ends in 2025-26, so
+    # using it alone leaves every 2026-27 target row unmatched.  Keep per-game
+    # PBP ``raw_ppp`` separate from season-level PPP by mapping the current
+    # artifact to the explicit ``raw_ppp_season`` field before aggregation.
+    if current_projection_path.exists():
+        try:
+            current = pd.read_csv(current_projection_path, low_memory=False)
+            if 'raw_ppp' in current.columns and 'raw_ppp_season' not in current.columns:
+                current['raw_ppp_season'] = current['raw_ppp']
+                current = current.drop(columns=['raw_ppp'])
+            if 'avg_opp_def_rtg' in current.columns and 'opp_def_rtg_avg' not in current.columns:
+                current['opp_def_rtg_avg'] = current['avg_opp_def_rtg']
+            current_agg = _season_aggregate(current)
+            if not current_agg.empty:
+                source_frames.append(current_agg)
+                loaded_cols = len([c for c in LAYER_COLS if c in current_agg.columns])
+                print(
+                    f"  [Layer features] Loaded {loaded_cols} current-season cols "
+                    "from player_projections_today.csv"
+                )
+        except Exception as e:
+            print(f"  [Layer features] current projection CSV failed ({e})")
+
     if enriched_path.exists():
         try:
             enr = pd.read_csv(enriched_path, low_memory=False)
-            layer_df = _season_aggregate(enr)
-            if not layer_df.empty:
-                loaded_cols = len([c for c in LAYER_COLS if c in layer_df.columns])
+            enriched_agg = _season_aggregate(enr)
+            if not enriched_agg.empty:
+                source_frames.append(enriched_agg)
+                loaded_cols = len([c for c in LAYER_COLS if c in enriched_agg.columns])
                 print(f"  [Layer features] Loaded {loaded_cols} cols from training_dataset_enriched.csv")
         except Exception as e:
             print(f"  [Layer features] enriched CSV failed ({e}), trying cache files...")
+
+    if source_frames:
+        shared_keys = ['player_id', 'player', 'season']
+        if not all(all(key in frame.columns for key in shared_keys) for frame in source_frames):
+            shared_keys = ['player_id', 'season'] if all(
+                all(key in frame.columns for key in ['player_id', 'season']) for frame in source_frames
+            ) else ['player', 'season']
+        combined_sources = pd.concat(source_frames, ignore_index=True, sort=False)
+        value_cols = [c for c in combined_sources.columns if c not in shared_keys]
+        layer_df = (
+            combined_sources.groupby(shared_keys, dropna=False, as_index=False)[value_cols]
+            .first()
+        )
 
     if layer_df is None or layer_df.empty:
         # Fallback: load individual cache files and join
@@ -5400,6 +5674,7 @@ def _prediction_feature_cache_signature(
     paths = [
         CONFIG['data_dir'] / 'nba_data.csv',
         CONFIG['data_dir'] / 'pbp_possessions_master.csv',
+        CONFIG['data_dir'] / 'player_projections_today.csv',
         CONFIG['data_dir'] / 'training_dataset_enriched.csv',
         CONFIG['data_dir'] / 'player_positions.csv',
         Path(__file__),
@@ -5485,7 +5760,7 @@ def _append_upcoming_prediction_rows(
             target[column] = np.nan
 
     target['game_date'] = pd.Series(pd.NaT, index=target.index, dtype='datetime64[ns]')
-    for text_column in ['season', 'SEASON_YEAR', 'opp', 'home_away', 'matchup']:
+    for text_column in ['GAME_ID', 'season', 'SEASON_YEAR', 'opp', 'home_away', 'matchup']:
         if text_column in target.columns:
             target[text_column] = pd.Series(pd.NA, index=target.index, dtype='object')
     target['game_date'] = target_date
@@ -5526,9 +5801,10 @@ def _align_selected_features_to_training_pipeline(
     canonical_features = [
         feature for feature in selected_features
         if feature not in POINT_IN_TIME_DEFENSE_FEATURES
+        and feature not in LIVE_AVAILABILITY_FEATURES
     ]
 
-    from feature_pipeline import FeaturePipeline
+    from feature_pipeline import FeaturePipeline, _canonical_game_id
     canonical_source = source_df.copy() if source_df is not None else df.copy()
     canonical = FeaturePipeline(ewma_span=5, split_window=15, min_games=10).fit_transform(canonical_source)
     missing = sorted(set(canonical_features) - set(canonical.columns))
@@ -5547,6 +5823,15 @@ def _align_selected_features_to_training_pipeline(
     left = df.copy()
     right = canonical[keys + canonical_features].copy()
     for frame in (left, right):
+        if 'GAME_ID' in keys:
+            frame['GAME_ID'] = _canonical_game_id(frame['GAME_ID'])
+        for player_id_key in ['PLAYER_ID', 'player_id']:
+            if player_id_key in keys:
+                numeric_ids = pd.to_numeric(frame[player_id_key], errors='coerce')
+                if numeric_ids.notna().all():
+                    frame[player_id_key] = numeric_ids.astype('Int64').astype('string')
+                else:
+                    frame[player_id_key] = frame[player_id_key].astype(str).str.strip()
         if 'game_date' in keys:
             frame['game_date'] = pd.to_datetime(frame['game_date'], errors='raise').dt.normalize()
         if 'team' in keys:
@@ -5739,6 +6024,14 @@ def generate_predictions(
             )
         latest = _attach_live_point_in_time_defense(latest, df, slate_date)
 
+    required_availability = sorted(set(required_feature_cols) & set(LIVE_AVAILABILITY_FEATURES))
+    if required_availability:
+        if slate_date is None:
+            raise ValueError(
+                f"Models require {required_availability}, but generate_predictions received no slate_date"
+            )
+        latest = _attach_live_availability_minutes(latest, df, slate_date)
+
     # Check if feature columns exist in latest
     missing_cols = [c for c in required_feature_cols if c not in latest.columns]
     if missing_cols:
@@ -5746,6 +6039,11 @@ def generate_predictions(
         if missing_defense:
             raise RuntimeError(
                 f"Required live point-in-time defense features are missing: {missing_defense}"
+            )
+        missing_availability = sorted(set(missing_cols) & set(LIVE_AVAILABILITY_FEATURES))
+        if missing_availability:
+            raise RuntimeError(
+                f"Required live availability/minutes features are missing: {missing_availability}"
             )
         print(f"  WARNING: {len(missing_cols)} feature columns not found, filling with 0")
         for c in missing_cols:
@@ -10468,6 +10766,11 @@ def main():
             if len(vegas_raw) > 0:
                 save_lines_snapshot(vegas_raw, source=_line_source)
                 active_live, live_slate_date = _select_lines_for_exact_slate_date(vegas_raw, today_str)
+                if len(active_live) > 0 and not use_prizepicks_lines:
+                    active_live = _select_preferred_line_rows(
+                        active_live,
+                        allowed_sources=[preferred_bookmaker],
+                    )
                 if len(active_live) == 0 and use_prizepicks_lines:
                     active_live, live_slate_date = _select_active_slate_lines(vegas_raw)
                     if len(active_live) > 0 and live_slate_date and live_slate_date != today_str:

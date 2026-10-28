@@ -1,0 +1,37 @@
+{
+  "artifact": "DEC-060 FanDuel live-card source receipt",
+  "created_at": "2026-10-26T10:40:00-05:00",
+  "sources": [
+    {
+      "source": "Odds API response headers",
+      "role": "Authentication and credit authority",
+      "freshness": "2026-10-26 live response",
+      "evidence": "HTTP 200; 366 remaining; 134 used after the completed workflow",
+      "secret_handling": "API key excluded"
+    },
+    {
+      "source": "data/historical_lines.csv",
+      "role": "Canonical exact FanDuel line store",
+      "freshness": "2026-10-26 snapshot",
+      "evidence": "565 rows; 113 players; 8 markets; 565 paired-price rows; 0 duplicate physical keys"
+    },
+    {
+      "source": "data/nba_team_game_logs.csv",
+      "role": "Exact team-game feature input",
+      "freshness": "Through 2026-10-25",
+      "evidence": "8004 team rows; 4002 games; 0 duplicate keys; 0 required nulls"
+    },
+    {
+      "source": "output/picks_latest.csv",
+      "role": "Published FanDuel card",
+      "freshness": "2026-10-26 run",
+      "evidence": "2 selections, both line_source=fanduel"
+    },
+    {
+      "source": "pytest full repository suite",
+      "role": "Regression verification",
+      "freshness": "2026-10-26",
+      "evidence": "151 passed; 330 warnings; 1 subtest passed; 0 failures"
+    }
+  ]
+}

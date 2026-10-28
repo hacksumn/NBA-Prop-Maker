@@ -81,6 +81,7 @@ LIVE_INJURY_CSV  = DATA_DIR / "live_injury_status.csv"
 PROJECTIONS_TODAY = DATA_DIR / "player_projections_today.csv"
 PROJECTIONS_ARCHIVE_DIR = DATA_DIR / "projection_archive"
 LAYER_SNAPSHOT_DIR = DATA_DIR / "season_snapshots"
+MAX_LUCK_SNAPSHOT_AGE_HOURS = 168.0
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -653,6 +654,18 @@ def step1_game_logs(args, errors):
         errors.append(f"Game logs: {exc}")
 
 
+def step1_1_team_game_logs(args, errors):
+    """Refresh the exact team-game source required by canonical live features."""
+    return _run_python_step(
+        "1.1",
+        "Exact NBA Team Game Logs  (OREB + possession inputs)",
+        ["scripts/fetch_nba_team_game_logs.py", "--seasons", _active_season(args)],
+        errors,
+        "Exact team game logs",
+        "Exact team game logs updated",
+    )
+
+
 # ── Step 1.5: Auto-grade picks ─────────────────────────────────────────────────
 
 def step1_5_grade_picks(errors):
@@ -1067,20 +1080,49 @@ def step1_6_grade_betslips(errors):
 # ── Step 2: PrizePicks Lines ───────────────────────────────────────────────────
 
 def step2_prizepicks(args, errors):
-    _step_header(2, "PrizePicks Snapshot  (live card source + history)")
+    _RUN_STATE["live_lines_step_failed"] = False
+    from nba_props import CONFIG as MODEL_CONFIG
+    source_mode = str(MODEL_CONFIG.get("live_line_source_mode", "fanduel") or "fanduel").strip().lower()
+    bookmaker = str(MODEL_CONFIG.get("live_sportsbook_key", "fanduel") or "fanduel").strip().lower()
+    source_label = "PrizePicks" if source_mode == "prizepicks" else bookmaker.title()
+    _step_header(2, f"{source_label} Snapshot  (authoritative live card source + history)")
     try:
-        from prizepicks_scraper import save_lines
-        save_lines(output_path=str(LINES_CSV))
+        if source_mode == "prizepicks":
+            from prizepicks_scraper import save_lines
+            save_lines(output_path=str(LINES_CSV))
+        else:
+            from nba_props import fetch_vegas_lines, save_lines_snapshot
+            live_lines, fetched_source = fetch_vegas_lines(
+                prefer_prizepicks=False,
+                preferred_bookmaker=bookmaker,
+                allow_prizepicks_fallback=False,
+            )
+            if live_lines is None or len(live_lines) == 0:
+                raise RuntimeError(f"no current {bookmaker} player-prop lines returned")
+            if str(fetched_source).strip().lower() != bookmaker:
+                raise RuntimeError(
+                    f"expected {bookmaker} lines but received {fetched_source!r}; refusing substitution"
+                )
+            save_lines_snapshot(live_lines, source=f"odds_api_{bookmaker}")
         _summarise_csv(LINES_CSV, "historical_lines.csv")
-        _ok("PrizePicks lines updated")
+        _ok(f"{source_label} lines updated")
     except Exception as exc:
-        _fail(f"PrizePicks fetch failed: {exc}")
+        _RUN_STATE["live_lines_step_failed"] = True
+        _fail(f"{source_label} fetch failed: {exc}")
         logger.debug(exc, exc_info=True)
-        errors.append(f"PrizePicks lines: {exc}")
+        errors.append(f"{source_label} lines: {exc}")
 
 
 def step2_5_start_prizepicks_closing_capture(args, errors):
     """Start the detached T-60/T-5 PrizePicks watcher for today's slate."""
+    from nba_props import CONFIG as MODEL_CONFIG
+    source_mode = str(MODEL_CONFIG.get("live_line_source_mode", "fanduel") or "fanduel").strip().lower()
+    if source_mode != "prizepicks":
+        logger.info(
+            "Skipping PrizePicks T-60/T-5 watcher because the configured live source is %s",
+            source_mode,
+        )
+        return
     if args.skip_pp_closing_capture:
         logger.info("Skipping PrizePicks T-60/T-5 watcher (--skip-pp-closing-capture)")
         return
@@ -1433,6 +1475,7 @@ def step7_luck_model(errors, season=None):
         import pandas as pd
         from luck_regression_model import build_player_luck_scores
         active_season = season or _active_season()
+        luck_snapshot = LAYER_SNAPSHOT_DIR / f"player_luck_scores_{active_season}.csv"
         # Layer 3 makes 30+ API calls — give the NBA API a cooldown before hitting it again
         logger.info("  Waiting 15s for API rate-limit cooldown after Layer 3...")
         time.sleep(15)
@@ -1444,16 +1487,32 @@ def step7_luck_model(errors, season=None):
                 attempts=2,
                 delay_s=15.0,
             )
+            if luck_df.empty:
+                _warn(
+                    f"No {active_season} players meet the luck model's minimum-games contract; "
+                    "the luck layer is disabled rather than reusing a prior-season cache"
+                )
+                return
             _atomic_csv(luck_df, PLAYER_LUCK)
+            _atomic_csv(luck_df, luck_snapshot)
         except Exception as exc:
-            if not PLAYER_LUCK.exists():
-                raise
-            age_hours = _file_age_hours(PLAYER_LUCK) or 0.0
-            _warn(
-                f"Luck model refresh failed ({exc}); "
-                f"reusing cached {PLAYER_LUCK.name} ({age_hours:.1f}h old)"
-            )
-            luck_df = pd.read_csv(PLAYER_LUCK)
+            snapshot_age = _file_age_hours(luck_snapshot)
+            if (
+                _csv_has_rows(luck_snapshot)
+                and snapshot_age is not None
+                and snapshot_age <= MAX_LUCK_SNAPSHOT_AGE_HOURS
+            ):
+                _warn(
+                    f"Luck model refresh failed ({exc}); reusing the same-season snapshot "
+                    f"({snapshot_age:.1f}h old)"
+                )
+                luck_df = pd.read_csv(luck_snapshot)
+            else:
+                _warn(
+                    f"Luck model refresh failed ({exc}); no fresh same-season snapshot is "
+                    "available, so the luck layer is disabled"
+                )
+                return
 
         very_lucky = (luck_df["luck_label"] == "VERY LUCKY").sum()
         very_unlucky = (luck_df["luck_label"] == "VERY UNLUCKY").sum()
@@ -1470,8 +1529,11 @@ def step7_luck_model(errors, season=None):
 
 # ── Step 8: Merge All Layers → player_projections_today.csv ──────────────────
 
-# Set when step 8 (merge projections) fails, so step 9 can refuse to pick from stale projections.
-_RUN_STATE = {"projections_step_failed": False}
+# Set when required live inputs fail, so step 9 cannot publish from stale state.
+_RUN_STATE = {
+    "projections_step_failed": False,
+    "live_lines_step_failed": False,
+}
 STALE_PROJECTIONS_BLOCK_HOURS = 48
 
 
@@ -1674,9 +1736,15 @@ def step8_merge_projections(errors, season=None):
             _warn("player_profiles.csv not found — Layer 3 not merged")
 
         # ── Merge Layer 4: Luck scores ─────────────────────────────────────────
-        if PLAYER_LUCK.exists():
+        luck_snapshot = LAYER_SNAPSHOT_DIR / f"player_luck_scores_{active_season}.csv"
+        luck_age = _file_age_hours(luck_snapshot)
+        if (
+            _csv_has_rows(luck_snapshot)
+            and luck_age is not None
+            and luck_age <= MAX_LUCK_SNAPSHOT_AGE_HOURS
+        ):
             logger.info("  Merging Layer 4 (luck scores)...")
-            luck = pd.read_csv(PLAYER_LUCK)
+            luck = pd.read_csv(luck_snapshot)
             # player_luck_scores.csv uses "player_name" (lowercase)
             for col in ["player_name", "PLAYER_NAME", "player"]:
                 if col in luck.columns:
@@ -1691,7 +1759,10 @@ def step8_merge_projections(errors, season=None):
             merged_count = proj["total_luck_score"].notna().sum() if "total_luck_score" in proj.columns else 0
             _ok(f"Layer 4 merged: {merged_count} players have luck scores")
         else:
-            _warn("player_luck_scores.csv not found — Layer 4 not merged")
+            _warn(
+                f"No fresh {active_season} luck snapshot is available - "
+                "Layer 4 is neutralized instead of using stale or prior-season values"
+            )
 
         # Dedup: merges can produce multiple rows per player if source data has duplicates
         proj = proj.drop_duplicates(subset=["player"], keep="first").reset_index(drop=True)
@@ -2040,6 +2111,13 @@ def step9_generate_picks(args, errors):
         logger.info("Skipping live pick generation (--skip-picks)")
         return
 
+    if _RUN_STATE["live_lines_step_failed"]:
+        _warn(
+            "Skipping live pick generation because the authoritative live-line snapshot failed; "
+            "no stale or substitute line source will be published"
+        )
+        return
+
     if _RUN_STATE["projections_step_failed"]:
         proj_age = _file_age_hours(PROJECTIONS_TODAY)
         if proj_age is None or proj_age > STALE_PROJECTIONS_BLOCK_HOURS:
@@ -2099,6 +2177,8 @@ def main() -> int:
 
     start_time = time.time()
     errors = []
+    _RUN_STATE["projections_step_failed"] = False
+    _RUN_STATE["live_lines_step_failed"] = False
     active_season = _active_season(args)
     logger.info(f"Active NBA season contract: {active_season}")
 
@@ -2106,6 +2186,7 @@ def main() -> int:
     if not args.layers_only:
         if not args.lines_only:
             step1_game_logs(args, errors)
+            step1_1_team_game_logs(args, errors)
             step1_5_grade_picks(errors)
             step1_6_grade_betslips(errors)
         else:

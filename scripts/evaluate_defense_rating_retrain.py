@@ -1,4 +1,4 @@
-"""Compare production and defense candidate on identical real-line OOF rows.
+"""Compare production and full-layer candidate on identical real-line OOF rows.
 
 The trainer persists quantile OOF predictions but not its primary-regression OOF
 vector.  Therefore this audit compares the persisted pre-line q50 projection for
@@ -23,7 +23,14 @@ DEFAULT_PRODUCTION_FEATURES = ROOT / "models" / "selected_features_advanced.json
 DEFAULT_CANDIDATE_FEATURES = ROOT / "models" / "defense_rating_retrain" / "selected_features_advanced.json"
 DEFAULT_DETAIL = ROOT / "output" / "defense_rating_same_row_oof.csv"
 DEFAULT_SUMMARY = ROOT / "output" / "defense_rating_same_row_oof_summary.json"
-NEW_FEATURES = {"opp_def_rtg_pt", "opp_pace_pt", "opp_def_tier_pt"}
+NEW_FEATURES = {
+    "opp_def_rtg_pt",
+    "opp_pace_pt",
+    "opp_def_tier_pt",
+    "availability_probability",
+    "conditional_minutes_prediction",
+    "expected_minutes_prediction",
+}
 KEY = ["target", "game_date", "player_norm", "actual"]
 
 
@@ -63,13 +70,21 @@ def evaluate(
     candidate_features: dict,
     draws: int = 5000,
     seed: int = 5051,
+    minimum_overlap: float = 0.99,
 ) -> tuple[pd.DataFrame, dict]:
     right = candidate[KEY + ["q50"]].rename(columns={"q50": "candidate_q50"})
     aligned = production.merge(right, on=KEY, how="inner", validate="one_to_one")
-    if len(aligned) != len(production):
+    overlap_rate = len(aligned) / len(production) if len(production) else 0.0
+    if overlap_rate < minimum_overlap:
         raise ValueError(
-            f"Candidate covers {len(aligned)}/{len(production)} frozen production real-line rows"
+            f"Candidate covers {len(aligned)}/{len(production)} frozen production real-line rows "
+            f"({overlap_rate:.2%}); required {minimum_overlap:.2%}"
         )
+    missing = production.merge(
+        right[KEY], on=KEY, how="left", validate="one_to_one", indicator=True
+    )
+    missing = missing.loc[missing["_merge"].eq("left_only")].drop(columns="_merge")
+    aligned_rows_before_push_exclusion = int(len(aligned))
     aligned = aligned.rename(columns={"q50": "production_q50", "line": "frozen_line"})
     aligned = aligned.loc[aligned["actual"].ne(aligned["frozen_line"])].copy()
     aligned["actual_over"] = aligned["actual"].gt(aligned["frozen_line"])
@@ -132,6 +147,20 @@ def evaluate(
             "seed": seed,
         },
         "production_real_rows": int(len(production)),
+        "aligned_rows_before_push_exclusion": aligned_rows_before_push_exclusion,
+        "overlap_rate": float(overlap_rate),
+        "minimum_overlap_rate": float(minimum_overlap),
+        "excluded_nonoverlap_rows": int(len(missing)),
+        "excluded_nonoverlap_by_target": {
+            str(target): int(count)
+            for target, count in missing.groupby("target").size().items()
+        },
+        "excluded_nonoverlap_date_min": (
+            missing["game_date"].min().date().isoformat() if not missing.empty else None
+        ),
+        "excluded_nonoverlap_date_max": (
+            missing["game_date"].max().date().isoformat() if not missing.empty else None
+        ),
         "aligned_nonpush_rows": int(len(aligned)),
         "date_min": aligned["game_date"].min().date().isoformat(),
         "date_max": aligned["game_date"].max().date().isoformat(),
@@ -166,6 +195,7 @@ def main() -> int:
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
     parser.add_argument("--bootstrap-draws", type=int, default=5000)
     parser.add_argument("--seed", type=int, default=5051)
+    parser.add_argument("--minimum-overlap", type=float, default=0.99)
     args = parser.parse_args()
     production = _load_oof(args.production, production=True)
     candidate = _load_oof(args.candidate, production=False)
@@ -174,6 +204,7 @@ def main() -> int:
     detail, summary = evaluate(
         production, candidate, production_features, candidate_features,
         draws=args.bootstrap_draws, seed=args.seed,
+        minimum_overlap=args.minimum_overlap,
     )
     args.detail.parent.mkdir(parents=True, exist_ok=True)
     detail.to_csv(args.detail, index=False, date_format="%Y-%m-%d")

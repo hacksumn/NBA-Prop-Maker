@@ -1,0 +1,958 @@
+{
+  "canonical_data": [
+    {
+      "bytes": 2659,
+      "path": "data/game_blowout_index.csv",
+      "sha256": "db7841fee9c6e1722dc6152c80b359c252650100d1f13f60f4b25cd9e454b269"
+    },
+    {
+      "bytes": 143418677,
+      "path": "data/historical_lines.csv",
+      "sha256": "17fae3ae3c44d799db00b027bb1926a32f05d1aa26e1bad8200361f1714012f0"
+    },
+    {
+      "bytes": 214050412,
+      "path": "data/model_data_advanced.csv",
+      "sha256": "a10ff09676cec4625540beb1d65e6caf8a2fd77ed47afb66091e46fde062494b"
+    },
+    {
+      "bytes": 220538034,
+      "path": "data/model_data_defenserating_advanced.csv",
+      "sha256": "fbac6069d75ea9ae1113c3ed4d01502c27a1f1c130e9aa4a3bf53e52fbf6a5f5"
+    },
+    {
+      "bytes": 24023883,
+      "path": "data/nba_data.csv",
+      "sha256": "a9674f3f097ee485a985b2079b5d6f73a32dd719fa55e7fb14576f93d8e12b67"
+    },
+    {
+      "bytes": 1312910,
+      "path": "data/nba_team_game_logs.csv",
+      "sha256": "1d8cda4cb44e3a806ccf2e787d6c0425eb1977e286dfba8dc5ddd6ff33226c07"
+    },
+    {
+      "bytes": 56879,
+      "path": "data/player_clean_baselines.csv",
+      "sha256": "75fbc2041f5f5948b09e54c5dad75e5c79cd57389c393cf16b938f1b6d98bf3e"
+    },
+    {
+      "bytes": 9495,
+      "path": "data/player_positions.csv",
+      "sha256": "97aea18d35a993c9ae32e0cf445c3a1743f42388278574c73000d224e835460d"
+    },
+    {
+      "bytes": 102650,
+      "path": "data/player_profiles.csv",
+      "sha256": "347746af720bbfc5a835e97fe25e90410ae6cff242cd2cfde54209f406fd09bd"
+    },
+    {
+      "bytes": 207650,
+      "path": "data/player_projections_today.csv",
+      "sha256": "1bec5e67c6e59938883250426400e8bb206c8cbd65dc7dc19660b493f0785b51"
+    },
+    {
+      "bytes": 1564506,
+      "path": "data/pointintime_team_defense_ratings.csv",
+      "sha256": "504006bb528caf3f02a9456e4aca902ce89a445b433fb24386acbf41fb0151e0"
+    }
+  ],
+  "contracts": {
+    "automatic_model_promotion": false,
+    "calibration_fit_dates": 64,
+    "calibration_fit_rows": 44787,
+    "calibration_holdout_date_max": "2026-05-18",
+    "calibration_holdout_date_min": "2026-04-27",
+    "calibration_holdout_dates": 20,
+    "calibration_holdout_rows": 5391,
+    "odds_api_spend_default": false,
+    "prizepicks_capture_windows": [
+      "T-60",
+      "T-5"
+    ],
+    "probability_sidecar_contract": {
+      "oof_sha256": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763",
+      "schema_version": 1,
+      "sidecar_sha256": {
+        "ast": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0",
+        "blk": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224",
+        "pa": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633",
+        "pr": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2",
+        "pra": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f",
+        "pts": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415",
+        "stl": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5",
+        "tov": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9",
+        "trb": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e"
+      },
+      "targets": [
+        "ast",
+        "blk",
+        "pa",
+        "pr",
+        "pra",
+        "pts",
+        "stl",
+        "tov",
+        "trb"
+      ]
+    },
+    "production_models_are_immutable_during_daily_operations": true
+  },
+  "created_at_utc": "2026-10-26T02:46:54.734633+00:00",
+  "evidence": [
+    {
+      "bytes": 27657,
+      "path": "output/dec057_production_recovery_manifest.json",
+      "sha256": "700ab4e0fd27d530f9d24e396edc90e93ef6f17edb74a0ef6d400fff0949bd64"
+    },
+    {
+      "bytes": 5330,
+      "path": "output/probability_under_selection_summary.json",
+      "sha256": "c15ee2cccba01046ac09e142919db97066399a2017219450edf6a6183c66fb51"
+    },
+    {
+      "bytes": 813,
+      "path": "output/training_live_selected_feature_parity_summary.json",
+      "sha256": "6fca94926f48968d1a7b2ca4ab449f14cbd2530896afd05c0db99960200c0471"
+    },
+    {
+      "bytes": 7093,
+      "path": "output/weekly_candidate_20261025_recovery_validation_same_row_oof_summary.json",
+      "sha256": "4c0989f4ec9d75bd1b2d59974362e6602315c85323b9cf5f5844052e795de192"
+    },
+    {
+      "bytes": 3386,
+      "path": "output/zip_recovery_20261025_manifest.json",
+      "sha256": "5676b4cc665462623fbb4a25e2f0312cfa23f7ca61fd321ea19cf3d53a431274"
+    }
+  ],
+  "git": {
+    "branch": "master",
+    "head": "67fa64065ae4ab2e59d93c871023cd9382073447",
+    "reviewed_release_commit": "b038f16351c340995c0e836c908d6deee7645201",
+    "source_hash_basis": "git_blob_contents",
+    "working_tree_clean": false
+  },
+  "policies": [
+    {
+      "bytes": 1219,
+      "path": "models/availability_minutes_policy.json",
+      "sha256": "4df7514969194002da89fb9244fff7583db23e33668705359c6f46ed0b5c349e"
+    },
+    {
+      "bytes": 411,
+      "path": "models/clv_selection_policy.json",
+      "sha256": "9acf8a67e441aec08da2e4a946c1567db27d537eb2467a25da750757b0d034e3"
+    },
+    {
+      "bytes": 710,
+      "path": "models/defense_rating_feature_contract.json",
+      "sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06"
+    },
+    {
+      "bytes": 44844,
+      "path": "models/probability_diagnostics_advanced.json",
+      "sha256": "ef3cc9bd2899556be3fe185f52290c3b103fa2b7fec8c052ded37f1b4de6bd1a"
+    },
+    {
+      "bytes": 4344,
+      "path": "models/selected_features_advanced.json",
+      "sha256": "2f68413c8f70c8e20ec33cd55579d800d5366f579646c4f0bc4a012e2e2f07e2"
+    },
+    {
+      "bytes": 823,
+      "path": "models/sportsbook_selection_policy.json",
+      "sha256": "fc4bfc7e2dcc5ec2b2445796d22e280a4981d1ab78d3519cfbbbbd68aab62f8f"
+    }
+  ],
+  "production_models": [
+    {
+      "bytes": 166,
+      "path": "models/bias_advanced.json",
+      "sha256": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c"
+    },
+    {
+      "bytes": 308341,
+      "path": "models/clf_ast_advanced.pkl",
+      "sha256": "0b19acb67f3b8918b393f84816af9b37fe6b57462622a22aa105fbd3fdacc02b"
+    },
+    {
+      "bytes": 177788,
+      "path": "models/clf_blk_advanced.pkl",
+      "sha256": "e51344021985ffd21fe39f5c83d07d60d4bfb54813473443b5fa204f6651ef9c"
+    },
+    {
+      "bytes": 544260,
+      "path": "models/clf_pa_advanced.pkl",
+      "sha256": "2acc3b0f97591ba8f28c2dc93785691f00dfa3a26f11b777b8d116e3be4bb4c0"
+    },
+    {
+      "bytes": 555811,
+      "path": "models/clf_pr_advanced.pkl",
+      "sha256": "2014b8cf59c6b861cd5b7297f24f6c6f3bbb4758abb6adf9a1b9a162b343c9bc"
+    },
+    {
+      "bytes": 669200,
+      "path": "models/clf_pra_advanced.pkl",
+      "sha256": "7b6926b671c2765b71e3d0695db4481a75c5a41a4c96c156d903215d323b6ce8"
+    },
+    {
+      "bytes": 693255,
+      "path": "models/clf_pts_advanced.pkl",
+      "sha256": "8b35b0a022683606fed90aa862f2702f591fc9baa157274e6b0b94679cffa8e2"
+    },
+    {
+      "bytes": 176264,
+      "path": "models/clf_stl_advanced.pkl",
+      "sha256": "0e7392829d72d9de71fe43c9ac50f2dda331b5ceac7a7d62732c52e4d7c0211d"
+    },
+    {
+      "bytes": 304784,
+      "path": "models/clf_tov_advanced.pkl",
+      "sha256": "03696c3438216e8ce873301b1eb3baa7cd9d740ac4be70342104c73e5882892b"
+    },
+    {
+      "bytes": 308847,
+      "path": "models/clf_trb_advanced.pkl",
+      "sha256": "40f0ad871de0392860efbee019f15c4fb590ca1daa09d5b84dcb5dc839950b08"
+    },
+    {
+      "bytes": 710,
+      "path": "models/defense_rating_feature_contract.json",
+      "sha256": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06"
+    },
+    {
+      "bytes": 396656,
+      "path": "models/edge_xgb_ast_advanced.pkl",
+      "sha256": "6e1db1b19f7fce2a0eccbd37e85c4f72001a8875e0d61b21495a53771356427a"
+    },
+    {
+      "bytes": 214454,
+      "path": "models/edge_xgb_blk_advanced.pkl",
+      "sha256": "025c9a3aa89efd52a03998a88327edb36fc95d35b4e3472e0a941335271933f7"
+    },
+    {
+      "bytes": 748159,
+      "path": "models/edge_xgb_pa_advanced.pkl",
+      "sha256": "b5d37f2b7e2e7ca315e2633e2f8f2d6d63100c62e0302877d2014ecf55e2f8ae"
+    },
+    {
+      "bytes": 1260640,
+      "path": "models/edge_xgb_pr_advanced.pkl",
+      "sha256": "814bcf9830ffb43221e13e7bcdd1200012a046bfe6b473bebbfa23ea334b340d"
+    },
+    {
+      "bytes": 1415725,
+      "path": "models/edge_xgb_pra_advanced.pkl",
+      "sha256": "939adfe04c51d00f5e43b9572b6270b40345525e621a22e038ff23ba6edc9fb8"
+    },
+    {
+      "bytes": 1364822,
+      "path": "models/edge_xgb_pts_advanced.pkl",
+      "sha256": "980e977b997bad5ee3d264a73baa4cd9b39a4587e31172556a56e0235d4ee6d0"
+    },
+    {
+      "bytes": 214577,
+      "path": "models/edge_xgb_stl_advanced.pkl",
+      "sha256": "dd869075b6e25b82b6cc2174256b624eaa3f416db75f9aa8b4030c3d976c3c74"
+    },
+    {
+      "bytes": 332306,
+      "path": "models/edge_xgb_tov_advanced.pkl",
+      "sha256": "ae33380263aa32cc15614bae8864d3c07432c2cdd89e36ac0390458eb3baf515"
+    },
+    {
+      "bytes": 622684,
+      "path": "models/edge_xgb_trb_advanced.pkl",
+      "sha256": "0063536100c083ec77e18d53bb6815418a26ec916583d531f148fa30c66ffd01"
+    },
+    {
+      "bytes": 72929,
+      "path": "models/feature_importance_advanced.json",
+      "sha256": "347b076d667e2a0f65bbbb2aece1ce0d97285d6d5b7f8395569ff392d8c30aa7"
+    },
+    {
+      "bytes": 32561,
+      "path": "models/market_feature_sets_advanced.json",
+      "sha256": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41"
+    },
+    {
+      "bytes": 260076,
+      "path": "models/meta_clf_ast_advanced.pkl",
+      "sha256": "cdcae8fde41534aa16c8d77e0ddd8c0aca1a3be0e249c3d8ee4516ad752f5b50"
+    },
+    {
+      "bytes": 180096,
+      "path": "models/meta_clf_blk_advanced.pkl",
+      "sha256": "1fe1f8b93b174262948ac3b171f4904dfd6a48a87d3aa3d359af30d23fdfff75"
+    },
+    {
+      "bytes": 323192,
+      "path": "models/meta_clf_pa_advanced.pkl",
+      "sha256": "3c6e5d6f0788c7dc26d3f981fba147e965ba74582b397c4892f79147a8e0fae1"
+    },
+    {
+      "bytes": 327542,
+      "path": "models/meta_clf_pr_advanced.pkl",
+      "sha256": "68f1a449a5496f2287e74560570bbd3e12d3040f7161ac5774e2d222a5d4b905"
+    },
+    {
+      "bytes": 391208,
+      "path": "models/meta_clf_pra_advanced.pkl",
+      "sha256": "a0e4da4c6a73f6d3eed7aa6ea52e7a9db9fe6c53fec5c6ca57f9c2190bdc353b"
+    },
+    {
+      "bytes": 398960,
+      "path": "models/meta_clf_pts_advanced.pkl",
+      "sha256": "7c3b8360f996430b8019c270e3ecf3165aa9fabc8a5fea4167cb35389e1fa990"
+    },
+    {
+      "bytes": 176690,
+      "path": "models/meta_clf_stl_advanced.pkl",
+      "sha256": "754b97309ba1da097841167b18f7e0c8237db31e490eca9524d8b5298fe45f18"
+    },
+    {
+      "bytes": 246948,
+      "path": "models/meta_clf_tov_advanced.pkl",
+      "sha256": "357656a1da10bb7d521ec000b0146280b1c377199dcf85649bc83f23a93cffd2"
+    },
+    {
+      "bytes": 259396,
+      "path": "models/meta_clf_trb_advanced.pkl",
+      "sha256": "5d8cd186b513c0c70723a57c8116ccc8ac390be34bcc18263c8ae70dcc1d06e5"
+    },
+    {
+      "bytes": 2340506,
+      "path": "models/prob_sidecar_ast_advanced.pkl",
+      "sha256": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0"
+    },
+    {
+      "bytes": 446576,
+      "path": "models/prob_sidecar_blk_advanced.pkl",
+      "sha256": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224"
+    },
+    {
+      "bytes": 3246464,
+      "path": "models/prob_sidecar_pa_advanced.pkl",
+      "sha256": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633"
+    },
+    {
+      "bytes": 3236239,
+      "path": "models/prob_sidecar_pr_advanced.pkl",
+      "sha256": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2"
+    },
+    {
+      "bytes": 3662057,
+      "path": "models/prob_sidecar_pra_advanced.pkl",
+      "sha256": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f"
+    },
+    {
+      "bytes": 3344260,
+      "path": "models/prob_sidecar_pts_advanced.pkl",
+      "sha256": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415"
+    },
+    {
+      "bytes": 446374,
+      "path": "models/prob_sidecar_stl_advanced.pkl",
+      "sha256": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5"
+    },
+    {
+      "bytes": 578813,
+      "path": "models/prob_sidecar_tov_advanced.pkl",
+      "sha256": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9"
+    },
+    {
+      "bytes": 2436497,
+      "path": "models/prob_sidecar_trb_advanced.pkl",
+      "sha256": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e"
+    },
+    {
+      "bytes": 20954,
+      "path": "models/probability_calibrator_advanced.pkl",
+      "sha256": "959a64f5879fbf48342896b1f4067002e0ae2eccf6fcddfa32c28bd3c461231b"
+    },
+    {
+      "bytes": 44844,
+      "path": "models/probability_diagnostics_advanced.json",
+      "sha256": "ef3cc9bd2899556be3fe185f52290c3b103fa2b7fec8c052ded37f1b4de6bd1a"
+    },
+    {
+      "bytes": 91822605,
+      "path": "models/probability_oof_advanced.csv",
+      "sha256": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763"
+    },
+    {
+      "bytes": 4344,
+      "path": "models/selected_features_advanced.json",
+      "sha256": "2f68413c8f70c8e20ec33cd55579d800d5366f579646c4f0bc4a012e2e2f07e2"
+    },
+    {
+      "bytes": 32293,
+      "path": "models/training_edge_analysis.json",
+      "sha256": "8715eeea1a5ff46a82ae083864a948093d9c79d129275176423b92345030294b"
+    },
+    {
+      "bytes": 4387,
+      "path": "models/training_probability_analysis.json",
+      "sha256": "509f57023528a712982d5f9d3256bf596f14f2d15fcef98d96ef103874bbd735"
+    },
+    {
+      "bytes": 72858,
+      "path": "models/training_results.json",
+      "sha256": "e413b9917e09ade19360d4ec55a8d163e98e9efb7a05f61f6df7c072b3365dba"
+    },
+    {
+      "bytes": 3763898,
+      "path": "models/xgb_ast_advanced.pkl",
+      "sha256": "6cd2eb69003aa4559ca7ef51b2870fb33388f7bf68a1c8f810b4ed929992df4b"
+    },
+    {
+      "bytes": 338272,
+      "path": "models/xgb_blk_advanced.pkl",
+      "sha256": "4dd3902b32b80166cdec9953f6125c1cb0bf43698cf60831c0515a78f4d97070"
+    },
+    {
+      "bytes": 1518086,
+      "path": "models/xgb_pa_advanced.pkl",
+      "sha256": "9edcac1da157be84ad6f39a8dbc61c63a24621d73ba2dd3eed294315eb5d1898"
+    },
+    {
+      "bytes": 2506688,
+      "path": "models/xgb_pr_advanced.pkl",
+      "sha256": "6a8adc2769c0a2b04aac5b1653869945211714cb7f6e3a21951cb7faa20d9bb2"
+    },
+    {
+      "bytes": 2923206,
+      "path": "models/xgb_pra_advanced.pkl",
+      "sha256": "add76e1bdae26e024e9a970deb04444f74905caeba6d40fdd660225c6f31f6bb"
+    },
+    {
+      "bytes": 18163527,
+      "path": "models/xgb_pts_advanced.pkl",
+      "sha256": "a295bf76ebec05de646ec1b9f4459a54b5d22d9a5634a86f08cf62e4db6f2fc2"
+    },
+    {
+      "bytes": 341966,
+      "path": "models/xgb_stl_advanced.pkl",
+      "sha256": "bfcfb0422822ccea4a6292423c6cc7d51add5a6428b0d65711f83884b182880e"
+    },
+    {
+      "bytes": 644912,
+      "path": "models/xgb_tov_advanced.pkl",
+      "sha256": "44be75a1c144f0bf8d954a31a069eb3515f49998e97fb4bbd73b603d96094578"
+    },
+    {
+      "bytes": 6790678,
+      "path": "models/xgb_trb_advanced.pkl",
+      "sha256": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806"
+    }
+  ],
+  "release_name": "DEC-059 operator-safe release boundary",
+  "schema_version": 1,
+  "source": [
+    {
+      "bytes": 840,
+      "path": ".gitignore",
+      "sha256": "02077cd93d64258f9b1b753e0e01a22a2814bb96f0327b47769a4a8791b478cc"
+    },
+    {
+      "bytes": 6547,
+      "path": "ARCHITECTURE.md",
+      "sha256": "065df4cc1d0fdc407fee59924dddfbdae53d1875c42651369645e8843230e4fd"
+    },
+    {
+      "bytes": 31912,
+      "path": "blowout_discount_model.py",
+      "sha256": "38170e928a09eec818dad6c639a1dd3b783e5d2d6ffb910e8b67ab005746f054"
+    },
+    {
+      "bytes": 39102,
+      "path": "build_historical_dataset.py",
+      "sha256": "3e0ea458de1c2787671bb3052f130c14d60ab992994b121b1a70f751a6ddd17e"
+    },
+    {
+      "bytes": 13260,
+      "path": "calibrate_confidence.py",
+      "sha256": "940737263e207836d253e33ec6e3a5ce87fea189ebb80df475fdfb855a4244a5"
+    },
+    {
+      "bytes": 6767,
+      "path": "CHANGELOG.md",
+      "sha256": "d78efb7ff074acf529c483714d64b9f3b266716de4afd39826cef658781d4aae"
+    },
+    {
+      "bytes": 6191,
+      "path": "CLAUDE.md",
+      "sha256": "9f19746b4cf69eec6f9601fb92768b58fb285d5f009b5c7b6676cbf21f07abf2"
+    },
+    {
+      "bytes": 18749,
+      "path": "CONTEXT.md",
+      "sha256": "49333b1e8de97629ba5f5d2140f98575e7bd1b5b559497a5fb0a52dd3f04bf4c"
+    },
+    {
+      "bytes": 1105,
+      "path": "feature_cols.json",
+      "sha256": "3f947291d01c2ae5b47e037e60aad4058e301d6c06721ea0cf2436ff4ba7204d"
+    },
+    {
+      "bytes": 5014,
+      "path": "feature_cols_advanced.json",
+      "sha256": "ca5759c7538838fa2bfcd2a1afbd64084053823e0c8358750bd4faa1a6d6e195"
+    },
+    {
+      "bytes": 41701,
+      "path": "feature_pipeline.py",
+      "sha256": "ff417a099685445adc3477ded8d34ec20ff9473e57c2561e34c853ea47ee00ef"
+    },
+    {
+      "bytes": 11417,
+      "path": "injury_feed.py",
+      "sha256": "aed8cdf3e3a45b2b39ba32f2cd9f7cef9111ec32ac0cf47d0cbe8479ca2e70be"
+    },
+    {
+      "bytes": 29762,
+      "path": "luck_regression_model.py",
+      "sha256": "6883790feb510dc5bf58d5f6ad6506df20afbec0069c53226fe0790774e1d979"
+    },
+    {
+      "bytes": 22106,
+      "path": "minutes_deviation.py",
+      "sha256": "f1d6c03c7858f484947afda009841910b75fde8937e8b28ca28681e133276c64"
+    },
+    {
+      "bytes": 25190,
+      "path": "minutes_model.py",
+      "sha256": "3db6a089958002c9532cec1986d3c9e69b1eca92d8a8d64fabf58ac72dd49d6f"
+    },
+    {
+      "bytes": 494488,
+      "path": "nba_props.py",
+      "sha256": "6c987a6e9e06e76536d87411b899f8048233f62bd29097ea1d6c60cf882398f3"
+    },
+    {
+      "bytes": 8695,
+      "path": "nba_scraper.py",
+      "sha256": "492df68695bb8f8e9442aaa3aa67824cee72e02247d63ea2e533c6bea928d059"
+    },
+    {
+      "bytes": 11044,
+      "path": "outlier_heatmap.py",
+      "sha256": "9c0c928b722544d6c7bebe2707baeaa935576b97968aa57be7002315352598ea"
+    },
+    {
+      "bytes": 4256,
+      "path": "output/AGENTS.md",
+      "sha256": "66321db09a5407b787b5ff5c240548f610bc4fcd8478781b00a17244fa05fc6e"
+    },
+    {
+      "bytes": 26279,
+      "path": "output/ARCHITECTURE.md",
+      "sha256": "5ea59aa94483a4642b4c3cbf0bd17d536270d0a80e9cc80cb50aa2b6d4ecfcc1"
+    },
+    {
+      "bytes": 212381,
+      "path": "output/DECISIONS.md",
+      "sha256": "0c97485a5eb04281bb8516d647856161280fef2f166894f1dd487ea4c084d5e5"
+    },
+    {
+      "bytes": 72670,
+      "path": "output/STATUS.md",
+      "sha256": "d9b1d98651973069a61915bdb34ccd294158da2afba312da0f0b39f3706c8df1"
+    },
+    {
+      "bytes": 36503,
+      "path": "output/TASKS.md",
+      "sha256": "50d1133706f0c16edb9765a3bb91887f3d5cb811af70b9e0b2670c65652ec23b"
+    },
+    {
+      "bytes": 25312,
+      "path": "pbp_fetcher.py",
+      "sha256": "97260f00b6f99f723624458f881c3bf6a2eeb64350cac8761a3eb1f6931237ca"
+    },
+    {
+      "bytes": 13771,
+      "path": "player_pool_guard.py",
+      "sha256": "e16afd181105bd89ab14d014eaccf352478545104297914d09ae23bc7889b385"
+    },
+    {
+      "bytes": 24158,
+      "path": "ppp_engine.py",
+      "sha256": "dbbb7476eb524f543ed136a5588cc9330127dd23c635cadb5d93cc75421bc87e"
+    },
+    {
+      "bytes": 26638,
+      "path": "prizepicks_scraper.py",
+      "sha256": "a5f89604894065167a9f7942222edc14e9636c8dcf533eabbfc9f916f10b82fc"
+    },
+    {
+      "bytes": 12380,
+      "path": "probability_utils.py",
+      "sha256": "2ed91cc4cb81257baceac78a29e03444ac0fd900545d5b07080025091e1b9e8e"
+    },
+    {
+      "bytes": 4935,
+      "path": "PROJECT_STATE.md",
+      "sha256": "db973ce7d2075a75626974a94b0f3521c82f019dfbed897edf23f977d3f1ff19"
+    },
+    {
+      "bytes": 11854,
+      "path": "README.md",
+      "sha256": "2d5daba22cd3aa381cc095a426f988fd9ed81860e4bba293d3e17e7a6b814174"
+    },
+    {
+      "bytes": 1695,
+      "path": "rebuild_profiles_2025_26.py",
+      "sha256": "0cbb675f84690e3455b8a93f886da216a9a3e0b6b6562d8bf4a4fc3777dcbe86"
+    },
+    {
+      "bytes": 100968,
+      "path": "run_daily.py",
+      "sha256": "39b46dae4696e9a28ef8c8ae037c061a82e0681630e8354759d0c7ac4a110eff"
+    },
+    {
+      "bytes": 10649,
+      "path": "scripts/analyze_clv_features.py",
+      "sha256": "858581ab51d5d4d44887a137c3603aadf25d6656b965a2d0e40bde5f04495c92"
+    },
+    {
+      "bytes": 17170,
+      "path": "scripts/audit_availability_minutes_model.py",
+      "sha256": "023aa087013d9192e547c0a2190ccbd5b2cc7f8b7cfa3902cd90de41ee3b1c85"
+    },
+    {
+      "bytes": 9837,
+      "path": "scripts/audit_clv_snapshot_panel.py",
+      "sha256": "8c75b18927a197a201993891d547f248629c32ddcf4f8da58f013e97824348d7"
+    },
+    {
+      "bytes": 12297,
+      "path": "scripts/audit_naive_under_baseline.py",
+      "sha256": "7ea53e25966083054ec557c35f3e7f3e53c11cb12b774163ab329add05f62390"
+    },
+    {
+      "bytes": 8786,
+      "path": "scripts/audit_production_holdout_simple.py",
+      "sha256": "c0f36cb8e6bb70ce21cdb4255f673cfc08f45689b4265d807a39a7228845a3a3"
+    },
+    {
+      "bytes": 8172,
+      "path": "scripts/audit_training_live_feature_parity.py",
+      "sha256": "c370b2f25d3c53f80ca767667df77daa5192432fa19e1c9a458081efe2624447"
+    },
+    {
+      "bytes": 1001,
+      "path": "scripts/backtest_under_only_slips.py",
+      "sha256": "0839ada0e3fe5a6e73a73c947b10d7e321b65128499abe2566bf32d42b0dbc3d"
+    },
+    {
+      "bytes": 10547,
+      "path": "scripts/build_clv_features.py",
+      "sha256": "1683f3e160309f4ae666cf7c5735533f79cdf4061efb5667f58d3f15c36b5f42"
+    },
+    {
+      "bytes": 15233,
+      "path": "scripts/build_clv_snapshot_manifest.py",
+      "sha256": "52b2be59af0450493465d66933006be1c953b98bf78559cc98024733329f87ec"
+    },
+    {
+      "bytes": 28270,
+      "path": "scripts/build_pointintime_team_defense.py",
+      "sha256": "f00bb7b5fd02c71e57e5732f3670dc9e9be6d68768e1563e57f1395d97d0a959"
+    },
+    {
+      "bytes": 11554,
+      "path": "scripts/build_prop_availability_training_data.py",
+      "sha256": "7efa64152aa8e30d84e69ecbe846cb00519193a27b654657a25d2703191e0461"
+    },
+    {
+      "bytes": 9734,
+      "path": "scripts/build_prop_defense_rating_training_data.py",
+      "sha256": "9d1d124c89c39e006500c96e4b6b108a3ed9c0e13d6e1c2ebddf74a006f7eb16"
+    },
+    {
+      "bytes": 9164,
+      "path": "scripts/build_release_manifest.py",
+      "sha256": "9075b7691d14aa1eb6072fdbeea2a01b06db3f2f07313b52b2ebfdd6cadf1476"
+    },
+    {
+      "bytes": 28428,
+      "path": "scripts/capture_prizepicks_closing_snapshots.py",
+      "sha256": "ff2bad7ffeccf5d1febd38c02ba8fc51d5187d262d09f9a6b40dee642f723d3f"
+    },
+    {
+      "bytes": 3596,
+      "path": "scripts/create_release_boundary.ps1",
+      "sha256": "4972153527ba0723b0861ddd2fc190a70fcf23105e039ba6c8397143dad4a65b"
+    },
+    {
+      "bytes": 35469,
+      "path": "scripts/evaluate_clv_walk_forward.py",
+      "sha256": "70f977cf893362345add348a48ff244d49e5e4fdd82164ab5cf35f8d0ac78e9a"
+    },
+    {
+      "bytes": 9164,
+      "path": "scripts/evaluate_defense_rating_retrain.py",
+      "sha256": "a3ab74e1ab262da5977616a020316954f52e9b2422ecdd313be610f00530aace"
+    },
+    {
+      "bytes": 7256,
+      "path": "scripts/evaluate_probability_under_selection.py",
+      "sha256": "aa6562b036ad0a01901dd2bad5950333fb0e24740b7e2b661885557e751e9d3e"
+    },
+    {
+      "bytes": 14502,
+      "path": "scripts/evaluate_sportsbook_expansion.py",
+      "sha256": "32c3ff9ae937ed53523ddc371995448ffbc90a62194c7102d14879b09d8b2732"
+    },
+    {
+      "bytes": 28470,
+      "path": "scripts/execute_clv_snapshot_manifest.py",
+      "sha256": "5219b68457e9bb00abe49631abc17e3b6c2ae22b8264fae29e66dcd88cd1489f"
+    },
+    {
+      "bytes": 4951,
+      "path": "scripts/fetch_nba_team_game_logs.py",
+      "sha256": "d9120dd0e525a8350e298f9e487cc1fb5456aec2d93dc6d1672d80d86913234b"
+    },
+    {
+      "bytes": 13058,
+      "path": "scripts/market_edge_map.py",
+      "sha256": "7ad087576b288b8a76f5a456a9eea44040e0749abbe64d11013116e795694f73"
+    },
+    {
+      "bytes": 6124,
+      "path": "scripts/project_operator.ps1",
+      "sha256": "8b31961a26ff16ae2d1cb30328600beda2de576dc45bce92911f134c346b423f"
+    },
+    {
+      "bytes": 8737,
+      "path": "scripts/promote_defense_rating_models.py",
+      "sha256": "7b3431f5be30c90f7e4d909b9844c42b4fe4e9caa6b217e8da77c234414140b9"
+    },
+    {
+      "bytes": 5435,
+      "path": "scripts/rebuild_probability_calibrator.py",
+      "sha256": "c155c08995554e1219f7c5c35446e89b551dadd5eb92316fc7367a4f28cf3e52"
+    },
+    {
+      "bytes": 13525,
+      "path": "scripts/recover_zip_assets.py",
+      "sha256": "495d2fc0cce5ca2c1f961d592051b5abc0545fc33b303f21a1211c167714fb09"
+    },
+    {
+      "bytes": 4321,
+      "path": "scripts/repair_clv_game_dates.py",
+      "sha256": "0c20c8cde911088cd958c9877f58a8bf37e3d4fdd6c559d3b4ab0d7f5c72372c"
+    },
+    {
+      "bytes": 2565,
+      "path": "scripts/retrain_updated_models.ps1",
+      "sha256": "fb9e3c2826154d2efc91f426bf7b16810981c44c96b607d81c576df8d7cff4ea"
+    },
+    {
+      "bytes": 40938,
+      "path": "scripts/train_availability_minutes_model.py",
+      "sha256": "d4939d4690958f236ba07502d7002cd1882ef1e2d3058354003e261341ed0f24"
+    },
+    {
+      "bytes": 937,
+      "path": "tests/test_audit_naive_under_baseline.py",
+      "sha256": "2c132a470901ee0d52e30e2f5badf64ced282e410cdf93591784d3750db52a1c"
+    },
+    {
+      "bytes": 3855,
+      "path": "tests/test_availability_minutes_model.py",
+      "sha256": "7589d8ff2fbcd790b2db3fc7da4c3b58ea148c90f03bd067c2a822bbeaf544ed"
+    },
+    {
+      "bytes": 3027,
+      "path": "tests/test_betslip_ev_selection.py",
+      "sha256": "e6a0f48b8d94c866ac10f2d2e3118f160f6a089322b021a0c8cd55324dec3844"
+    },
+    {
+      "bytes": 2663,
+      "path": "tests/test_betslip_view_sync.py",
+      "sha256": "aa53ec6430e348cc86bc6e81fefeb6db45630ab7f4382bece0b4360a1c7da512"
+    },
+    {
+      "bytes": 1343,
+      "path": "tests/test_build_clv_features.py",
+      "sha256": "1aca9908a6468bd225ad4499137b7a75c7b2f4039df3cce6a43450e92430a1cf"
+    },
+    {
+      "bytes": 2397,
+      "path": "tests/test_build_clv_snapshot_manifest.py",
+      "sha256": "d1f5e3a96da05aa940d2fda82341af26dc84ff75b95d0a0baee2d623c3a81b5c"
+    },
+    {
+      "bytes": 1717,
+      "path": "tests/test_build_release_manifest.py",
+      "sha256": "ffe0d3009e02b03cdb416a8ce7ec9f95c3f1a01e1b001c6693bdf1f0dbdb23a2"
+    },
+    {
+      "bytes": 9247,
+      "path": "tests/test_capture_prizepicks_closing_snapshots.py",
+      "sha256": "06c4254b7362e36948a6212b57b1d0337479c0345fe676a4905d2ee0b20a4362"
+    },
+    {
+      "bytes": 2221,
+      "path": "tests/test_chronological_calibration_script.py",
+      "sha256": "654ba9269f735e5b7259e65c8fefeca75e1e89691b0ee27712b95d19c23236c3"
+    },
+    {
+      "bytes": 3654,
+      "path": "tests/test_composite_feature_training_alignment.py",
+      "sha256": "2b8da5f9c349f447ca4406ca8e94058e4ec4c1f40e285161ad9c2f4fe2da2cc2"
+    },
+    {
+      "bytes": 7082,
+      "path": "tests/test_daily_runtime_contracts.py",
+      "sha256": "eeb3b64cfe5c2d9d9c2df17984cc49be54204d7b02346a2d187892861f6daa18"
+    },
+    {
+      "bytes": 2582,
+      "path": "tests/test_evaluate_clv_walk_forward.py",
+      "sha256": "1ef2085e25e880e213e7cb6d2ae9286a63c2dca4a74d54dfaf12bfde46636065"
+    },
+    {
+      "bytes": 1069,
+      "path": "tests/test_evaluate_sportsbook_expansion.py",
+      "sha256": "b79210a4cc4b5a7997a819e2dbf8162095508a53ecab1ea841684ac07196a26d"
+    },
+    {
+      "bytes": 4705,
+      "path": "tests/test_execute_clv_snapshot_manifest.py",
+      "sha256": "3998c519deaade80096e48ac784ed2d44804ad305252b1ce97ec3b367ed6465a"
+    },
+    {
+      "bytes": 3082,
+      "path": "tests/test_injury_feed_merge.py",
+      "sha256": "e9f2a0c121e6237f4237338383af90181d850742aea5d0276f9c7f6b0e01fa01"
+    },
+    {
+      "bytes": 3727,
+      "path": "tests/test_layer_feature_coverage.py",
+      "sha256": "e569d643dea45e600964507a0ee045e9ac7b95032f0c8ffe93209bb40cfa9e6b"
+    },
+    {
+      "bytes": 22957,
+      "path": "tests/test_live_card_selection.py",
+      "sha256": "481a12848e6651c102d2b7b5c96f179d3c3c6a907eaf8a722fe65a85fae76cd3"
+    },
+    {
+      "bytes": 3875,
+      "path": "tests/test_live_training_feature_contract.py",
+      "sha256": "e56278f8d0191cb7b99224078523ba276ceaefc66db09c4bddbfa0928c48d502"
+    },
+    {
+      "bytes": 2003,
+      "path": "tests/test_luck_layer_contract.py",
+      "sha256": "b524502302ae93b96e71435cb4fd9382dcd240e2981c73f35156fe5db334d242"
+    },
+    {
+      "bytes": 2512,
+      "path": "tests/test_model_promotion_contract.py",
+      "sha256": "d3919cc9e6910926bffeb0550fa0e9fd4d1db9a29ce12beae9c87ea488314501"
+    },
+    {
+      "bytes": 3097,
+      "path": "tests/test_pending_team_status_fallback.py",
+      "sha256": "04124b6313b6741627c92ed456a74ba21dd2bec81663762c2bc3193624e53994"
+    },
+    {
+      "bytes": 3390,
+      "path": "tests/test_player_pool_guard.py",
+      "sha256": "9bdf6737c9886801f0deb6e75e164aae9aac0b1018ae603a3b988a757ea5b2ee"
+    },
+    {
+      "bytes": 1780,
+      "path": "tests/test_player_position_cache_contract.py",
+      "sha256": "91b00a46fc68ef5920fbda3832d6bac6b62a0bbcf2bf228142ff8d70171810e2"
+    },
+    {
+      "bytes": 9898,
+      "path": "tests/test_pointintime_team_defense.py",
+      "sha256": "fa70190ad20531c7c80115c0c1bb652bff62648040ae867421834175ddc31ce7"
+    },
+    {
+      "bytes": 4174,
+      "path": "tests/test_postseason_daily_grading.py",
+      "sha256": "7f6d4b26165a3105303387ba5ec3e87fd514c4d4f40f4027e65e0d6fb205a1b2"
+    },
+    {
+      "bytes": 2976,
+      "path": "tests/test_prizepicks_market_gating.py",
+      "sha256": "8a9256712b55b82c00fc211a0f6a5ca16a816ab3b92f131fe52c6bfd7c480493"
+    },
+    {
+      "bytes": 3391,
+      "path": "tests/test_prizepicks_scraper_merge.py",
+      "sha256": "1944bde491dea5163103c72080cd2b70918ade7ff4ccab5691e3a39ef5eb9bfe"
+    },
+    {
+      "bytes": 2250,
+      "path": "tests/test_probability_bundle_contract.py",
+      "sha256": "45a04a5e93f1b48c3e04400ec6458a06bb78668b1ba1dff745f349e42b49b0f3"
+    },
+    {
+      "bytes": 2083,
+      "path": "tests/test_probability_under_selection.py",
+      "sha256": "4939fdd9303d5fdb79c9e6f97f82a1247188c7bff22272b1c8512468f0b9d3c3"
+    },
+    {
+      "bytes": 2182,
+      "path": "tests/test_production_holdout_audit.py",
+      "sha256": "0cd147f240d4492a7c3bcdcc7ed463324f6802083416210ba0878e6c3b61519f"
+    },
+    {
+      "bytes": 3430,
+      "path": "tests/test_prop_availability_training_integration.py",
+      "sha256": "bb05a996beb5a731ce85428fbbf8940b176e1cf783655164d714ee1c91326ead"
+    },
+    {
+      "bytes": 4605,
+      "path": "tests/test_pts_shot_quality_features.py",
+      "sha256": "5674dca19cf70b5920e48f3db7b1a958cc0024a1ec8635711ec91ef4f8c79753"
+    },
+    {
+      "bytes": 1795,
+      "path": "tests/test_quantile_sidecar_model.py",
+      "sha256": "4b4325268468fb5ce0a696fc1cdbb361d98252bfeef5e0e087f2c0484ddafd9a"
+    },
+    {
+      "bytes": 5197,
+      "path": "tests/test_recover_zip_assets.py",
+      "sha256": "5bcf6d2e469a74a7e0e77d085768c6903851e8f9aef07e09646ad5cb35e54931"
+    },
+    {
+      "bytes": 20651,
+      "path": "tests/test_slate_date_handling.py",
+      "sha256": "585b2bcb91802bf7d9cd41580b05e612e476581cb74efb10132ef80897494ab6"
+    },
+    {
+      "bytes": 1470,
+      "path": "tests/test_training_live_feature_parity_audit.py",
+      "sha256": "71a270440e2ae63ff0a6d5f646403efe0d600ee397d4c8ab3cbc97e0168dfe10"
+    },
+    {
+      "bytes": 759,
+      "path": "tests/test_training_recency_weights.py",
+      "sha256": "ad9ec1217a96ce6f3e011a5ce8ce4a26fc4f68e884c53296f53ec0f07e15357b"
+    },
+    {
+      "bytes": 150500,
+      "path": "train_advanced_models.py",
+      "sha256": "a6dc85242090ff2da2200a35451e6a3af1b5964755620edacfb2c7ad25091e3d"
+    },
+    {
+      "bytes": 31515,
+      "path": "usage_injury_model.py",
+      "sha256": "81e40b38333b43382820ef91ae678e1b7084de63967ab896635141f9d081daad"
+    },
+    {
+      "bytes": 66067,
+      "path": "vegas_gui.py",
+      "sha256": "0b4c5f8b5b6d13d18a8659ff9e883c5b1d505d4201b892850057c74b847892f9"
+    }
+  ]
+}

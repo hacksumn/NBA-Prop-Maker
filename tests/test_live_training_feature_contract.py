@@ -47,7 +47,7 @@ def test_upcoming_target_row_uses_latest_completed_game_in_shifted_features():
     history = _history()
     slate_date = pd.Timestamp("2026-01-27")
     schedule = pd.DataFrame(
-        [{"game_id": 999_999, "home_team": "AAA", "away_team": "BBB", "game_date": slate_date}]
+        [{"game_id": "0022600999", "home_team": "AAA", "away_team": "BBB", "game_date": slate_date}]
     )
 
     with_target = nba_props._append_upcoming_prediction_rows(history, slate_date, schedule)
@@ -66,6 +66,7 @@ def test_upcoming_target_row_uses_latest_completed_game_in_shifted_features():
     assert np.isclose(alpha_target["pts_l10"], completed_alpha.tail(10).mean())
     assert alpha_target["game_date"] == slate_date
     assert alpha_target["opp"] == "BBB"
+    assert alpha_target["GAME_ID"] == "0022600999"
 
 
 def test_prediction_cache_is_scoped_to_slate_date():
@@ -83,12 +84,15 @@ def test_active_prop_features_are_overwritten_by_training_pipeline(tmp_path, mon
 
     source = _history()
     live_copy = source.copy()
+    live_copy["GAME_ID"] = live_copy["GAME_ID"].astype(str).str.zfill(10)
     live_copy["pts_ewma5"] = -999.0
     live_copy["pts_confidence"] = -999.0
 
     aligned = nba_props._align_selected_features_to_training_pipeline(live_copy, source)
     canonical = FeaturePipeline(ewma_span=5, split_window=15, min_games=10).fit_transform(source)
     keys = ["GAME_ID", "PLAYER_ID", "team"]
+    canonical["GAME_ID"] = pd.to_numeric(canonical["GAME_ID"]).astype("Int64").astype("string")
+    canonical["PLAYER_ID"] = pd.to_numeric(canonical["PLAYER_ID"]).astype("Int64").astype("string")
     check = aligned[keys + selected["pts"]].merge(
         canonical[keys + selected["pts"]],
         on=keys,

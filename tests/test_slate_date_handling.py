@@ -27,7 +27,9 @@ class SlateDateHandlingTests(unittest.TestCase):
         self.assertFalse(_line_source_policy_allows_publish("", "prizepicks"))
 
     def test_prizepicks_failure_does_not_spend_reserved_odds_credits(self):
-        with patch("nba_props.fetch_prizepicks_lines", return_value=pd.DataFrame()), patch(
+        with patch.dict(
+            "nba_props.CONFIG", {"allow_live_odds_api_spend": False}
+        ), patch("nba_props.fetch_prizepicks_lines", return_value=pd.DataFrame()), patch(
             "nba_props.requests.get"
         ) as odds_get:
             lines, source = fetch_vegas_lines(prefer_prizepicks=True)
@@ -389,8 +391,8 @@ class SlateDateHandlingTests(unittest.TestCase):
         self.assertEqual(len(merged), 2)
         preferred = _select_preferred_line_rows(merged)
         self.assertEqual(len(preferred), 1)
-        self.assertEqual(preferred.loc[0, "source"], "prizepicks_scraper")
-        self.assertEqual(float(preferred.loc[0, "line"]), 8.5)
+        self.assertEqual(preferred.loc[0, "source"], "odds_api_fanduel")
+        self.assertEqual(float(preferred.loc[0, "line"]), 7.5)
 
     def test_historical_line_merge_preserves_intraday_snapshots(self):
         first = pd.DataFrame([{
