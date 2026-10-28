@@ -1976,7 +1976,13 @@ def fetch_nba_data(seasons: List[str] = None, local_file: str = None) -> pd.Data
 ESPN_NBA_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 ESPN_TEAM_ABBR_ALIASES = {
     "GS": "GSW", "NO": "NOP", "NY": "NYK", "SA": "SAS", "UTAH": "UTA",
+    "WSH": "WAS",
 }
+NBA_TEAM_TRICODES = frozenset({
+    "ATL", "BKN", "BOS", "CHA", "CHI", "CLE", "DAL", "DEN", "DET", "GSW",
+    "HOU", "IND", "LAC", "LAL", "MEM", "MIA", "MIL", "MIN", "NOP", "NYK",
+    "OKC", "ORL", "PHI", "PHX", "POR", "SAC", "SAS", "TOR", "UTA", "WAS",
+})
 
 
 def _fetch_espn_games(slate_date: object) -> pd.DataFrame:
@@ -2006,6 +2012,14 @@ def _fetch_espn_games(slate_date: object) -> pd.DataFrame:
         away = _abbr(by_side["away"])
         if not home or not away:
             continue
+        unknown_codes = sorted({home, away} - NBA_TEAM_TRICODES)
+        if unknown_codes:
+            # Fail loudly here: an unmapped code otherwise silently routes the
+            # point-in-time defense build to the incomplete player-box path.
+            raise ValueError(
+                f"ESPN schedule has unmapped team code(s) {unknown_codes}; "
+                f"add them to ESPN_TEAM_ABBR_ALIASES"
+            )
         matchups.append({
             "game_id": event.get("id"),
             "home_team": home,
@@ -10797,6 +10811,24 @@ def main():
                     vegas['num_books'] = active_live['num_books'].values if 'num_books' in active_live.columns else 1
 
         print(f"\nActive slate date: {active_slate_date}")
+
+        # Causal guard: history must end strictly before the slate being predicted.
+        # A re-run after tip-off can pull partial box scores for today's games into
+        # nba_data.csv; those rows would duplicate the synthetic target rows and
+        # leak same-game information into L10/regression/sanity inputs.
+        _slate_cutoff = pd.Timestamp(active_slate_date).normalize()
+        _row_dates = pd.to_datetime(df['game_date'], errors='coerce')
+        _not_prior = _row_dates >= _slate_cutoff
+        if _not_prior.any():
+            _held_games = (
+                df.loc[_not_prior, 'GAME_ID'].nunique() if 'GAME_ID' in df.columns else 'n/a'
+            )
+            print(
+                f"  CAUSAL GUARD: ignoring {int(_not_prior.sum())} history rows dated on/after "
+                f"slate {_slate_cutoff.date()} ({_held_games} games, likely in-progress box scores). "
+                f"nba_data.csv is not modified."
+            )
+            df = df.loc[~_not_prior].reset_index(drop=True)
 
         # Warn loudly when lines did not come from PrizePicks — picks are bet on PrizePicks,
         # so a line source mismatch corrupts the performance-tracking record.

@@ -3581,3 +3581,37 @@ The project had working components but no complete operating loop. Play-by-play 
 The repository can now improve continuously without conflating data collection, candidate training, and production promotion. Better minutes and defense logic are present in the candidate path and must earn promotion on future executable FanDuel observations. A null candidate result is retained as evidence rather than hidden, and scheduled collection continues regardless of whether the current candidate wins.
 
 ---
+
+## DEC-062 — Add a Same-Day History Causal Guard and Harden the ESPN Schedule Fallback
+
+- **Date:** 2026-10-28
+- **Status:** Implemented in `nba_props.py`; syntax and offline simulation checks passed; full `PicksNow` re-run pending
+- **Decision owner:** Jake
+
+### Context
+
+Two consecutive live runs failed after the 2026-10-27 card was published (2 picks: Wembanyama STL UNDER 1.5, Harper AST UNDER 4.5; both later graded LOSS).
+
+1. **2026-10-27 19:58 CT.** `nba_props.py predict` stopped with `Canonical feature alignment has duplicate keys: ['GAME_ID', 'PLAYER_ID', 'team']`. The step-1 game-log refresh ran after tip-off and wrote partial in-progress box scores for three of the day's games (GAME_IDs 22600128, 22600129, 22600130; 40 rows) into `data/nba_data.csv`. `predict` appends one synthetic target row per player for the slate, so those players had two rows for the same GAME_ID/PLAYER_ID/team. The existing duplicate-key check stopped the run, which was the correct fail-closed behavior; merging the rows would have leaked same-game information into the features.
+2. **2026-10-28 03:12 CT.** `predict` got past feature alignment and then stopped in the point-in-time defense build with `ValueError: Player box-score ORB is incomplete`. NBA Stats schedule returned no data, so the ESPN fallback was used (12 games). `build_live_matchup_ratings` uses `data/nba_team_game_logs.csv` only when every scheduled team is one of the 30 known tricodes; otherwise it falls back to player box scores, where every 2026-27 row has a null ORB (1,275 of 1,275 rows). `data/nba_team_game_logs.csv` contains all 30 teams, so the fallback can only have been triggered by an ESPN team code outside the 30. `ESPN_TEAM_ABBR_ALIASES` mapped GS, NO, NY, SA and UTAH but had no entry for WSH (Washington), which is the most likely unmapped code. The exact ESPN code was not directly observed (ESPN was not reachable from the analysis environment), so this is an inference from the code path.
+
+### Decision and Implementation
+
+1. In the `predict` command, immediately after the active slate date is resolved, drop every `nba_data.csv` row dated on or after that slate date before any downstream use (`generate_predictions`, `compute_regression_candidates`, `sanity_check_picks`, `build_live_pick_card`). The guard prints `CAUSAL GUARD: ignoring N history rows dated on/after slate ...` when it acts. `data/nba_data.csv` is not modified, and nothing changes when no same-day rows exist.
+2. Add `"WSH": "WAS"` to `ESPN_TEAM_ABBR_ALIASES`.
+3. Add `NBA_TEAM_TRICODES` (the 30 canonical tricodes) and make `_fetch_espn_games` raise `ValueError: ESPN schedule has unmapped team code(s) [...]` for any code outside it, so an unmapped code fails with a direct message instead of misrouting the defense build to the incomplete player-box path.
+4. No change to gating, ranking, per-prop caps, confidence thresholds, or betslip construction.
+
+### Evidence and Outcome
+
+- Staged `data/nba_data.csv` (82,340 rows) contained 94 rows dated on/after 2026-10-27 across 4 games. For slate 2026-10-27 the guard removed exactly 40 rows from 3 games with zero of those GAME_IDs remaining in history; a simulation of the failure produced 40 duplicate keys without the guard and 0 with it.
+- The 30-code list matches the distinct `TEAM_ABBREVIATION` values in `data/nba_team_game_logs.csv` exactly. A simulated ESPN-style code list maps entirely into the 30 with the new alias; without it `WSH` is the only unmapped code.
+- `python -m py_compile nba_props.py` passes; the causal guard from item 1 is still present after the item 2-3 edits.
+- Not verified: a full `PicksNow` run with these changes. Whether WSH was the specific failing code is unconfirmed until the next run succeeds or the new unmapped-code message names another one.
+- Backup of the pre-guard file: `nba_props.py.bak_before_causal_guard` (repository root).
+
+### Consequences
+
+A late re-run on a slate day can no longer leak partial same-day box scores into features or duplicate target rows, and ESPN schedule problems now fail with an explicit message. Operationally, a re-run after tip-off still produces a card from late FanDuel lines, so lines for started games must be checked before betting. Tomorrow's morning refresh refetches the 2026-27 season and is expected to replace the partial rows once the games are final (not yet confirmed).
+
+---
