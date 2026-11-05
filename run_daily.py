@@ -328,6 +328,26 @@ def _fail(msg: str):
     logger.error(f"  [FAIL] {msg}")
 
 
+def _save_timestamped_snapshot(df, stem: str):
+    """Keep a never-overwritten, timestamped copy of a 'latest' file (DEC-070).
+
+    ``data/<stem>.csv`` is replaced each run for downstream readers; this preserves
+    every observation under ``data/snapshots/<stem>/<stem>_<YYYYMMDD_HHMMSS>.csv``.
+    Failure only warns; it never blocks the run.
+    """
+    try:
+        if df is None or len(df) == 0:
+            return None
+        folder = DATA_DIR / "snapshots" / stem
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        _atomic_csv(df, path)
+        return path
+    except Exception as exc:
+        logger.warning(f"  Could not save {stem} snapshot: {exc}")
+        return None
+
+
 class _StdoutToLog(io.TextIOBase):
     """File-like sink that forwards each complete printed line to the run logger.
 
@@ -1807,6 +1827,7 @@ def step6_usage_injury(errors, season=None):
             absence_df = pd.DataFrame(all_absences)
             absence_out = DATA_DIR / "detected_absences.csv"
             absence_df.to_csv(absence_out, index=False)
+            _save_timestamped_snapshot(absence_df, "detected_absences")
             _ok(f"Detected {len(absence_df)} potential absences/injuries → {absence_out.name}")
         else:
             _ok("No new absences detected")
@@ -1822,6 +1843,7 @@ def step6_usage_injury(errors, season=None):
         live_injury_df = _flatten_live_injury_status(live_injuries, fetched_at=fetched_at)
         _atomic_json(live_injuries, LIVE_INJURY_JSON)
         _atomic_csv(live_injury_df, LIVE_INJURY_CSV)
+        _save_timestamped_snapshot(live_injury_df, "live_injury_status")
         player_rows = int((live_injury_df["player_norm"] != "").sum()) if len(live_injury_df) > 0 else 0
         team_rows = int(live_injury_df["team_abbr"].nunique()) if len(live_injury_df) > 0 else 0
         pending_teams = int(

@@ -80,15 +80,23 @@ def main() -> int:
     args = parser.parse_args()
     output = fetch_team_game_logs(args.seasons, request_pause=args.request_pause)
     if args.output.exists() and not args.replace_all:
+        # Append-only (DEC-070): keep every stored team-game; refreshed rows replace
+        # only the same GAME_ID + TEAM_ABBREVIATION via the keep="last" dedup below,
+        # so a partial API response can never remove stored games.
         existing = pd.read_csv(args.output, low_memory=False)
-        if "season" in existing.columns:
-            existing = existing[~existing["season"].astype(str).isin(args.seasons)]
+        # The CSV stores GAME_ID as an integer (leading zeros lost) while the API
+        # returns a zero-padded string; normalize both so the dedup key matches.
+        for frame in (existing, output):
+            frame["GAME_ID"] = pd.to_numeric(frame["GAME_ID"], errors="raise").astype("int64")
+        stored_rows = len(existing)
         output = pd.concat([existing, output], ignore_index=True)
         output = (
             output.drop_duplicates(["GAME_ID", "TEAM_ABBREVIATION"], keep="last")
             .sort_values(["GAME_DATE", "GAME_ID", "TEAM_ABBREVIATION"])
             .reset_index(drop=True)
         )
+        if len(output) < stored_rows:
+            raise RuntimeError("append-only guard: nba_team_game_logs.csv would shrink; nothing written")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.output.with_suffix(args.output.suffix + ".tmp")
     output.to_csv(temporary, index=False)

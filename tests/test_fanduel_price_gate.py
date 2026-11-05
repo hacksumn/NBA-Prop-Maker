@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -125,7 +126,10 @@ class TrackingOnlyLogTests(unittest.TestCase):
         try:
             with TemporaryDirectory() as tmpdir:
                 nba_props.CONFIG["output_dir"] = Path(tmpdir)
-                out = nba_props._log_tracking_only_props(pred, lines, "2026-11-01")
+                # Pin the clock before the fixture's 2026-11-02T01:40Z tip-off: leans for
+                # games already started are not recorded (DEC-070).
+                with patch("nba_props._utc_now", return_value=pd.Timestamp("2026-11-01T18:00:00Z")):
+                    out = nba_props._log_tracking_only_props(pred, lines, "2026-11-01")
                 saved = pd.read_csv(Path(tmpdir) / "tracking_only_history.csv")
                 self.assertFalse((Path(tmpdir) / "picks_history.csv").exists())
         finally:

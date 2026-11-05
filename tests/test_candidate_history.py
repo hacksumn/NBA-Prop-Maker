@@ -77,7 +77,8 @@ class LogCandidateHistoryTests(unittest.TestCase):
         self.assertEqual(len(hist), 1)
         self.assertEqual(hist.loc[0, "gate_bucket"], "published")
 
-    def test_upsert_keeps_absent_rows_and_published_is_sticky(self):
+    def test_first_record_is_kept_absent_rows_stay_and_published_is_sticky(self):
+        # DEC-070: append-only. A later run never rewrites the first pre-tip record.
         nba_props._log_candidate_history(
             pd.DataFrame([_candidate("A"), _candidate("B")]), pd.DataFrame([_candidate("A")]),
             "2026-11-04", now_utc=self.pre_tip,
@@ -90,7 +91,20 @@ class LogCandidateHistoryTests(unittest.TestCase):
         self.assertEqual(sorted(hist.index), ["A", "B"])
         self.assertEqual(hist.loc["A", "published"], "True")
         self.assertEqual(hist.loc["A", "gate_bucket"], "published")
-        self.assertEqual(hist.loc["A", "price_gate_reason"], "EV moved")
+        self.assertEqual(hist.loc["A", "price_gate_reason"], "")  # first record kept as stored
+
+    def test_later_run_can_only_promote_to_published(self):
+        nba_props._log_candidate_history(
+            pd.DataFrame([_candidate("A")]), pd.DataFrame(), "2026-11-04", now_utc=self.pre_tip,
+        )
+        nba_props._log_candidate_history(
+            pd.DataFrame([_candidate("A")]), pd.DataFrame([_candidate("A")]),
+            "2026-11-04", now_utc=self.pre_tip + pd.Timedelta(hours=1),
+        )
+        hist = self._read()
+        self.assertEqual(len(hist), 1)
+        self.assertEqual(hist.loc[0, "published"], "True")
+        self.assertEqual(hist.loc[0, "gate_bucket"], "published")
 
     def test_graded_rows_are_never_modified(self):
         nba_props._log_candidate_history(

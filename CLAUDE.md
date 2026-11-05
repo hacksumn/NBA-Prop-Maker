@@ -32,6 +32,7 @@ Do not rely on old chat context when they disagree with prior conversation histo
 - Never optimize for backtest aesthetics over deployable forward realism.
 - Never mark work complete without verification.
 - Never delete decision history from DECISIONS.md.
+- Never delete or overwrite saved data. History/data files are append-only (`nba_props._append_only_history`); reruns may only add rows. Refreshed sources merge by key and must never shrink. Snapshot "latest" files must also keep a timestamped copy. Deleting data is Jake's decision only (DEC-070).
 
 ## Required Workflow
 For any non-trivial task:

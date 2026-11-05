@@ -4,6 +4,10 @@
 
 ## NOW
 
+- [x] **[DEC-070] Make every data/history write append-only and restore lost rows.** 9 paths fixed; 70 picks + 116 slips restored; `tests/test_append_only_history.py` (8); `scripts/recover_lost_history_rows.py`.
+- [ ] **[VERIFY — DEC-070] Next morning run: confirm Step 1.5/1.6 grade the restored rows and Step 9 logs `+N new, M already recorded`.**
+- [ ] **[DECISION — DEC-070] Decide whether restored (`history_source=archive_recovered`) picks/slips count in headline performance figures.**
+
 - [x] **[DEC-069] Log and grade every final candidate, including gated-out ones.** `output/candidates_history.csv` + Step 1.8; `tests/test_candidate_history.py` (9).
 - [ ] **[VERIFY — DEC-069] After the next morning run, confirm Step 9 logs `Candidate history: N candidate(s) logged`, and the following morning confirm Step 1.8 grades them.**
 - [ ] **[OPTIONAL — DEC-069] Apply the same pre-tip rule to `tracking_only_history.csv`,** which currently lets a post-tip rerun replace the morning PTS leans.

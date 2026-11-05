@@ -1690,6 +1690,62 @@ def _atomic_text(text: str, path: Path) -> None:
 PICKS_HISTORY_KEY = ['game_date', 'player', 'prop', 'direction', 'line']
 
 
+def _count_csv_rows(path: Path) -> int:
+    """Count data rows in a CSV without loading it (handles quoted newlines via pandas chunks)."""
+    total = 0
+    for chunk in pd.read_csv(path, usecols=[0], chunksize=200_000, low_memory=False):
+        total += len(chunk)
+    return total
+
+
+def _backup_before_shrink(path: Path, new_row_count: int) -> Optional[Path]:
+    """If writing ``new_row_count`` rows would shrink ``path``, copy the current file first.
+
+    DEC-070: the pipeline never decides to delete stored data. When a rewrite of a
+    store would hold fewer rows (e.g. two name spellings collapsing to one key),
+    the full prior file is preserved under ``<dir>/backups/`` and a !!! warning is
+    printed so the operator decides what to keep.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    old_rows = _count_csv_rows(path)
+    if new_row_count >= old_rows:
+        return None
+    backup_dir = path.parent / 'backups'
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / f"{path.stem}_before_shrink_{datetime.now().strftime('%Y%m%d_%H%M%S')}{path.suffix}"
+    import shutil
+    shutil.copy2(path, backup)
+    print(
+        f"  !!! {path.name}: rewrite holds {new_row_count:,} rows vs {old_rows:,} stored "
+        f"({old_rows - new_row_count:,} fewer). Full prior file preserved -> {backup} !!!"
+    )
+    return backup
+
+
+def _save_nba_data_preserving(df: pd.DataFrame, data_path: Path) -> pd.DataFrame:
+    """Merge fetched game logs into nba_data.csv without dropping stored rows (DEC-070).
+
+    The ``update``/``train``/``full`` commands fetch a fixed season list; writing
+    that frame directly would erase every other season (including the live one).
+    Stored rows are kept; fetched rows replace only the same PLAYER_ID + GAME_ID.
+    Fails loudly if the fetched frame lacks those key columns.
+    """
+    from nba_scraper import merge_game_logs_preserving
+    data_path = Path(data_path)
+    if data_path.exists():
+        existing = pd.read_csv(data_path, dtype=str, low_memory=False)
+        merged = merge_game_logs_preserving(existing, df.astype(str))
+    else:
+        merged = df
+    _atomic_csv(merged, data_path)
+    reloaded = pd.read_csv(data_path, low_memory=False)
+    if 'game_date' in reloaded.columns:
+        reloaded['game_date'] = pd.to_datetime(reloaded['game_date'], errors='coerce')
+    return reloaded
+
+
 def _betslip_history_key(frame: pd.DataFrame) -> pd.Series:
     """Key a betslip by date, slip type and its sorted set of legs (order-independent)."""
     def _one(row) -> str:
@@ -2031,12 +2087,14 @@ def _write_historical_lines(df: pd.DataFrame, path: Optional[Path] = None) -> Pa
         date_col='game_date',
         player_norm_col='player_norm',
         data_dir=CONFIG['data_dir'],
-        drop_unknown=True,
+        # DEC-070: never drop stored rows for unrecognized names; keep them as-is.
+        drop_unknown=False,
         require_roster=False,
     )
     # Canonicalization can merge formerly distinct name spellings into the same
     # store key, so enforce idempotence again after the name pass.
     clean = _normalize_historical_lines_frame(clean)
+    _backup_before_shrink(Path(path), len(clean))
     _atomic_csv(clean, Path(path))
     if summary['canonicalized_rows'] or summary['dropped_rows']:
         print(
@@ -10723,6 +10781,8 @@ def _log_candidate_history(candidates: pd.DataFrame,
             f"(published {counts.get('published', 0)}, blocked by price "
             f"{counts.get('blocked_price', 0)}, blocked by other gates "
             f"{counts.get('blocked_other', 0)}"
+            + f"; +{n_added} new, {n_already} already recorded"
+            + (f", {promoted} marked published" if promoted else "")
             + (f"; {skipped_started} skipped, game already started" if skipped_started else "")
             + f") -> {path.name}  [TRACKING ONLY]"
         )
@@ -11459,7 +11519,7 @@ def main():
         else:
             df = fetch_nba_data(seasons=['2025-26', '2024-25', '2023-24'])
 
-        df.to_csv(data_path, index=False)
+        df = _save_nba_data_preserving(df, data_path)
         print(f"\nData saved to {data_path}")
         print(f"Total rows: {len(df):,}")
 
@@ -11478,7 +11538,7 @@ def main():
         if not data_path.exists():
             print("No data found. Running 'update' first...")
             df = fetch_nba_data(seasons=['2025-26', '2024-25', '2023-24'])
-            df.to_csv(data_path, index=False)
+            df = _save_nba_data_preserving(df, data_path)
         else:
             df = pd.read_csv(data_path, parse_dates=['game_date'])
         
@@ -11822,7 +11882,7 @@ def main():
         else:
             df = fetch_nba_data(seasons=['2025-26', '2024-25', '2023-24'])
         
-        df.to_csv(data_path, index=False)
+        df = _save_nba_data_preserving(df, data_path)
         
         print("\n[2/4] Creating features...")
         df = create_features(df)

@@ -3856,3 +3856,47 @@ Jake wants a forward record of the model's final candidates even when the last g
 - No backfill is possible: past candidate sets were never archived. The record starts with the next pre-tip run.
 - `tracking_only_history.csv` still replaces a whole slate on every run, so a post-tip rerun overwrites the morning PTS leans (it did on 2026-11-04 at 23:17). Same pre-tip rule could be applied there; not changed.
 - Interpretation: compare `blocked_price` hit rate and ROI against `published`. Sample sizes will be small for weeks; do not loosen gates without a time-respecting before/after comparison.
+
+## DEC-070 — Data Is Never Deleted: History Files Are Append-Only; Lost Picks and Slips Restored
+
+- **Date:** 2026-11-05
+- **Status:** Implemented, recovery applied, verified. Standing rule (also in CLAUDE.md Non-Negotiable Rules).
+- **Decision owner:** Jake
+
+### Context
+
+Jake: "All data should be saved and it should be left up to me what's deleted." An audit of every write in the daily pipeline found code that deleted saved data:
+
+1. `save_picks` replaced every row for the slate in `output/picks_history.csv` with only the current run's picks (`existing[existing['game_date'] != slate_date]`). Comparing all timestamped archive run copies with the history found **70 published picks across 19 slates** erased by later same-day reruns, including 2026-10-31 and 2026-11-01.
+2. `log_betslips` did the same to `output/betslips_history.csv`; a zero-slip rerun wiped the whole slate (04-11, 04-14, 05-07, 05-11 had no slips left), and `reindex(columns=col_order)` dropped unlisted columns. **116 slips** recovered.
+3. `_log_tracking_only_props` replaced the slate in `tracking_only_history.csv`.
+4. `_log_candidate_history` (DEC-069) replaced rows on key match.
+5. `nba_scraper.incremental_update` deleted all current-season rows of `data/nba_data.csv` before adding the API pull (a partial response would shrink the file); `--full-refresh` overwrote other seasons.
+6. `nba_props.py update|train|full` wrote a hardcoded 2023-24..2025-26 fetch over `nba_data.csv`, erasing 2026-27.
+7. `scripts/fetch_nba_team_game_logs.py` deleted the refreshed season's rows before merging.
+8. `_write_historical_lines` re-sanitized the whole store with `drop_unknown=True` (0 rows dropped to date, but could drop stored rows).
+9. `live_injury_status.csv` and `detected_absences.csv` were overwritten with no history.
+
+Unaffected: timestamped archive copies (never rewritten), `*_latest` working files, derived reports, protected model artifacts, `historical_lines.csv` append/dedup on a key including `snapshot_ts`.
+
+### Decision and Implementation
+
+- New `nba_props._append_only_history(path, rows, key)`: existing rows and columns are never deleted or modified; rows are added only when their key is new; new columns are added blank for old rows; raises if the result would shrink. Keys: `PICKS_HISTORY_KEY` (game_date, player, prop, direction, line, normalized) and `_betslip_history_key` (date, slip_type, order-independent legs).
+- Items 1-4 use it. New `published_at` column on picks/betslips history. Zero-slip runs leave betslips_history untouched. Tracking-only leans for games already started are not recorded. Candidate history keeps the first pre-tip record; the only in-place change allowed is promoting an ungraded row to `published=True`.
+- Items 5-6: `nba_scraper.merge_game_logs_preserving` keeps every stored row and replaces only the same PLAYER_ID+GAME_ID (final box score superseding an in-progress one); empty responses change nothing; atomic write. `_save_nba_data_preserving` routes the `update/train/full` commands through it.
+- Item 7: merge keeps all stored team-games; GAME_ID normalized to int on both sides (CSV loses leading zeros) so the keep-last dedup matches; shrink guard. `--replace-all` remains an explicit operator choice.
+- Item 8: whole-store sanitize uses `drop_unknown=False`; `_backup_before_shrink` copies the full prior file to `data/backups/` with a `!!!` warning before any rewrite that would hold fewer rows.
+- Item 9: `run_daily._save_timestamped_snapshot` keeps `data/snapshots/<stem>/<stem>_<stamp>.csv` each run.
+- Recovery: `scripts/recover_lost_history_rows.py` (dry run by default; additive; idempotent) appended 70 picks (1,556 -> 1,626) and 116 slips (160 -> 276) from the archive run copies, tagged `history_source=archive_recovered`, `published_at` = run-copy time, `recovered_from` = source file. Step 1.5/1.6 will grade them on the next run, which will change reported historical win rates; filter on `history_source` to exclude them.
+
+### Verification
+
+- Backup before any change: `output/backups/before_append_only_20261105_041553/` (all affected data and code files).
+- Original 1,556 picks and 160 slips are byte-identical after recovery (rows and original columns compared to the backup); re-running recovery finds nothing.
+- Real `nba_data.csv` (83,794 rows): re-merging the current season, a 100-row partial response, and an empty response all leave 83,794 rows (old code: a partial response would have cut it to ~81,165).
+- `pytest -q tests`: 223 passed (new `tests/test_append_only_history.py`, 8). Preflight clean, 56 protected artifacts hashed.
+
+### Operator Decisions
+
+- Whether restored rows should count in headline performance figures (they are flagged).
+- Whether to remove any data; the pipeline never will.

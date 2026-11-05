@@ -206,13 +206,8 @@ def incremental_update(existing_path: str, seasons: list[str] | None = None) -> 
     if os.path.exists(existing_path):
         logger.info(f"Existing data found at {existing_path}. Running incremental update ...")
         existing = pd.read_csv(existing_path, dtype=str)
-
-        # Drop current season rows (will be replaced with fresh pull)
-        historical = existing[existing["season"] != current_season].copy()
-        logger.info(f"  -> Kept {len(historical):,} historical rows from prior seasons")
-
         fresh = fetch_season(current_season)
-        combined = pd.concat([historical, fresh], ignore_index=True)
+        combined = merge_game_logs_preserving(existing, fresh)
     else:
         logger.info("No existing data found. Performing full 3-season pull (this may take ~60s) ...")
         combined = fetch_all_seasons(seasons)
@@ -222,21 +217,69 @@ def incremental_update(existing_path: str, seasons: list[str] | None = None) -> 
     return combined
 
 
+def _player_game_key(frame: pd.DataFrame) -> pd.Series:
+    """Normalized PLAYER_ID|GAME_ID key (handles str vs int dtypes and leading zeros)."""
+    def _norm(col):
+        raw = frame[col].astype(str).str.strip()
+        numeric = pd.to_numeric(raw, errors="coerce")
+        return numeric.map(lambda v: "" if pd.isna(v) else str(int(v))).where(numeric.notna(), raw)
+    return _norm("PLAYER_ID") + "|" + _norm("GAME_ID")
+
+
+def merge_game_logs_preserving(existing: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+    """Merge freshly fetched box scores into the stored dataset without losing rows (DEC-070).
+
+    Every stored row is kept. A fresh row replaces a stored row only for the same
+    PLAYER_ID + GAME_ID (e.g. a final box score superseding an in-progress one);
+    all other fresh rows are added. A partial or empty API response therefore can
+    never shrink the dataset. No column is dropped.
+    """
+    if fresh is None or len(fresh) == 0:
+        logger.warning("  -> API returned no rows; stored game logs kept unchanged")
+        return existing.copy()
+    for col in ("PLAYER_ID", "GAME_ID"):
+        if col not in existing.columns or col not in fresh.columns:
+            raise ValueError(f"game-log merge needs {col} in both stored and fetched data")
+    fresh = fresh.copy()
+    fresh_keys = set(_player_game_key(fresh))
+    existing_keys = _player_game_key(existing)
+    replaced = existing_keys.isin(fresh_keys)
+    kept = existing[~replaced]
+    combined = pd.concat([kept, fresh], ignore_index=True)
+    new_rows = len(fresh) - int(replaced.sum())
+    logger.info(
+        f"  -> Kept all {len(existing):,} stored rows ({int(replaced.sum()):,} refreshed in place "
+        f"by the same player+game), added {new_rows:,} new rows"
+    )
+    if len(combined) < len(existing):
+        raise RuntimeError("append-only guard: nba_data.csv would shrink; nothing written")
+    return combined
+
+
 def save_game_logs(output_path: str = "data/nba_data.csv",
                    incremental: bool = True,
                    seasons: list[str] | None = None) -> str:
     """
     Main entry point.  Fetches game logs and saves to output_path.
     Returns the absolute path of the saved file.
+
+    Both modes preserve every stored row (DEC-070): a full refresh re-fetches the
+    requested seasons and merges them in; it never discards other seasons.
     """
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
 
     if incremental:
         df = incremental_update(output_path, seasons)
     else:
-        df = fetch_all_seasons(seasons)
+        fetched = fetch_all_seasons(seasons)
+        if os.path.exists(output_path):
+            df = merge_game_logs_preserving(pd.read_csv(output_path, dtype=str), fetched)
+        else:
+            df = fetched
 
-    df.to_csv(output_path, index=False)
+    tmp_path = output_path + ".tmp"
+    df.to_csv(tmp_path, index=False)
+    os.replace(tmp_path, output_path)
     logger.info(f"Game logs saved -> {output_path}  ({len(df):,} total rows)")
     return os.path.abspath(output_path)
 
