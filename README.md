@@ -124,6 +124,11 @@ set PRIZEPICKS_CHROME_PROFILE=C:\Users\<YourUsername>\AppData\Local\Google\Chrom
 
 ### 3. Run Daily Operations
 
+The Odds API key is read from the `ODDS_API_KEY` environment variable; do not put
+the key in source code or commit it. In Windows, add a user environment variable
+named `ODDS_API_KEY` with your rotated key under **Edit environment variables for
+your account**, then restart the terminal before running the pipeline.
+
 ```bash
 # Full morning run (recommended)
 python run_daily.py

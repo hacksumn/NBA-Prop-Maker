@@ -21,8 +21,19 @@
       "probability_holdout_summary": "output/full_layers_20261027_150127_probability_holdout_summary.json",
       "same_row_oof_summary": "output/full_layers_20261027_150127_same_row_oof_summary.json",
       "status": "shadow_pending_future_results"
+    },
+    {
+      "candidate_id": "full_layers_20261101_150748",
+      "created_at": "2026-11-01T15:16:44.206965-06:00",
+      "future_holdout_start": "2026-11-02",
+      "minimum_dates": 15,
+      "minimum_rows": 100,
+      "model_dir": "models/weekly_candidates/full_layers_20261101_150748",
+      "probability_holdout_summary": "output/full_layers_20261101_150748_probability_holdout_summary.json",
+      "same_row_oof_summary": "output/full_layers_20261101_150748_same_row_oof_summary.json",
+      "status": "retained_not_active_existing_shadow_in_progress"
     }
   ],
-  "updated_at": "2026-10-27T15:17:12.178211-05:00",
+  "updated_at": "2026-11-01T15:16:44.206965-06:00",
   "version": 1
 }

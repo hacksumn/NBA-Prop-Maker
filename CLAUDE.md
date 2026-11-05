@@ -17,6 +17,10 @@ Before doing meaningful work, read these files first:
 - TASKS.md
 - DECISIONS.md
 
+Where the live versions are: `output/STATUS.md`, `output/TASKS.md`, and `output/DECISIONS.md`.
+`DECISIONS.md` exists only in `output/`. The root `STATUS.md` and `TASKS.md` are the 2026-08-23
+snapshot and point to the `output/` files; read the `output/` versions for current state.
+
 Treat those files as canonical memory.
 Do not rely on old chat context when they disagree with prior conversation history.
 

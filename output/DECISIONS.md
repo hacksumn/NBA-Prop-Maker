@@ -3615,3 +3615,244 @@ Two consecutive live runs failed after the 2026-10-27 card was published (2 pick
 A late re-run on a slate day can no longer leak partial same-day box scores into features or duplicate target rows, and ESPN schedule problems now fail with an explicit message. Operationally, a re-run after tip-off still produces a card from late FanDuel lines, so lines for started games must be checked before betting. Tomorrow's morning refresh refetches the 2026-27 season and is expected to replace the partial rows once the games are final (not yet confirmed).
 
 ---
+
+## DEC-063 — Preflight Full-Slate Spend and Never Report a Blocked Watcher as Complete
+
+- **Date:** 2026-10-28
+- **Status:** Implemented and verified
+- **Decision owner:** Jake
+
+### Context
+
+At 17:59 the guarded `PicksNow` workflow failed with `no current fanduel player-prop lines returned`. That message was false as a diagnosis. `historical_lines.csv` already contained 1,626 October 28 FanDuel rows over 12 events, with snapshots at 03:13, 03:30, and 08:34; the 08:43 pipeline had successfully published Josh Hart AST UNDER 4.5. The active Odds API headers reported 452 credits used and 48 remaining, proving the configured key has 500 total credits rather than the expected 100,000-credit tier.
+
+The same account condition broke the closing-capture promise. The noon watcher planned 24 event windows, reached the configured 100-credit reserve before its first October 28 paid request, captured zero windows, and nevertheless returned `status: complete`. Separately, two full-slate pulls at 03:13 and 03:30 were only 17 minutes apart, so the pipeline had no protection against accidental rapid repurchase.
+
+### Decision
+
+1. Before the first paid event request, calculate a conservative complete-slate ceiling as event count multiplied by requested market count. Require that ceiling plus the configured provider reserve. If the balance is insufficient, raise a dedicated `OddsApiBudgetError` with remaining credits, events, markets, request ceiling, reserve, and total required. Send zero paid event requests.
+2. Retain the 100-credit live reserve. Do not solve insufficient balance by silently spending through it or by returning a partial event slate.
+3. Reuse an exact-date, same-book snapshot captured within the prior 30 minutes. Log the row count and age explicitly. This prevents an immediate repeated `PicksNow` call from repurchasing the same board.
+4. Do not silently call a many-hour-old morning board fresh. A current paid refresh failure still blocks `PicksNow`; `PredictCached` is the explicit operator choice for no-spend cached scoring.
+5. Closing watchers must report `blocked_provider_reserve`, `blocked_daily_credit_cap`, or `incomplete_windows` and include planned, completed, blocked, and pending window counts plus the provider balance. `complete` is permitted only when no planned window remains pending.
+
+### Evidence
+
+- Real free endpoint preflight: 48 remaining; 12 events x 9 markets = 108-credit conservative ceiling; 100-credit reserve; 208 required; zero paid event requests sent.
+- October 28 retained data: 1,626 FanDuel rows, 132 players, 12 events; latest snapshot 08:34 local.
+- October 28 valid morning card remains present: Josh Hart AST UNDER 4.5, prediction 3.8, confidence 61.1.
+- Focused spend/watcher/runtime tests: `23 passed, 1 subtest passed`.
+- Full repository suite: `162 passed, 330 warnings, 1 subtest passed`.
+- Protected production models were not changed.
+
+### Consequences
+
+The pipeline can no longer burn another full slate during a short accidental rerun, begin a paid slate it cannot finish, hide reserve exhaustion behind a generic empty-lines error, or claim that a zero-capture watcher completed successfully. The remaining blocker is external and measurable: the configured key needs the intended paid-tier balance before full morning plus T-60/T-5 collection can resume.
+
+---
+
+## DEC-064 — Gate FanDuel Picks on the Exact Offered Price; Fix Season Stage, Opponent, and Slip Probability Defects
+
+- **Date:** 2026-11-01
+- **Status:** Implemented and verified; first live card produced under the gate
+- **Decision owner:** Jake
+
+### Context
+
+The operator reported picks on props that did not look bettable (e.g. an unfamiliar player's STL under) and asked why PTS is never picked. Investigation of the 2026-11-01 card (Darius Garland STL UNDER 1.5, Brandon Williams AST UNDER 3.5) found:
+
+1. Both lines were real FanDuel contracts from the 06:38 Odds API snapshot, but `predict` dropped `over_price`/`under_price`/`commence_time` when building the line frame. Every pick was judged against the PrizePicks 2-pick break-even `(1/3)^0.5 = 57.74%` regardless of price. Garland UNDER was priced -240 (70.6% break-even); the model's 72% was treated as a 77%-confidence edge.
+2. `_coerce_pick_side_probability` read `dir_prob` (stored as a percentage, e.g. 72.0) as a fraction and clipped it to 0.99, so every betslip leg was scored as near-certain.
+3. `_infer_season_stage` labeled any slate after the last logged game as `play_in`/`playoffs`. During the regular season the last logged game is always yesterday, so every regular-season slate (including 2026-11-01) was ranked with postseason weights.
+4. Prediction rows did not carry `opp`, so `opponent` was blank on every pick.
+5. Betslips used PrizePicks Power Play multipliers and grading, which do not describe FanDuel parlays.
+6. PTS is not blocked by a hard-coded rule: the evidence policy rejects it (real-line shrunk accuracy 50.2% on 6,950 rows, meta AUC 0.50). PRA/PR/PA/TRB are rejected for the same reason; only AST/STL/BLK UNDER are allowed.
+
+### Decision and Implementation
+
+1. `_attach_live_market_prices` matches each candidate to its exact FanDuel row on (raw-name normalized player, prop, line) and adds `over_price`, `under_price`, `side_price`, `side_decimal_odds`, `no_vig_side_prob`, `model_side_prob`, `ev_per_unit`, `commence_time`, `event_id`, `line_snapshot_ts`, `price_gate_pass`, `price_gate_reason`. In FanDuel mode `break_even_prob` is the vig-inclusive implied probability of the chosen side and `exceeds_ev_threshold` equals `price_gate_pass` (semantics change from the PrizePicks value; columns unchanged).
+2. Publication requires a paired price on both sides, a known start time in the future, side price no worse than `live_max_favorite_american = -200`, and `ev_per_unit >= live_min_ev_per_unit = 0.03`. The filter is applied before the tier cascade because lower tiers bypass the accuracy gates. The -200 cap exists because at heavy juice a few points of calibration error flips the EV sign; it is a risk control, not evidence.
+3. `_coerce_pick_side_probability` divides percentage inputs by 100.
+4. Postseason context requires April–June and at least a two-day gap after the last logged game.
+5. Prediction rows carry `opp`; picks now show the opponent.
+6. FanDuel-mode betslips are cross-game parlays priced as the product of leg decimal odds; same-event legs and unpriced legs are rejected (FanDuel prices same-game parlays with its own correlation adjustment). `betslips_history.csv` gains trailing `Pick_1..4_Price` columns; slip types are `N-pick FanDuel Parlay` / `N-pick FanDuel UNDER Parlay`. `run_daily.py` step 1.6 grades priced slips as FanDuel parlays (push/DNP legs drop out); legacy unpriced rows keep Power Play grading.
+7. PTS stays blocked for betting. `live_tracking_only_props = ['pts']` logs the model's lean, exact price and EV for every PTS line to `output/tracking_only_history.csv` (never picks_history or betslips) to build a forward record.
+
+### Evidence
+
+- 2026-11-01 live scheduled run (07:39 predict, which loaded the edited module): price gate passed 2/8 candidates before the name-normalization fix; card = Brandon Williams AST UNDER 3.5 at -114 (break-even 53.3%, model 62.6%, EV +0.175), opponent LAC, `season_stage=regular_season`. Garland/Reaves/Nembhard STL unders were blocked at -245/-260/-270; Pritchard AST UNDER 4.5 blocked at EV -0.131 (-174).
+- The store's `player_norm` uses a different normalizer ("collin murray boyles") than picks ("collin murrayboyles"); matching now normalizes the raw `player` name. Isolated dry run after the fix (outputs redirected to scratch, spend disabled): 4/8 pass (Williams, Murray-Boyles -106, Oubre +104, Melton -102). The card is still one pick because `live_pick_max_per_prop = 1` and all four are AST.
+- PTS tracking: 49 leans logged, model side probabilities cluster near 51%; 1 of 49 clears the gate.
+- Tests: new `tests/test_fanduel_price_gate.py` (price gate, juice cap, unmatched/started/one-sided lines, punctuated names, season stage, tracking log) and FanDuel parlay tests in `tests/test_betslip_ev_selection.py`; the Power Play test is pinned to PrizePicks mode.
+- Full suite: `174 passed, 1 failed, 330 warnings, 1 subtest passed`. The single failure, `test_failed_live_line_snapshot_blocks_pick_generation`, reads the real `historical_lines.csv`; the scheduled run's 07:32 FanDuel snapshot was under the 30-minute reuse window, so the test's simulated refresh failure was correctly suppressed. Unmodified re-run at 08:03, after the snapshot aged out: `tests/test_daily_runtime_contracts.py` `15 passed, 1 subtest passed`. This test depends on the environment and can fail within 30 minutes of any real pull.
+
+### Consequences
+
+Cards will be smaller and some days empty; that is the honest result when the model cannot beat FanDuel's price. STL/BLK unders, historically the highest hit rates, are mostly priced beyond -200 and will rarely publish; this is consistent with DEC-038's finding that STL is efficiently priced at the book. Open operator decisions: whether to raise `live_pick_max_per_prop`, and whether to rank the card by EV rather than signal score.
+
+---
+
+## DEC-065 — Remove the Card-Size and Per-Stat Caps
+
+- **Date:** 2026-11-01
+- **Status:** Implemented and verified; 2026-11-01 live card regenerated
+- **Decision owner:** Jake
+
+### Context
+
+Under DEC-064 four AST unders cleared every accuracy gate and the FanDuel price gate, but `live_pick_max_per_prop = 1` published only one. The card was also capped at `live_pick_target = 5`, and the candidate pool at `max(25, live_pick_min * 10) = 50`. The operator directed: publish every confident pick, with no limit per stat category and no limit on the total.
+
+### Decision and Implementation
+
+1. `live_pick_target = None` and `live_pick_max_per_prop = None` mean unlimited; `live_pick_min = 0` (no shortfall warning); `live_pick_candidate_pool = 500`.
+2. With no target, `build_live_pick_card` publishes only the `core` tier (every accuracy gate passed). The `market_structured`/`structured` backfill tiers existed only to reach a fixed card size and are not used, so removing the cap does not admit ungated picks. The FanDuel price gate (DEC-064) still applies before the card is built.
+3. Kept: one pick per player, and one row per (player, prop). These are correlation/duplication guards, not stat or size caps.
+4. The console table prints every published pick (previously the top 10).
+5. Integer targets and per-prop caps still work when configured; the existing card tests pin `live_pick_max_per_prop = 1` to keep covering that path.
+
+### Evidence
+
+- 2026-11-01, regenerated from the cached 07:32 FanDuel snapshot (no paid call): 4/8 candidates passed the price gate and all 4 published — Brandon Williams AST U3.5 -114 (EV +0.175), Collin Murray-Boyles AST U1.5 -106 (+0.073), Kelly Oubre Jr. AST U1.5 +104 (+0.277), De'Anthony Melton AST U2.5 -102 (+0.093). Previous card: Williams only.
+- No betslips: the slip pool still requires confidence >= 70 and none of the four qualify.
+- Tests: new unlimited-card tests (12 same-stat picks all publish; no ungated backfill; production defaults uncapped). Full suite `178 passed, 330 warnings, 1 subtest passed`.
+
+### Consequences
+
+Card size now tracks how many picks clear the gates; concentration in one stat or one game is possible (today: 4 AST, 2 from GSW-LAC). The protection against weak picks is the gates themselves, not volume limits. Prices on the card are from the snapshot time and must be checked at FanDuel before betting.
+
+---
+
+## DEC-066 — Closing-Line Value Tracking and Alternate-Line Contract Selection
+
+- **Date:** 2026-11-01
+- **Status:** CLV implemented and running daily; alternate-line selection implemented and verified but dormant (no alternate lines are fetched yet)
+- **Decision owner:** Jake
+
+### Context
+
+The operator asked for (a) an honest, fast measure of whether the edge is real and (b) more high-value picks per day. Two facts shaped the design:
+
+1. The paid FanDuel feed requests only main markets. Raw payloads (`data/line_archive/live_raw/`) carry exactly one outcome per player/market/side, and `historical_lines.csv` holds exactly one line per player/prop/snapshot. FanDuel alternate lines are separate `*_alternate` markets that cost extra credits per event and have never been requested.
+2. Closing prices exist only where the T-60/T-5 watcher could spend: 2 slates (2026-10-27, 2026-10-31). The 500-credit key (DEC-063) blocked it on the other days.
+
+### Decision and Implementation
+
+**CLV (`scripts/clv_report.py`, run daily as `run_daily.py` step 1.7, diagnostic only):**
+1. Bet snapshot = the latest FanDuel snapshot at or before the archived run that produced the card/predictions. Close = the latest FanDuel snapshot after that and before tip (master store, T-60/T-5 captures, alternate store).
+2. Metrics per row: `ev_vs_close` (close no-vig side prob x bet decimal − 1; beats the close only if the market moved by more than the vig), `no_vig_move` (vig-free direction signal), `line_clv` when the line moved, `close_minutes_before_tip`, `close_source`, and graded result/profit at the bet price. Rows with no later snapshot are labeled and excluded from the summary.
+3. Two populations: published picks and every model lean (the favored side on every scored line, from archived predictions), so skill can be measured on hundreds of rows per day rather than a handful of bets.
+
+**Alternate lines (nba_props.py):**
+1. `_line_raw_over_probability` / `_line_over_probability` price any line from the row's stored distribution (quantiles for continuous stats, ordinal tails `P(X>=k)` or Poisson rate for STL/BLK/TOV) through the same isotonic calibrator. Ordinal tail columns (`stl_ge_1..3`, `blk_ge_1..3`) are now persisted in predictions.
+2. `_select_best_contract_lines` moves each candidate — whose direction already cleared the model gates on the main line — to the highest-EV FanDuel line in the same direction, subject to paired prices, the -200 favorite cap, `live_alt_line_max_distance = 2.0`, and `live_alt_line_raw_prob_band = (0.30, 0.70)`. Adds `main_line` and `line_choice`. The price gate then evaluates the chosen contract. No new player/prop candidates are created from alternate lines.
+3. Fetching `*_alternate` markets is behind `live_fetch_alternate_markets = False` (default off; costs credits). When enabled, alternate rows are written to `data/fanduel_alternate_lines.csv`, never `historical_lines.csv`, because `_normalize_projection_type` maps unknown types to `standard` and the master store feeds training and the main-line view.
+
+### Evidence
+
+- `_line_over_probability` at the main line reproduces production `{stat}_p_over_cal` for AST/TRB/PTS/PRA/PR/PA on the 2026-11-01 predictions (max abs diff 5e-5, i.e. rounding).
+- **Calibration limit found:** the AST isotonic calibrator maps every raw probability from 0.012 to 0.265 to 0.293 (fitted on main lines, where a low raw probability means the model disagrees with a balanced market). It is not valid far from the main line; hence the raw-probability band. Alternate-line probabilities outside the band are not used. There is no historical alternate-line data to recalibrate on.
+- CLV baseline (2026-10-26 to 2026-11-01): published picks 15 rows, 4 with a real close (mean no-vig move +0.004, ev_vs_close −0.055); model leans 2,793 rows, 472 with an exact-line close (T-5, median 8.5 minutes before tip): no-vig move +0.0012, moved toward the lean 43.4% vs away 36.9%, ev_vs_close −0.057 (≈ the vig). This is noise-level evidence, not a demonstrated edge. 2,175 leans had no later snapshot.
+- Dry run on the 2026-11-01 snapshot: `Contract lines: 275 main + 0 alternate`; card unchanged (4 picks).
+- Tests: `tests/test_clv_report.py` (6), `tests/test_alternate_lines.py` (8). Full suite `192 passed, 330 warnings, 1 subtest passed`.
+
+### Consequences / Open Items
+
+- CLV becomes meaningful only with daily closing captures, which require the paid-tier Odds API key (DEC-063 blocker).
+- Alternate lines produce no picks until `live_fetch_alternate_markets` is enabled. Before enabling: run a one-event canary to confirm FanDuel's alternate format. If FanDuel alternates are Over-only ladders, they cannot serve the current UNDER-only allowed props (and fail the paired-price rule), so the expected volume gain could be near zero.
+
+---
+
+## DEC-067 — Zero-Pick Reason Logging; Read-Only Audit of Absence Flags, Layer Joins, and the PBP Delay
+
+- **Date:** 2026-11-03
+- **Status:** Logging implemented and verified. Absence-flag attribution change NOT made (operator decision pending). PBP delay fix NOT made (awaiting approval).
+- **Decision owner:** Jake
+
+### Context
+
+A manual `run_daily.py` run at 23:06 CT on 2026-11-03 produced no live picks. Step 2 logged only `Odds API returned no NBA events for today's slate (2026-11-03)`. The provider call itself succeeded (HTTP 200, remaining-credit header present) and `_coerce_slate_date` converts commence times to America/Chicago, so there is no UTC/local date mismatch. The message prints only when the provider lists events but none is dated on the slate date. The log did not say how many events were listed, their dates, the local time, or the credit balance, so a late run, an empty schedule, and a credit problem looked the same (DEC-063 recorded credit exhaustion previously misreported as missing data).
+
+### Decision and Implementation (logging only; no pick-affecting change)
+
+1. `nba_props._describe_empty_slate()` builds the message: events listed, their local date range, local clock time, provider credits remaining, and the possible reasons. `fetch_vegas_lines` prints it in place of the bare line. Return values and control flow are unchanged.
+2. `run_daily.step2_prizepicks` logs a `Zero-pick reason` warning before raising the existing `no current <book> player-prop lines returned` error (exception text unchanged).
+3. The Step 8 `Top 10 Projected Scorers Today` header states when the live-line snapshot failed and the list is not filtered to today's slate.
+4. `tests/test_zero_pick_reason_logging.py` (3 tests) covers the helper and the `fetch_vegas_lines` path with a mocked provider, including that only the single free events lookup is made.
+5. Backups: `nba_props.py.bak_before_zero_pick_reason`, `run_daily.py.bak_before_zero_pick_reason`.
+
+### Audit Findings (read-only; nothing below was changed)
+
+1. **Absence flags reach live predictions.** `usage_injury_model.detect_recent_absences` flags any rostered player with 2 or fewer of the last 5 team games (no minutes/role gate). Its roster comes from the cached player profiles, which are the DEC-058 restored 2025-26 profiles, so traded players carry last season's team; the `latest_played_team` filter removes only players who have already played for another team. Flags flow to `detected_absences.csv`, then Step 8 `absence_recent_gp`, then `nba_props._adaptive_fp_blend_weights`, which lowers the first-principles blend weight by 0.10 when `absence_recent_gp <= 2` (PTS/TRB/AST blends; AST is a live-allowed prop), and also suppresses luck columns. Changing absence attribution is therefore a pick-affecting change and interacts with the DEC-061 frozen holdout that began 2026-10-28.
+2. **Join keys.** Layer 2 and the roster override join on `player_id`; Layers 3/4/5 join on `_normalize_player_name` (diacritic-safe). The Layer 3 count (508) mirrors the restored 2025-26 profiles. `apply_first_principles_adjustments` joins on `_normalize_name`; unmatched players skip the blend silently (`fp_applied=False`).
+3. **Step 8 projects every player ever in `nba_data.csv`.** `raw_l20_*` is built from `base.groupby("player")` with no season filter, so 859 players are projected against 448 active in 2026-27, and each L20 window spans seasons for players with fewer than 20 current-season games.
+4. **PBP delay.** `pbp_fetcher.fetch_game` skips games already on disk, but `fetch_season` still sleeps `REQUEST_DELAY = 1.1` s after every game including skipped ones: 55 games is about 60.5 s of the 205 s run (observed 61 s).
+5. **CLV definitions** match DEC-066: `beat_close` requires the market to move by more than the vig, so `ev_vs_close` near `-vig` is expected when there is no information beyond the market.
+
+### Consequences / Open Items
+
+- **Operator decision:** re-key absence flags to the current-season roster and add a rotation gate now, or after the DEC-061 holdout window. It changes AST blend weights for affected players; a before/after diff of flagged players and the generated card is required.
+- Optional, no pick impact: skip the post-request sleep when `fetch_game` was a cache hit (about 60 s per run).
+- Not verified: whether the Odds API events endpoint lists games that have already finished; the new message reports observed facts and states the reasons only as possibilities.
+- Verification run in the cloud workspace: new tests pass; 47 related tests passed in a temp copy. The full suite and the 56-artifact production-hash check were not run there and must be run on the operator machine.
+
+---
+
+## DEC-068 — Live Fetch Skips In-Play Events; Low-Credit Alarm; Step 2 Fetch Output Reaches the Run Log
+
+- **Date:** 2026-11-04
+- **Status:** Implemented and verified on the operator machine. No pick-scoring, model, or schema change.
+- **Decision owner:** Jake
+
+### Context
+
+The 2026-11-04 07:30 CT run published no card: the Odds API key had 109 credits, below the 126 + 100 reserve needed for a 14-event slate (the budget guard worked; nothing was spent). The operator rotated `ODDS_API_KEY` (User env var) to a new 20,000-credit key. A 23:07 CT manual rerun then paid 18 credits and stored **135 in-play rows** (3 events that tipped at 20:48-21:41 CT) in `historical_lines.csv` as ordinary `odds_api_fanduel` rows, because the `/events` endpoint lists live games and `fetch_vegas_lines` filtered only by local slate date. Also, since Step 2 calls `fetch_vegas_lines` in-process, every message it prints (credits, events fetched, DEC-067 empty-slate reason) reached the console only; `grep` found none in `logs/run_202611*.log`.
+
+Downstream impact of the in-play rows was contained: `_select_preferred_line_rows` and `scripts/clv_report.py` already drop post-tip snapshots, and the price gate blocked all candidates ("game started"). Unguarded raw readers remain (`scripts/market_edge_map.py`, `evaluate_clv_walk_forward.py`, `build_clv_features.py`, `player_pool_guard.py`). The 135 existing rows were left in place (no ad hoc edit of the data-contract file); they are identifiable by `snapshot_ts > commence_time`.
+
+### Decision and Implementation
+
+1. `nba_props._split_pregame_events(events, now_utc)` splits events by `commence_time <= now` (started) vs later/unknown (pregame; unknown kept, matching `_select_preferred_line_rows`). `fetch_vegas_lines` applies it before the budget check and before any paid request, logs how many events were skipped, and returns empty with a "none spent" message when every slate event has started. The clock comes from `nba_props._utc_now()` so tests are time-independent.
+2. New `CONFIG['odds_api_low_credit_warning'] = 750`: when provider credits are below it, `fetch_vegas_lines` prints a `!!! ODDS API CREDITS LOW` line.
+3. `run_daily._call_with_logged_stdout` / `_StdoutToLog` route Step 2's `fetch_vegas_lines` output to the run logger line by line; lines containing `!!!` log at WARNING.
+4. `generate_predictions` logs start and elapsed time for point-in-time defense, live availability/minutes, and the per-player scoring loop (the 2m13s silent gap observed at 23:15-23:17).
+5. Tests: new `tests/test_pregame_event_filter.py` (8). `tests/test_fanduel_live_lines.py` pins `_utc_now` in two tests whose 23:00Z tip-offs would otherwise fail after 17:00 CT. `tests/test_daily_runtime_contracts.py::test_failed_live_line_snapshot_blocks_pick_generation` now stubs `_recent_bookmaker_snapshot`; it failed whenever a real capture was under 30 minutes old.
+
+### Verification
+
+- `pytest -q tests`: 205 passed, 1 subtest passed (this also closes the DEC-067 operator-machine verification item).
+- `scripts/project_operator.ps1 -Action Preflight`: syntax/import smoke clean; 56 protected production artifacts present and hashed.
+- Live check (free `/events` call, 19,982 credits): at 23:29 CT, 3 events listed for 2026-11-04, all 3 classified started, 0 pregame; a rerun would spend nothing. This also confirms the DEC-067 open item: `/events` lists in-play games.
+
+### Findings Not Acted On
+
+- Layer 1 PBP columns (`possessions`, `raw_ppp`, `garbage_time_flag`, `competitive_poss`) cover 37/702 prediction rows because only `training_dataset_enriched.csv` (ends 2025-26) carries them. Only the legacy `models.pkl` uses them; none of the 36 production advanced models do. No change.
+- Layers 3/4 MIN_GP (10/15) leave usage on restored 2025-26 profiles and luck neutral early in the season (DEC-058/059, by design).
+- CLV (2026-11-04): model leans `ev_vs_close` -0.0586 (SE 0.0016, n=857), picks -0.0458 (n=11): consistent with no information beyond the closing market under the DEC-066 definitions.
+
+## DEC-069 — Grade Every Final Candidate, Including Those Blocked by the Last Gates
+
+- **Date:** 2026-11-05
+- **Status:** Implemented and verified. Tracking only; no pick-scoring, card, betslip, model, or existing-schema change.
+- **Decision owner:** Jake
+
+### Context
+
+Jake wants a forward record of the model's final candidates even when the last gates (FanDuel price gate, accuracy gates, card build) keep them off the card, to judge whether the model and the gates are doing well. `pre_card_candidates` (post injury/sanity check, with exact FanDuel prices and gate flags) was written only to `output/candidates_latest.csv`, which every run overwrites, and was never archived or graded. `tracking_only_history.csv` covers only PTS leans; `clv_model_leans.csv` covers all model leans, not the final shortlist.
+
+### Decision and Implementation
+
+1. **New file `output/candidates_history.csv`** (new artifact; no existing file changed). `nba_props._log_candidate_history()` runs in `predict` after the final card is built. One row per candidate with model fields, exact side price/EV, gate results, `published`, and `gate_bucket` = `published` | `blocked_price` | `blocked_other`.
+2. **Integrity rules:** candidates whose game had tipped at run time are skipped (a late rerun cannot replace the pre-game record with in-play prices); rows upsert on (game_date, player, prop, direction, line) so the latest pre-tip run wins; `published` is sticky once True; rows absent from a later run are kept; graded rows are never modified. Failure prints a warning and never affects the card.
+3. **New Step 1.8 `run_daily.step1_8_grade_candidates`** (after Step 1.7): grades past rows with Step 1.5 rules (WIN/LOSS/PUSH; player absent = DNP; no box scores and >3 days old = DNP), records `profit_units` at the recorded FanDuel side price (unpriced rows count toward hit rate only), and logs the last-14-days and all-time record per bucket. Never counts as a pipeline error.
+4. Tests: `tests/test_candidate_history.py` (9).
+
+### Verification
+
+- `pytest -q tests`: 214 passed, 1 subtest passed. Preflight: 56 protected artifacts hashed, smoke clean.
+- End-to-end in a temp directory with the real 2026-11-04 `candidates_latest.csv` (clock set pre-tip) and real `nba_data.csv`: 4 rows logged and graded correctly (Edgecombe STL U1.5 actual 1 WIN; Cunningham AST U8.5 actual 11 LOSS; Robinson AST U2.5 actual 2 WIN; Thompson AST U4.5 actual 3 WIN). Not written to production because those candidates came from a post-tip run.
+
+### Consequences / Open Items
+
+- No backfill is possible: past candidate sets were never archived. The record starts with the next pre-tip run.
+- `tracking_only_history.csv` still replaces a whole slate on every run, so a post-tip rerun overwrites the morning PTS leans (it did on 2026-11-04 at 23:17). Same pre-tip rule could be applied there; not changed.
+- Interpretation: compare `blocked_price` hit rate and ROI against `published`. Sample sizes will be small for weeks; do not loosen gates without a time-respecting before/after comparison.

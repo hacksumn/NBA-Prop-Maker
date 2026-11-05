@@ -1,6 +1,9 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
+
+import nba_props
 
 from nba_props import (
     _apply_consistency_scores,
@@ -187,6 +190,8 @@ class LiveCardSelectionTests(unittest.TestCase):
 
         self.assertGreater(stable, fragile)
 
+    # Exercises the optional per-stat cap; production default is unlimited (DEC-065).
+    @patch.dict(nba_props.CONFIG, {"live_pick_max_per_prop": 1})
     def test_build_live_pick_card_enforces_accuracy_gates_and_unique_players(self):
         picks = pd.DataFrame(
             [
@@ -339,6 +344,8 @@ class LiveCardSelectionTests(unittest.TestCase):
         self.assertEqual(card["prop"].value_counts().max(), 1)
         self.assertTrue(card["accuracy_gate_pass"].all())
 
+    # Exercises the optional per-stat cap; production default is unlimited (DEC-065).
+    @patch.dict(nba_props.CONFIG, {"live_pick_max_per_prop": 1})
     def test_build_live_pick_card_backfills_to_minimum_five_with_relaxed_market_model_tier(self):
         picks = pd.DataFrame(
             [
@@ -532,6 +539,8 @@ class LiveCardSelectionTests(unittest.TestCase):
 
         self.assertEqual(card["player"].tolist(), ["Standard Pick"])
 
+    # Exercises the optional per-stat cap; production default is unlimited (DEC-065).
+    @patch.dict(nba_props.CONFIG, {"live_pick_max_per_prop": 1})
     def test_build_live_pick_card_prefers_stable_roles_in_postseason_context(self):
         history_rows = []
         for idx in range(12):
@@ -617,6 +626,38 @@ class LiveCardSelectionTests(unittest.TestCase):
 
         self.assertEqual(card["season_stage"].tolist(), ["play_in"])
         self.assertEqual(card["player"].tolist(), ["Veteran Starter"])
+
+
+    def _gated_pick(self, player, prop, hit):
+        return {
+            "player": player, "prop": prop, "direction": "UNDER",
+            "estimated_hit_rate": hit, "selection_priority": 0.0, "consistency_score": 0.8,
+            "rank_score": 0.7, "meta_prob": 60.0, "volatility_metric": 0.5,
+            "dir_prob": 70.0, "confidence": 72.0, "edge": -1.0, "pick_source": "market_model",
+        }
+
+    @patch.dict(nba_props.CONFIG, {"live_pick_max_per_prop": None})
+    def test_unlimited_card_keeps_every_gated_pick_in_one_stat(self):
+        picks = pd.DataFrame([self._gated_pick(f"Player {i}", "AST", 70.0 - i) for i in range(12)])
+        card = build_live_pick_card(picks, target_picks=None, min_picks=0)
+        self.assertEqual(len(card), 12)
+        self.assertEqual(set(card["prop"]), {"AST"})
+        self.assertTrue(card["accuracy_gate_pass"].all())
+        self.assertEqual(set(card["publish_tier"]), {"core"})
+
+    @patch.dict(nba_props.CONFIG, {"live_pick_max_per_prop": None})
+    def test_unlimited_card_does_not_backfill_with_ungated_picks(self):
+        picks = pd.DataFrame([
+            self._gated_pick("Gated", "AST", 70.0),
+            {**self._gated_pick("Low Hit", "STL", 40.0)},  # fails estimated_hit_rate gate
+        ])
+        card = build_live_pick_card(picks, target_picks=None, min_picks=0)
+        self.assertEqual(card["player"].tolist(), ["Gated"])
+
+    def test_production_defaults_have_no_card_or_stat_cap(self):
+        self.assertIsNone(nba_props.CONFIG["live_pick_target"])
+        self.assertIsNone(nba_props.CONFIG["live_pick_max_per_prop"])
+        self.assertIsNone(nba_props._live_pick_target())
 
 
 if __name__ == "__main__":

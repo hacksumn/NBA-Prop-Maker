@@ -1,0 +1,162 @@
+{
+  "pts": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 7116,
+    "pinball_loss": {
+      "q10": 0.8872856678882459,
+      "q25": 1.751449382158781,
+      "q50": 2.3661615152486486,
+      "q75": 2.020587704527416,
+      "q90": 1.1893703998214407
+    },
+    "raw_probability_metrics": {
+      "n_records": 7116,
+      "positive_rate": 0.4832771219786397,
+      "brier": 0.2633503112269393,
+      "log_loss": 0.7268818852373916,
+      "ece": 0.09229260806857871
+    }
+  },
+  "trb": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 6819,
+    "pinball_loss": {
+      "q10": 0.3552093797090411,
+      "q25": 0.7092431086225297,
+      "q50": 0.9726694363304931,
+      "q75": 0.8465881815090462,
+      "q90": 0.5051147847553766
+    },
+    "raw_probability_metrics": {
+      "n_records": 6819,
+      "positive_rate": 0.4656107933714621,
+      "brier": 0.25363286319565503,
+      "log_loss": 0.7101856988547856,
+      "ece": 0.061047497634556476
+    }
+  },
+  "ast": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 5904,
+    "pinball_loss": {
+      "q10": 0.262879505640457,
+      "q25": 0.480742667196617,
+      "q50": 0.6855122225094228,
+      "q75": 0.6054788359344944,
+      "q90": 0.36649271570674447
+    },
+    "raw_probability_metrics": {
+      "n_records": 5904,
+      "positive_rate": 0.42784552845528456,
+      "brier": 0.24596671625882727,
+      "log_loss": 0.6948438491848861,
+      "ece": 0.045611661245346005
+    }
+  },
+  "pra": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 6990,
+    "pinball_loss": {
+      "q10": 1.2287964757044858,
+      "q25": 2.3519286642563726,
+      "q50": 3.125656065004138,
+      "q75": 2.62913578027735,
+      "q90": 1.5282982279863677
+    },
+    "raw_probability_metrics": {
+      "n_records": 6990,
+      "positive_rate": 0.47739628040057225,
+      "brier": 0.2720608315190669,
+      "log_loss": 0.7697336265477329,
+      "ece": 0.11874556272541997
+    }
+  },
+  "pr": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 6590,
+    "pinball_loss": {
+      "q10": 1.0978735654095988,
+      "q25": 2.123698847027043,
+      "q50": 2.842162780914351,
+      "q75": 2.4051919159642927,
+      "q90": 1.4073624266623195
+    },
+    "raw_probability_metrics": {
+      "n_records": 6590,
+      "positive_rate": 0.4849772382397572,
+      "brier": 0.2653695705245267,
+      "log_loss": 0.7399539759642975,
+      "ece": 0.09792992657992136
+    }
+  },
+  "pa": {
+    "kind": "quantile_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 5906,
+    "pinball_loss": {
+      "q10": 1.005735639194427,
+      "q25": 1.9519616602252048,
+      "q50": 2.6085262839993586,
+      "q75": 2.20990763219075,
+      "q90": 1.2928108798233793
+    },
+    "raw_probability_metrics": {
+      "n_records": 5906,
+      "positive_rate": 0.4791737216390112,
+      "brier": 0.26485691228782177,
+      "log_loss": 0.7373357898932729,
+      "ece": 0.09838926993338167
+    }
+  },
+  "stl": {
+    "kind": "ordinal_tail_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 3760,
+    "thresholds": [
+      1,
+      2,
+      3
+    ],
+    "raw_probability_metrics": {
+      "n_records": 3760,
+      "positive_rate": 0.2946808510638298,
+      "brier": 0.1900093904460558,
+      "log_loss": 0.5630711415910578,
+      "ece": 0.014745034905586481
+    }
+  },
+  "blk": {
+    "kind": "ordinal_tail_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 5116,
+    "thresholds": [
+      1,
+      2,
+      3
+    ],
+    "raw_probability_metrics": {
+      "n_records": 5116,
+      "positive_rate": 0.3062939796716185,
+      "brier": 0.1952760297347076,
+      "log_loss": 0.5747255624172899,
+      "ece": 0.01111648699699774
+    }
+  },
+  "tov": {
+    "kind": "poisson_probability_sidecar",
+    "n_oof_rows": 44790,
+    "n_real_line_rows": 2452,
+    "raw_probability_metrics": {
+      "n_records": 2452,
+      "positive_rate": 0.47716150081566067,
+      "brier": 0.24475463260908423,
+      "log_loss": 0.6839761971742209,
+      "ece": 0.03909593184314835
+    }
+  }
+}

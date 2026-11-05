@@ -1,10 +1,10 @@
 {
   "status": "complete",
   "output": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\nba_team_game_logs.csv",
-  "rows": 8030,
-  "games": 4015,
+  "rows": 8160,
+  "games": 4080,
   "date_min": "2023-10-24",
-  "date_max": "2026-10-27",
+  "date_max": "2026-11-04",
   "seasons": {
     "2023-24|PlayIn": 12,
     "2023-24|Playoffs": 164,
@@ -15,7 +15,7 @@
     "2025-26|PlayIn": 12,
     "2025-26|Playoffs": 170,
     "2025-26|Regular Season": 2460,
-    "2026-27|Regular Season": 112
+    "2026-27|Regular Season": 242
   },
   "duplicate_team_game_keys": 0,
   "required_null_cells": 0

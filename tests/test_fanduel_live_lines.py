@@ -20,6 +20,12 @@ class _Response:
         return self._payload
 
 
+def _before_tip_today():
+    """Fixed clock (12:00 UTC today) before the 23:00Z test tip-offs, so these
+    tests do not depend on what time of day the suite runs."""
+    return pd.Timestamp(f"{datetime.now().strftime('%Y-%m-%d')}T12:00:00Z")
+
+
 class FanDuelLiveLineTests(unittest.TestCase):
     def test_paid_live_response_is_atomically_checkpointed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,6 +101,8 @@ class FanDuelLiveLineTests(unittest.TestCase):
                     "line_archive_dir": Path(tmp),
                 },
             ), patch("nba_props.requests.get", side_effect=responses), patch(
+                "nba_props._utc_now", return_value=_before_tip_today()
+            ), patch(
                 "nba_props.sanitize_player_names",
                 side_effect=lambda frame, **kwargs: (
                     frame,
@@ -115,6 +123,32 @@ class FanDuelLiveLineTests(unittest.TestCase):
         self.assertEqual(main["under_price"], -110)
         self.assertEqual(main["source"], "odds_api_fanduel")
         self.assertEqual(main["bookmaker"], "fanduel")
+
+    def test_full_slate_budget_is_checked_before_any_paid_event_request(self):
+        today = datetime.now().strftime("%Y-%m-%d")
+        events = [
+            {"id": f"event-{index}", "commence_time": f"{today}T23:00:00Z"}
+            for index in range(12)
+        ]
+        response = _Response(events, headers={"x-requests-remaining": "48"})
+        with patch.dict(
+            nba_props.CONFIG,
+            {
+                "odds_api_key": "test",
+                "allow_live_odds_api_spend": True,
+                "live_odds_min_remaining_credits": 100,
+            },
+        ), patch("nba_props.requests.get", return_value=response) as getter, patch(
+            "nba_props._utc_now", return_value=_before_tip_today()
+        ):
+            with self.assertRaisesRegex(
+                nba_props.OddsApiBudgetError, "48 credits remain.*208 required"
+            ):
+                nba_props.fetch_vegas_lines(
+                    preferred_bookmaker="fanduel",
+                    allow_prizepicks_fallback=False,
+                )
+        self.assertEqual(getter.call_count, 1)
 
     def test_main_line_selection_prefers_balanced_fanduel_contract(self):
         lines = pd.DataFrame([

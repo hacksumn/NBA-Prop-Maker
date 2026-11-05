@@ -9,6 +9,33 @@ import run_daily
 
 
 class DailyRuntimeContractTests(unittest.TestCase):
+    def test_recent_exact_fanduel_snapshot_suppresses_duplicate_paid_pull(self):
+        import pandas as pd
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lines_path = Path(tmp) / "historical_lines.csv"
+            pd.DataFrame(
+                [{
+                    "game_date": real_datetime.now().strftime("%Y-%m-%d"),
+                    "source": "odds_api_fanduel",
+                    "snapshot_ts": pd.Timestamp.now(tz="UTC").isoformat(),
+                }]
+            ).to_csv(lines_path, index=False)
+            errors = []
+            args = SimpleNamespace()
+            with patch.object(run_daily, "LINES_CSV", lines_path), patch.dict(
+                "nba_props.CONFIG",
+                {
+                    "live_line_source_mode": "fanduel",
+                    "live_sportsbook_key": "fanduel",
+                    "live_line_refresh_cooldown_minutes": 30,
+                },
+            ), patch("nba_props.fetch_vegas_lines") as fetcher:
+                run_daily.step2_prizepicks(args, errors)
+            fetcher.assert_not_called()
+            self.assertFalse(run_daily._RUN_STATE["live_lines_step_failed"])
+            self.assertEqual(errors, [])
+
     def test_daily_exact_team_log_refresh_uses_active_season(self):
         errors = []
         args = SimpleNamespace(seasons=["2026-27"])
@@ -29,6 +56,10 @@ class DailyRuntimeContractTests(unittest.TestCase):
             ), patch(
                 "nba_props.fetch_vegas_lines",
                 return_value=([], "odds_api"),
+            ), patch.object(
+                # Isolate from the real historical_lines.csv: a capture made in the
+                # last 30 minutes would otherwise take the reuse path and skip the fetch.
+                run_daily, "_recent_bookmaker_snapshot", return_value={"usable": False}
             ):
                 run_daily.step2_prizepicks(args, errors)
             self.assertTrue(run_daily._RUN_STATE["live_lines_step_failed"])

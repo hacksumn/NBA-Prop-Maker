@@ -4,6 +4,37 @@
 
 ## NOW
 
+- [x] **[DEC-069] Log and grade every final candidate, including gated-out ones.** `output/candidates_history.csv` + Step 1.8; `tests/test_candidate_history.py` (9).
+- [ ] **[VERIFY — DEC-069] After the next morning run, confirm Step 9 logs `Candidate history: N candidate(s) logged`, and the following morning confirm Step 1.8 grades them.**
+- [ ] **[OPTIONAL — DEC-069] Apply the same pre-tip rule to `tracking_only_history.csv`,** which currently lets a post-tip rerun replace the morning PTS leans.
+- [ ] **[REVIEW — DEC-069] After ~3-4 weeks, compare `blocked_price` vs `published` hit rate and ROI** before considering any gate change (time-respecting before/after required).
+
+- [x] **[DEC-068] Stop the live fetch from paying for/storing in-play lines; add low-credit alarm; log Step 2 fetch output and Step 9 timings.** `tests/test_pregame_event_filter.py` (8); full suite 205 passed; Preflight clean.
+- [ ] **[DECISION — DEC-068] Decide whether to tag or remove the 135 in-play `odds_api_fanduel` rows from 2026-11-04 23:07 CT in `historical_lines.csv`** (identifiable by `snapshot_ts > commence_time`), and whether to add a post-tip guard to `scripts/market_edge_map.py`, `evaluate_clv_walk_forward.py`, `build_clv_features.py`, `player_pool_guard.py`. Canonical selectors already exclude them.
+- [x] **[DEC-067] Make zero-pick days state their cause** (empty-slate message with event count/dates/clock/credits; Step 2 `Zero-pick reason` line; Step 8 top-10 header). Logging only; `tests/test_zero_pick_reason_logging.py`.
+- [x] **[VERIFY — DEC-067] Run the full test suite and the production-hash preflight on the operator machine.** Done 2026-11-04 under DEC-068: 205 passed; 56 artifacts hashed.
+- [ ] **[DECISION — DEC-067] Re-key absence flags to the current-season roster and add a rotation gate.** Pick-affecting: `absence_recent_gp <= 2` shifts the AST/PTS/TRB first-principles blend weight by 0.10. Decide whether to do it now or after the DEC-061 holdout window; require a before/after diff of flagged players and the card.
+- [ ] **[OPTIONAL — DEC-067] Skip the 1.1 s sleep after cached games in `pbp_fetcher.fetch_season`** (about 60 s/run, no pick impact).
+- [ ] **[AUDIT — DEC-067] Decide whether Step 8 should project only players with 2026-27 games, and whether `raw_l20_*` should be season-aware.** Currently 859 players are projected against 448 active, with L20 windows that span seasons.
+- [x] **[UNVERIFIED — DEC-067] Confirm whether the Odds API events endpoint lists started games.** Confirmed live 2026-11-04 (DEC-068): it lists in-play events; the fetch now skips them.
+
+- [x] **[DEC-066] Daily CLV report for picks and every model lean** (step 1.7; diagnostic only).
+- [x] **[DEC-066] Alternate-line pricing and best-contract selection** with calibration band guard; STL/BLK tail probabilities persisted.
+- [ ] **[CREDITS — DEC-066] Enable alternate markets.** Approve a one-event canary (~3 extra credits/event for AST/STL/BLK alternates) to confirm FanDuel's alternate format, then decide on `live_fetch_alternate_markets`. Requires the paid-tier key.
+- [ ] **[EVIDENCE — DEC-066] Re-read `output/clv_summary.json` after 15+ slates with real closes** before any claim of edge.
+- [x] **[DEC-065] Remove the per-stat and total card caps** (operator decision). `live_pick_target`/`live_pick_max_per_prop` = None; only fully gated picks publish.
+- [x] **[DEC-064] Gate live FanDuel picks on the exact offered price.** Paired price, future start, -200 favorite cap, EV >= +0.03; applied before the tier cascade.
+- [x] **[DEC-064] Fix betslip leg probability (percent read as fraction), regular-season `play_in` mislabel, blank opponent, and FanDuel parlay pricing/grading.**
+- [x] **[DEC-064] Log PTS as tracking-only** to `output/tracking_only_history.csv`; never bet.
+- [x] **[DECISION — DEC-064, resolved by DEC-065: unlimited] Decide `live_pick_max_per_prop`.** On 2026-11-01 four AST unders cleared every gate but only one can publish. Raising the cap concentrates risk in one prop family; leaving it caps cards at ~1-3 picks.
+- [ ] **[DECISION — DEC-064] Consider ranking the card by EV.** Oubre AST UNDER 1.5 (+104, EV +0.277) ranked below Williams (EV +0.175) on signal score.
+- [ ] **[TRACKING — DEC-064] Grade `tracking_only_history.csv` PTS leans** after games complete; review only after a pre-declared sample (e.g. 300 graded rows) before reconsidering PTS.
+
+- [x] **[DEC-063] Identify the October 28 FanDuel failure from provider evidence.** The master retained 1,626 same-day rows and the morning card remained intact. The active key reports 452 used / 48 remaining on a 500-credit account; the late failure was insufficient full-slate budget, not missing or shredded data.
+- [x] **[DEC-063] Stop rapid duplicate full-slate purchases.** An exact-date FanDuel snapshot less than 30 minutes old now suppresses another paid refresh; this would have prevented the redundant 03:30 pull following 03:13.
+- [x] **[DEC-063] Make live-spend and watcher failures honest.** Full-slate affordability is checked before any paid event request, and the watcher reports reserve/cap/incomplete states with captured and pending counts rather than returning false success.
+- [ ] **[ACCOUNT — DEC-063] Activate the intended Odds API paid tier/key before the next full collection day.** The currently configured key is 500 total credits and has only 48 remaining. A 12-game morning pull plus all T-60/T-5 windows cannot run on this balance while preserving the 100-credit reserve.
+
 - [x] **[DEC-061] Repair the daily data and live-feature chain.** Canonicalized the PBP index, preserved all current-season PBP games, made live layer features prefer the current-season projection artifact, and attached live availability/minutes estimates instead of zero-filling missing training-only fields.
 - [x] **[DEC-061] Rebuild the complete leakage-safe training table.** The 52,975-row unified table has a complete-season availability holdout, forward-only 2026-27 availability predictions, and 100% point-in-time defense coverage with zero chronology violations.
 - [x] **[DEC-061] Train and audit an isolated full-layer candidate.** All nine props trained under `models/weekly_candidates/full_layers_20261027_150127`; the 49,301-row identical-row audit authorized zero promotions, and all 56 production artifacts remained unchanged.

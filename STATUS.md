@@ -2,6 +2,14 @@
 
 **Last Updated:** 2026-08-23 — Diagnosis: Plumbing fixed, edge not yet proven.
 
+> **Live files (2026-11-03, DEC-067):** current state is `output/STATUS.md`, `output/TASKS.md`, and `output/DECISIONS.md` (`DECISIONS.md` exists only in `output/`). This root file is the 2026-08-23 snapshot.
+
+> **2026-11-01 (DEC-066):** Daily CLV report (`output/clv_summary.json`); alternate-line selection built but dormant until alternate markets are fetched (credits). See `output/DECISIONS.md`.
+>
+> **2026-11-01 (DEC-065):** No card-size or per-stat cap; every fully gated, +EV FanDuel pick publishes (one per player). See `output/DECISIONS.md`.
+>
+> **2026-11-01 update (DEC-064):** The current, detailed status lives in `output/STATUS.md` and `output/DECISIONS.md`. Live FanDuel picks now require +EV at the exact offered price (paired price, future start, side price no worse than -200, EV >= +0.03); previously every pick was judged against a PrizePicks 57.7% break-even. Also fixed: betslip legs scored at 99% (percent/fraction bug), regular-season slates labeled `play_in`, blank opponents, PrizePicks payout math on FanDuel parlays. PTS remains blocked by evidence (50.2% real-line accuracy) and is logged tracking-only to `output/tracking_only_history.csv`. 2026-11-01 card: Brandon Williams AST UNDER 3.5 at -114.
+
 ---
 
 ## The Core Insight

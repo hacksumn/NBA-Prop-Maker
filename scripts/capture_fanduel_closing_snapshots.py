@@ -333,6 +333,7 @@ def watch(
 
     acquire_lock()
     attempts = []
+    terminal_status = None
     try:
         recover_completed_to_master(checkpoint)
         targets = pd.to_datetime(plan["target_ts_utc"], utc=True)
@@ -346,10 +347,12 @@ def watch(
                 plan, now, api_key, max_daily_credits, min_remaining_credits
             )
             attempts.extend(results)
-            if any(
-                item.get("status") in {"daily_credit_cap_reached", "provider_reserve_reached"}
-                for item in results
-            ):
+            result_statuses = {str(item.get("status")) for item in results}
+            if "provider_reserve_reached" in result_statuses:
+                terminal_status = "blocked_provider_reserve"
+                break
+            if "daily_credit_cap_reached" in result_statuses:
+                terminal_status = "blocked_daily_credit_cap"
                 break
             if now >= final_deadline:
                 break
@@ -357,10 +360,23 @@ def watch(
     finally:
         if LOCK.exists():
             LOCK.unlink()
+    latest_checkpoint = load_checkpoint()
+    plan_keys = {
+        f"{row.event_id}:{row.snapshot_kind}" for row in plan.itertuples(index=False)
+    }
+    completed_windows = len(plan_keys & set(latest_checkpoint["completed"]))
+    blocked_windows = len(plan_keys & set(latest_checkpoint["blocked"]))
+    pending_windows = max(0, len(plan_keys) - completed_windows - blocked_windows)
+    if terminal_status is None:
+        terminal_status = "complete" if pending_windows == 0 else "incomplete_windows"
     return {
-        "status": "complete",
+        "status": terminal_status,
         "local_date": local_date,
         "planned_windows": int(len(plan)),
+        "completed_windows": int(completed_windows),
+        "blocked_windows": int(blocked_windows),
+        "pending_windows": int(pending_windows),
+        "provider_balance": latest_checkpoint.get("last_api_balance", {}),
         "attempts": attempts,
         "credits_used": int(sum(int(item.get("credits_used", 0)) for item in attempts)),
     }

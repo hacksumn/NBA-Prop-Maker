@@ -98,7 +98,7 @@ CONFIG = {
     'data_dir':    _HERE.parent / 'data',     # → Fresh_Start_NBA/data/
     'models_dir':  _HERE / 'models',          # → files/models/
     'output_dir':  _HERE / 'output',          # → files/output/
-    'odds_api_key': '8269e5e566cd8d8f8c294b85244ffab7',
+    'odds_api_key': os.environ.get('ODDS_API_KEY', ''),
     'min_games':    10,
     'ewma_span':    5,
     'confidence_threshold': 0.6,

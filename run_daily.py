@@ -9,6 +9,7 @@ Pipeline Execution Order:
     STEP 1   — NBA Game Logs          (nba_scraper → data/nba_data.csv)
     STEP 1.5 — Auto-grade picks       (picks_history.csv)
     STEP 1.6 — Auto-grade betslips    (betslips_history.csv)
+    STEP 1.7 — CLV report             (scripts/clv_report.py → output/clv_summary.json)
     STEP 2   — PrizePicks Snapshot    (history only; Step 9 fetches sportsbook lines)
     STEP 3   — Layer 5: Blowout Index (blowout_discount_model → game_blowout_index.csv)
     STEP 4   — Layer 1: PBP Fetch     (pbp_fetcher → pbp_possessions_master.csv)
@@ -31,7 +32,9 @@ Usage:
 """
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import logging
 import os
@@ -323,6 +326,55 @@ def _warn(msg: str):
 
 def _fail(msg: str):
     logger.error(f"  [FAIL] {msg}")
+
+
+class _StdoutToLog(io.TextIOBase):
+    """File-like sink that forwards each complete printed line to the run logger.
+
+    In-process helpers (e.g. ``nba_props.fetch_vegas_lines``) report credits,
+    event counts and empty-slate reasons with ``print``; without this they reach
+    the console only and never appear in ``logs/run_*.log``. Lines containing
+    ``!!!`` are logged at WARNING so credit alarms stand out.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._pending = ""
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        self._pending += text
+        while "\n" in self._pending:
+            line, self._pending = self._pending.split("\n", 1)
+            self._emit(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self._pending:
+            self._emit(self._pending)
+            self._pending = ""
+
+    @staticmethod
+    def _emit(line: str) -> None:
+        if not line.strip():
+            return
+        text = f"  {line.rstrip()}"
+        if "!!!" in line:
+            logger.warning(text)
+        else:
+            logger.info(text)
+
+
+def _call_with_logged_stdout(func, *args, **kwargs):
+    """Call ``func`` with its ``print`` output routed to the run log, line by line."""
+    sink = _StdoutToLog()
+    try:
+        with contextlib.redirect_stdout(sink):
+            return func(*args, **kwargs)
+    finally:
+        sink.flush()
 
 
 def _file_age_hours(path: Path) -> Optional[float]:
@@ -914,6 +966,232 @@ def step1_5_grade_picks(errors):
 
 # ── Step 1.6: Auto-grade betslips ─────────────────────────────────────────────
 
+def step1_7_clv_report():
+    """Refresh closing-line value for picks and model leans (DEC-066).
+
+    Diagnostic only: a failure is logged as a warning and never blocks the run or
+    counts as a pipeline error.
+    """
+    diagnostic_errors = []
+    ok = _run_python_step(
+        "1.7",
+        "CLV report  (scripts/clv_report.py)",
+        ["scripts/clv_report.py"],
+        diagnostic_errors,
+        "CLV report",
+        "CLV report refreshed -> output/clv_summary.json",
+    )
+    if not ok:
+        _warn(f"CLV report did not refresh ({'; '.join(diagnostic_errors)}); picks are unaffected")
+
+
+_CANDIDATE_PROP_MAP = {
+    "PTS": "pts", "TRB": "trb", "AST": "ast", "STL": "stl",
+    "BLK": "blk", "TOV": "tov", "PRA": "pra", "PR": "pr", "PA": "pa",
+}
+_CANDIDATE_BUCKET_LABELS = {
+    "published": "Published (bet)",
+    "blocked_price": "Blocked by price gate",
+    "blocked_other": "Blocked by other gates",
+}
+
+
+def _candidate_profit_units(result, side_decimal_odds, side_price):
+    """Return profit per 1-unit stake at the recorded FanDuel side price, or None if unpriced."""
+    decimal = None
+    try:
+        decimal = float(side_decimal_odds)
+    except (TypeError, ValueError):
+        try:
+            american = float(side_price)
+            if american > 0:
+                decimal = 1.0 + american / 100.0
+            elif american < 0:
+                decimal = 1.0 + 100.0 / abs(american)
+        except (TypeError, ValueError):
+            decimal = None
+    if decimal is None or decimal != decimal or decimal <= 1.0:
+        return None
+    if result == "WIN":
+        return round(decimal - 1.0, 4)
+    if result == "LOSS":
+        return -1.0
+    if result == "PUSH":
+        return 0.0
+    return None
+
+
+def _grade_candidate_rows(hist, box, available_dates, today_str, stale_cutoff, now_str, norm_fn):
+    """Grade ungraded candidate rows in place against prepared box scores.
+
+    Same rules as Step 1.5: player absent from the box score = DNP; a date with no
+    box scores that is more than 3 days old = DNP. Returns the graded row indexes.
+    """
+    graded = []
+    ungraded = hist[_blank_text_mask(hist["result"]) & (hist["game_date"] < today_str)]
+    for date, group in ungraded.groupby("game_date"):
+        if date not in available_dates:
+            if date <= stale_cutoff:
+                for idx in group.index:
+                    hist.at[idx, "result"] = "DNP"
+                    hist.at[idx, "graded_at"] = now_str
+                    graded.append(idx)
+            continue
+        day_box = box[box["game_date"] == date]
+        for idx, row in group.iterrows():
+            stat = _CANDIDATE_PROP_MAP.get(str(row.get("prop", "")).strip().upper())
+            if not stat:
+                continue
+            try:
+                float(row.get("line"))
+            except (TypeError, ValueError):
+                logger.warning(f"  Candidate row {idx} has no numeric line ({row.get('line')!r}); left ungraded")
+                continue
+            match = day_box[day_box["player_norm"] == norm_fn(row.get("player", ""))]
+            if match.empty or stat not in match.columns or pd_isna(match.iloc[0][stat]):
+                result, actual = "DNP", ""
+            else:
+                actual_val = float(match.iloc[0][stat])
+                line_val = float(row.get("line"))
+                direction = str(row.get("direction", "")).strip().upper()
+                if actual_val == line_val:
+                    result = "PUSH"
+                elif (actual_val > line_val) == (direction == "OVER"):
+                    result = "WIN"
+                else:
+                    result = "LOSS"
+                actual = f"{actual_val:g}"
+            profit = _candidate_profit_units(
+                result, row.get("side_decimal_odds"), row.get("side_price")
+            )
+            hist.at[idx, "result"] = result
+            hist.at[idx, "actual"] = actual
+            hist.at[idx, "profit_units"] = "" if profit is None else f"{profit:g}"
+            hist.at[idx, "graded_at"] = now_str
+            graded.append(idx)
+    return graded
+
+
+def pd_isna(value):
+    """Scalar NaN/None check without importing pandas at module import time."""
+    try:
+        return value is None or value != value
+    except Exception:
+        return False
+
+
+def _summarize_candidate_record(hist, since=None):
+    """Return {bucket: dict(w, l, p, dnp, hit_pct, priced_n, units, roi_pct)} for graded rows."""
+    rows = hist[hist["result"].isin(["WIN", "LOSS", "PUSH", "DNP"])]
+    if since:
+        rows = rows[rows["game_date"] >= since]
+    summary = {}
+    for bucket in ("published", "blocked_price", "blocked_other"):
+        part = rows[rows["gate_bucket"] == bucket]
+        w = int((part["result"] == "WIN").sum())
+        l = int((part["result"] == "LOSS").sum())
+        p = int((part["result"] == "PUSH").sum())
+        dnp = int((part["result"] == "DNP").sum())
+        units = []
+        for value in part.loc[part["result"].isin(["WIN", "LOSS", "PUSH"]), "profit_units"]:
+            try:
+                units.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        summary[bucket] = {
+            "w": w, "l": l, "p": p, "dnp": dnp,
+            "hit_pct": round(100.0 * w / (w + l), 1) if (w + l) else None,
+            "priced_n": len(units),
+            "units": round(sum(units), 2),
+            "roi_pct": round(100.0 * sum(units) / len(units), 1) if units else None,
+        }
+    return summary
+
+
+def step1_8_grade_candidates(errors):
+    """Grade every final candidate (published or gated out) in candidates_history.csv.
+
+    Tracking only: this never touches picks_history, betslips, or the live card.
+    It answers "would the gated-out candidates have won?" so the gates can be
+    judged on forward results. ROI is at the exact FanDuel side price recorded
+    when the candidate was logged; unpriced rows count toward hit rate only.
+    """
+    _step_header("1.8", "Grade final candidates incl. gated-out  (candidates_history.csv)")
+    try:
+        import pandas as pd, unicodedata, re
+        from datetime import datetime as _dt
+
+        path = OUTPUT_DIR / "candidates_history.csv"
+        if not path.exists():
+            logger.info("  candidates_history.csv not created yet (first logged by Step 9) - nothing to grade")
+            return
+        if not GAME_LOG_CSV.exists():
+            _warn("nba_data.csv not found - skipping candidate grading")
+            return
+        hist = pd.read_csv(path, dtype=str, keep_default_na=False)
+        for col in ("result", "actual", "profit_units", "graded_at", "gate_bucket"):
+            if col not in hist.columns:
+                hist[col] = ""
+        hist["game_date"] = _normalize_game_date_series(hist["game_date"]).fillna("").astype(str)
+
+        def _norm(name):
+            n = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode("ascii")
+            return re.sub(r"[^a-z0-9 ]", "", n.lower()).strip()
+
+        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+        pending = hist[_blank_text_mask(hist["result"]) & (hist["game_date"] < today_str)]
+        graded_idx = []
+        if len(pending) > 0:
+            box = _prepare_box_score_frame(pd.read_csv(GAME_LOG_CSV, low_memory=False), _norm)
+            box, available_dates = _hydrate_live_box_scores(
+                box, pending["game_date"].dropna().astype(str).unique(), _norm,
+                context_label="[candidates] ",
+            )
+            stale_cutoff = (pd.Timestamp.now() - pd.Timedelta(days=3)).strftime("%Y-%m-%d")
+            graded_idx = _grade_candidate_rows(
+                hist, box, set(available_dates), today_str, stale_cutoff,
+                _dt.now().strftime("%Y-%m-%d %H:%M:%S"), _norm,
+            )
+            if graded_idx:
+                _atomic_csv(hist, path)
+
+        if graded_idx:
+            newly = hist.loc[graded_idx]
+            logger.info(f"  Newly graded candidates: {len(newly)}")
+            for _, r in newly[newly["result"] != "DNP"].sort_values(["game_date", "gate_bucket"]).iterrows():
+                marker = {"WIN": "+", "LOSS": "-", "PUSH": "="}.get(r["result"], " ")
+                logger.info(
+                    f"    [{marker}] {r['game_date']} {str(r['player'])[:22]:<22} {r['prop']:<4} "
+                    f"{r['direction']:<5} {r['line']:>5} actual {r['actual']:>5}  "
+                    f"{_CANDIDATE_BUCKET_LABELS.get(r['gate_bucket'], r['gate_bucket'])}"
+                    + (f"  ({r['price_gate_reason']})" if r["gate_bucket"] == "blocked_price" and r.get("price_gate_reason") else "")
+                )
+
+        since_14 = (pd.Timestamp.now() - pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+        for label, since in (("Last 14 days", since_14), ("All time", None)):
+            summary = _summarize_candidate_record(hist, since)
+            logger.info(f"  Candidate record - {label}:")
+            for bucket, s in summary.items():
+                n = s["w"] + s["l"] + s["p"]
+                hit = f"{s['hit_pct']:.1f}%" if s["hit_pct"] is not None else "n/a"
+                roi = (
+                    f"{s['units']:+.2f}u on {s['priced_n']} priced ({s['roi_pct']:+.1f}% ROI)"
+                    if s["roi_pct"] is not None else "no priced results"
+                )
+                logger.info(
+                    f"    {_CANDIDATE_BUCKET_LABELS[bucket]:<24} {s['w']}W-{s['l']}L-{s['p']}P "
+                    f"(n={n}, DNP {s['dnp']})  hit {hit}  |  {roi}"
+                )
+        waiting = int((_blank_text_mask(hist["result"]) & (hist["game_date"] < today_str)).sum())
+        if waiting:
+            logger.info(f"  {waiting} past candidate(s) still waiting on box scores")
+        _ok(f"Candidate grading complete ({len(graded_idx)} newly graded, {len(hist)} tracked)")
+    except Exception as exc:
+        # Tracking only: never block the run or count as a pipeline error.
+        _warn(f"Candidate grading failed ({type(exc).__name__}: {exc}); picks are unaffected")
+        logger.debug(exc, exc_info=True)
+
+
 def step1_6_grade_betslips(errors):
     _step_header("1.6", "Auto-grade betslips  (betslips_history.csv)")
     try:
@@ -1036,9 +1314,29 @@ def step1_6_grade_betslips(errors):
             if effective_picks == 0:
                 continue  # All players DNP — can't grade yet
 
+            leg_prices = [
+                pd.to_numeric(slip.get(f"Pick_{i}_Price", ""), errors="coerce")
+                for i in range(1, len(all_results) + 1)
+            ]
+            fanduel_priced = (
+                "Pick_1_Player" in slips.columns
+                and len(leg_prices) == len(all_results)
+                and all(pd.notna(p) and abs(p) >= 100 for p in leg_prices)
+            )
+
             if any(r == "LOSS" for r in graded):
                 slip_result = "LOSS"
                 actual_payout = 0.0
+            elif fanduel_priced and any(r == "WIN" for r in graded):
+                # FanDuel parlay: pushed/void (DNP) legs drop out and the slip pays
+                # the product of the remaining winning legs' decimal odds.
+                slip_result = "WIN"
+                wager = float(slip.get("wager", 20))
+                mult = 1.0
+                for result, price in zip(all_results, leg_prices):
+                    if result == "WIN":
+                        mult *= 1.0 + (price / 100.0 if price > 0 else 100.0 / -price)
+                actual_payout = round(wager * mult, 2)
             elif all(r == "WIN" for r in graded):
                 # All active legs won — pay at effective (DNP-reduced) tier
                 slip_result = "WIN"
@@ -1079,6 +1377,64 @@ def step1_6_grade_betslips(errors):
 
 # ── Step 2: PrizePicks Lines ───────────────────────────────────────────────────
 
+def _recent_bookmaker_snapshot(
+    bookmaker: str,
+    slate_date: Optional[str] = None,
+    max_age_minutes: int = 30,
+    now: Optional[object] = None,
+) -> dict:
+    """Describe a recent exact-date sportsbook snapshot without mutating it."""
+    import pandas as pd
+
+    target = slate_date or datetime.now().strftime("%Y-%m-%d")
+    result = {
+        "usable": False,
+        "slate_date": target,
+        "bookmaker": str(bookmaker).strip().lower(),
+        "age_minutes": None,
+        "rows": 0,
+    }
+    if not LINES_CSV.exists():
+        return result
+    try:
+        lines = pd.read_csv(
+            LINES_CSV,
+            usecols=lambda column: column in {"game_date", "source", "snapshot_ts"},
+            low_memory=False,
+        )
+    except Exception:
+        return result
+    required = {"game_date", "source", "snapshot_ts"}
+    if not required.issubset(lines.columns):
+        return result
+    dates = pd.to_datetime(lines["game_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    source = lines["source"].fillna("").astype(str).str.lower()
+    subset = lines.loc[
+        dates.eq(target) & source.str.contains(result["bookmaker"], regex=False)
+    ].copy()
+    if subset.empty:
+        return result
+    timestamps = pd.to_datetime(subset["snapshot_ts"], errors="coerce", utc=True)
+    latest = timestamps.max()
+    if pd.isna(latest):
+        return result
+    current = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC")
+    if current.tzinfo is None:
+        current = current.tz_localize("UTC")
+    else:
+        current = current.tz_convert("UTC")
+    age_minutes = max(0.0, float((current - latest).total_seconds() / 60.0))
+    result.update(
+        {
+            "usable": age_minutes <= float(max_age_minutes),
+            "age_minutes": age_minutes,
+            "rows": int(timestamps.eq(latest).sum()),
+            "latest_snapshot_ts": latest.isoformat(),
+        }
+    )
+    return result
+
+
 def step2_prizepicks(args, errors):
     _RUN_STATE["live_lines_step_failed"] = False
     from nba_props import CONFIG as MODEL_CONFIG
@@ -1092,12 +1448,30 @@ def step2_prizepicks(args, errors):
             save_lines(output_path=str(LINES_CSV))
         else:
             from nba_props import fetch_vegas_lines, save_lines_snapshot
-            live_lines, fetched_source = fetch_vegas_lines(
+            cooldown = int(MODEL_CONFIG.get("live_line_refresh_cooldown_minutes", 30) or 0)
+            cached = _recent_bookmaker_snapshot(bookmaker, max_age_minutes=cooldown)
+            if cached["usable"]:
+                _warn(
+                    f"Reusing {cached['rows']:,} {bookmaker} rows from the exact-date "
+                    f"snapshot captured {cached['age_minutes']:.1f} minutes ago; "
+                    "duplicate paid refresh suppressed"
+                )
+                _summarise_csv(LINES_CSV, "historical_lines.csv")
+                _ok(f"{source_label} lines already fresh")
+                return
+            live_lines, fetched_source = _call_with_logged_stdout(
+                fetch_vegas_lines,
                 prefer_prizepicks=False,
                 preferred_bookmaker=bookmaker,
                 allow_prizepicks_fallback=False,
             )
             if live_lines is None or len(live_lines) == 0:
+                logger.warning(
+                    f"  Zero-pick reason: {bookmaker} returned no lines at "
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M')} local time. Live picks need "
+                    "pre-game lines; see the Odds API message above for the event count, "
+                    "listed dates and provider credits."
+                )
                 raise RuntimeError(f"no current {bookmaker} player-prop lines returned")
             if str(fetched_source).strip().lower() != bookmaker:
                 raise RuntimeError(
@@ -1928,7 +2302,12 @@ def step8_merge_projections(errors, season=None):
         logger.info(f"  Archived run snapshot:   {run_archive.name}")
 
         # Print top 10 projected scorers — skip players with 0 recent games (fully absent)
-        logger.info("\n  ── Top 10 Projected Scorers Today (active players only) ──────────────")
+        top10_scope = (
+            "live-line snapshot failed: not filtered to today's slate; active players only"
+            if _RUN_STATE.get("live_lines_step_failed")
+            else "active players only"
+        )
+        logger.info(f"\n  ── Top 10 Projected Scorers Today ({top10_scope}) ──────────────")
         display_rows = []
         skipped_absent = []
         skipped_live_out = []
@@ -2189,6 +2568,8 @@ def main() -> int:
             step1_1_team_game_logs(args, errors)
             step1_5_grade_picks(errors)
             step1_6_grade_betslips(errors)
+            step1_7_clv_report()
+            step1_8_grade_candidates(errors)
         else:
             logger.info("Skipping game logs (--lines-only mode)")
 

@@ -2,6 +2,14 @@
 
 **Last Updated:** 2026-08-23 | **Owner:** Jake
 
+> **Live files (2026-11-03, DEC-067):** the current work queue is `output/TASKS.md`; decisions are in `output/DECISIONS.md` (it exists only in `output/`). This root file is the 2026-08-23 snapshot.
+
+> **2026-11-01 (DEC-066):** Daily CLV report (`output/clv_summary.json`); alternate-line selection built but dormant until alternate markets are fetched (credits). See `output/DECISIONS.md`.
+>
+> **2026-11-01 (DEC-065):** No card-size or per-stat cap; every fully gated, +EV FanDuel pick publishes (one per player). See `output/DECISIONS.md`.
+>
+> **2026-11-01 (DEC-064):** The live work queue is `output/TASKS.md`. Done: FanDuel exact-price EV gate, slip probability fix, season-stage fix, opponent field, FanDuel parlay pricing/grading, PTS tracking-only log. Open operator decisions: `live_pick_max_per_prop` (currently 1) and EV-based card ranking. Item 1.1 below (gate PTS) is satisfied by the evidence policy: PTS is not bet.
+
 ---
 
 ## Phase 1: Immediate Production Risk Mitigation

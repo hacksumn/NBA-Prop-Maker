@@ -26,6 +26,7 @@ import sys
 import math
 import gc
 import re
+import time as _time
 from itertools import combinations
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -34,7 +35,13 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from player_pool_guard import sanitize_player_names
-from probability_utils import apply_isotonic_calibrators, over_probability_from_quantiles, quantile_tags
+from probability_utils import (
+    apply_isotonic_calibrators,
+    ordinal_over_probability,
+    over_probability_from_quantiles,
+    poisson_over_probability,
+    quantile_tags,
+)
 from injury_feed import fetch_injury_data
 
 # =============================================================================
@@ -55,6 +62,11 @@ CONFIG = {
     'odds_api_key': os.environ.get('ODDS_API_KEY', ''),
     'allow_live_odds_api_spend': True,
     'odds_api_credit_reserve': 0,  # Informational only; provider response headers are authoritative.
+    'live_odds_min_remaining_credits': 100,
+    # Logging only: warn when provider credits fall below this floor (~5 full slates
+    # plus reserve) so a budget stop is visible days before it blocks a morning card.
+    'odds_api_low_credit_warning': 750,
+    'live_line_refresh_cooldown_minutes': 30,
     
     # Model settings
     'min_games': 10,           # Minimum games for prediction
@@ -65,10 +77,12 @@ CONFIG = {
     'require_meta_for_live_picks': True,   # Only allow picks supported by the abstention layer
     'allow_structural_micro_props': False, # Disable hardcoded STL/BLK fallback picks by default
     'excluded_pick_props': [],  # Dynamic evidence policy decides which props are publishable.
-    'live_pick_min': 5,        # Minimum number of live picks to publish each day
-    'live_pick_target': 5,     # Target size of the final live card
-    'live_pick_candidate_pool': 25,  # Pull a deeper pool, then sanitize and diversify
-    'live_pick_max_per_prop': 1,  # Prevent one prop family from taking over the card.
+    # Card size (DEC-065): no total cap and no per-stat cap. Every pick that clears all
+    # accuracy gates and the FanDuel price gate publishes. None = unlimited.
+    'live_pick_min': 0,        # Warn when fewer picks than this survive (0 = never warn)
+    'live_pick_target': None,  # Max card size; None = publish every fully gated pick
+    'live_pick_candidate_pool': 500,  # Candidate pool depth before sanity/price gates
+    'live_pick_max_per_prop': None,  # Max picks per stat category; None = unlimited
     'live_pick_meta_floor_min': 45.0,      # Final-card hard floor for meta_prob (%)
     'live_pick_meta_floor_max': 60.0,      # Prevent over-tightening on thin slates
     'live_pick_meta_floor_slack': 10.0,    # Allow some slack below prop policy floor
@@ -80,10 +94,36 @@ CONFIG = {
     'live_fanduel_min_side_prob': 0.50,
     'live_fanduel_min_residual_edge': 0.05,
     'live_fanduel_volatility_ceiling_mult': 1.25,
+    # Price gate (DEC-064): a FanDuel pick must be +EV at the exact offered price for
+    # the chosen side. Picks with no paired price, or whose game has started, are not
+    # publishable. Heavy favorites are capped because a few points of calibration
+    # error flips their EV sign (e.g. -240 needs 70.6% just to break even).
+    'live_price_gate_enabled': True,
+    'live_min_ev_per_unit': 0.03,
+    'live_max_favorite_american': -200,
+    # Props blocked by the evidence policy that are still logged (never bet) so a
+    # forward record accumulates: output/tracking_only_history.csv.
+    'live_tracking_only_props': ['pts'],
+    # Alternate lines (DEC-066). Every FanDuel line for a candidate's player/prop is
+    # priced from the same predicted distribution and the best-EV contract in the
+    # candidate's direction is published. Fetching *_alternate markets costs extra
+    # Odds API credits per event, so it stays off until explicitly enabled.
+    'live_fetch_alternate_markets': False,
+    'live_alternate_markets': [
+        'player_assists_alternate', 'player_steals_alternate', 'player_blocks_alternate',
+    ],
+    'live_alt_line_max_distance': 2.0,  # Only price lines within this many stat units of the main line
+    # Alternate lines are priced only where the raw model probability lies in the
+    # calibrator's dense main-line support; the isotonic map plateaus in the tails.
+    'live_alt_line_raw_prob_band': (0.30, 0.70),
     'local_timezone': 'America/Chicago',
     # Targets
     'targets': ['pts', 'trb', 'ast', 'pra', 'pr', 'pa'],
 }
+
+
+class OddsApiBudgetError(RuntimeError):
+    """Raised before any paid request when a complete live slate is unaffordable."""
 
 # Ensure directories exist
 for dir_key in ['data_dir', 'line_archive_dir', 'models_dir', 'output_dir', 'output_archive_dir']:
@@ -178,8 +218,13 @@ def _infer_season_stage(slate_date: Optional[str] = None,
     regular_end = pd.Timestamp(season_dates.max()).normalize()
     days_after = max(0, int((slate_ts - regular_end).days))
     season_stage = 'regular_season'
-    if days_after > 0:
+    # During the regular season the latest logged game is normally yesterday, so a
+    # gap alone is not evidence of the postseason. Require the April-June window and
+    # at least one league-wide off day (the regular season ends before the play-in).
+    if days_after >= 2 and slate_ts.month in (4, 5, 6):
         season_stage = 'play_in' if days_after <= 4 else 'playoffs'
+    else:
+        days_after = 0
 
     info.update({
         'regular_season_end': regular_end.strftime('%Y-%m-%d'),
@@ -1199,8 +1244,254 @@ def _apply_live_accuracy_gates(picks_df: pd.DataFrame,
     return working
 
 
+def _fanduel_price_mode() -> bool:
+    """True when live picks are bet at a sportsbook price rather than PrizePicks payouts."""
+    return str(CONFIG.get('live_line_source_mode', 'fanduel') or '').strip().lower() != 'prizepicks'
+
+
+def _american_to_decimal(price: object) -> float:
+    """Convert an American price to decimal odds (stake included). NaN when invalid."""
+    value = pd.to_numeric(pd.Series([price]), errors='coerce').iloc[0]
+    if pd.isna(value) or value == 0 or -100 < value < 100:
+        return float('nan')
+    value = float(value)
+    return 1.0 + (value / 100.0 if value > 0 else 100.0 / -value)
+
+
+def _attach_live_market_prices(picks_df: pd.DataFrame,
+                               lines_df: Optional[pd.DataFrame],
+                               now_utc: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+    """Attach the exact FanDuel contract price for each pick's side and gate on it.
+
+    Matches on (player_norm, prop, line) against the same line rows the predictions
+    were scored from. Adds side price, decimal odds, vig-inclusive break-even,
+    no-vig market probability, model EV per unit, commence time and event id, then
+    sets ``price_gate_pass``/``price_gate_reason``. ``break_even_prob`` and
+    ``exceeds_ev_threshold`` are overwritten with the real-price values.
+    """
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+    working = picks_df.copy()
+    now_utc = now_utc if now_utc is not None else pd.Timestamp.now(tz='UTC')
+
+    price_cols = ['over_price', 'under_price', 'commence_time', 'event_id', 'snapshot_ts']
+    market = pd.DataFrame(columns=['_pn', '_prop', '_line'] + price_cols)
+    if lines_df is not None and len(lines_df) > 0:
+        market = lines_df.copy()
+        for col in price_cols:
+            if col not in market.columns:
+                market[col] = np.nan
+        # Normalize from the raw name: the stored player_norm came from a different
+        # normalizer ("collin murray boyles" vs "collin murrayboyles").
+        market['_pn'] = (
+            market['player'] if 'player' in market.columns else market['player_norm']
+        ).astype(str).apply(_normalize_name)
+        market['_prop'] = market['prop'].astype(str).str.lower().map(
+            lambda p: _ODDS_PROP_TO_STAT.get(p, p)
+        ).str.upper()
+        market['_line'] = pd.to_numeric(market['line'], errors='coerce').round(2)
+        market = market.drop_duplicates(subset=['_pn', '_prop', '_line'], keep='last')
+
+    working['_pn'] = working['player'].astype(str).apply(_normalize_name)
+    working['_prop'] = working['prop'].astype(str).str.upper()
+    working['_line'] = pd.to_numeric(working['line'], errors='coerce').round(2)
+    working = working.drop(columns=[c for c in price_cols if c in working.columns])
+    working = working.merge(
+        market[['_pn', '_prop', '_line'] + price_cols], on=['_pn', '_prop', '_line'], how='left'
+    ).rename(columns={'snapshot_ts': 'line_snapshot_ts'})
+
+    is_under = working['direction'].astype(str).str.upper().eq('UNDER')
+    over = pd.to_numeric(working['over_price'], errors='coerce')
+    under = pd.to_numeric(working['under_price'], errors='coerce')
+    working['side_price'] = np.where(is_under, under, over)
+    working['side_decimal_odds'] = working['side_price'].apply(_american_to_decimal)
+    other_decimal = pd.Series(np.where(is_under, over, under), index=working.index).apply(_american_to_decimal)
+    side_implied = 1.0 / working['side_decimal_odds']
+    other_implied = 1.0 / other_decimal
+    working['break_even_prob'] = side_implied.round(4)
+    working['no_vig_side_prob'] = (side_implied / (side_implied + other_implied)).round(4)
+    model_prob = working.apply(_coerce_pick_side_probability, axis=1)
+    working['model_side_prob'] = model_prob.round(4)
+    working['ev_per_unit'] = (model_prob * working['side_decimal_odds'] - 1.0).round(4)
+
+    min_ev = float(CONFIG.get('live_min_ev_per_unit', 0.03))
+    max_fav = float(CONFIG.get('live_max_favorite_american', -200))
+    commence = pd.to_datetime(working['commence_time'], errors='coerce', utc=True)
+    reasons = []
+    for idx in working.index:
+        if pd.isna(working.at[idx, 'side_decimal_odds']) or pd.isna(other_decimal.at[idx]):
+            reasons.append('no paired FanDuel price for this line')
+        elif pd.isna(commence.at[idx]) or commence.at[idx] <= now_utc:
+            reasons.append('game started or start time unknown')
+        elif working.at[idx, 'side_price'] < max_fav:
+            reasons.append(f"price {working.at[idx, 'side_price']:+.0f} beyond {max_fav:+.0f} cap")
+        elif working.at[idx, 'ev_per_unit'] < min_ev:
+            reasons.append(
+                f"EV {working.at[idx, 'ev_per_unit']:+.3f}<{min_ev:+.3f} at {working.at[idx, 'side_price']:+.0f}"
+            )
+        else:
+            reasons.append('')
+    working['price_gate_reason'] = reasons
+    working['price_gate_pass'] = working['price_gate_reason'].eq('')
+    working['exceeds_ev_threshold'] = working['price_gate_pass']
+    return working.drop(columns=['_pn', '_prop', '_line'])
+
+
+_ALT_LINES_PATH_NAME = 'fanduel_alternate_lines.csv'
+_CALIBRATOR_CACHE: Dict[str, object] = {}
+
+
+def _active_probability_calibrators() -> Dict[str, object]:
+    """Load (once) the isotonic calibrators bound to the active probability sidecars."""
+    if 'calibrators' not in _CALIBRATOR_CACHE:
+        sidecars = _load_probability_sidecars()
+        _CALIBRATOR_CACHE['calibrators'] = _load_probability_calibrators(sidecars) if sidecars else {}
+    return _CALIBRATOR_CACHE['calibrators']
+
+
+def _line_raw_over_probability(pred_row: pd.Series, stat: str, line: float) -> float:
+    """Uncalibrated P(stat > line) from the row's stored distribution (NaN if absent).
+
+    Quantiles (continuous stats), ordinal tails P(X >= k) or a Poisson rate (count
+    stats) -- the same sources the main-line probability uses.
+    """
+    stat = str(stat).lower()
+    q_cols = [f'{stat}_{tag}' for tag in quantile_tags()]
+    raw = float('nan')
+    if all(col in pred_row.index for col in q_cols):
+        q_vals = pd.to_numeric(pred_row[q_cols], errors='coerce').to_numpy(dtype=float)
+        if np.isfinite(q_vals).all():
+            raw = float(over_probability_from_quantiles([line], q_vals.reshape(1, -1))[0])
+    if not np.isfinite(raw):
+        tail_cols = sorted(
+            [c for c in pred_row.index if str(c).startswith(f'{stat}_ge_')],
+            key=lambda c: int(str(c).rsplit('_', 1)[-1]),
+        )
+        tails = pd.to_numeric(pred_row[tail_cols], errors='coerce').to_numpy(dtype=float) if tail_cols else np.array([])
+        if len(tails) and np.isfinite(tails).all():
+            thresholds = [int(str(c).rsplit('_', 1)[-1]) for c in tail_cols]
+            raw = float(ordinal_over_probability([line], tails.reshape(1, -1), thresholds)[0])
+    if not np.isfinite(raw):
+        rate = pd.to_numeric(pd.Series([pred_row.get(f'{stat}_rate')]), errors='coerce').iloc[0]
+        if pd.notna(rate):
+            raw = float(poisson_over_probability([line], [rate])[0])
+    return raw
+
+
+def _line_over_probability(pred_row: pd.Series, stat: str, line: float,
+                           calibrators: Optional[Dict[str, object]] = None) -> float:
+    """Calibrated P(stat > line) for any line: raw distribution probability, then the
+    target's isotonic calibrator. At the main line this reproduces ``{stat}_p_over_cal``.
+    The calibrator was fitted on main lines only, so callers must keep alternate lines
+    inside its dense support (see ``live_alt_line_raw_prob_band``).
+    """
+    raw = _line_raw_over_probability(pred_row, stat, line)
+    if not np.isfinite(raw):
+        return float('nan')
+    calibrators = _active_probability_calibrators() if calibrators is None else calibrators
+    return float(apply_isotonic_calibrators([raw], str(stat).lower(), calibrators)[0])
+
+
+def _load_alternate_lines(slate_date: str, snapshot_ts: Optional[str] = None) -> pd.DataFrame:
+    """Alternate FanDuel lines for a slate, optionally restricted to one snapshot."""
+    path = CONFIG['data_dir'] / _ALT_LINES_PATH_NAME
+    if not path.exists():
+        return pd.DataFrame()
+    alt = pd.read_csv(path, low_memory=False)
+    alt = alt[alt['game_date'].astype(str) == str(slate_date)]
+    if snapshot_ts is not None and 'snapshot_ts' in alt.columns:
+        alt = alt[alt['snapshot_ts'].astype(str) == str(snapshot_ts)]
+    return alt.reset_index(drop=True)
+
+
+def _save_alternate_lines(alt_df: pd.DataFrame) -> None:
+    """Append alternate FanDuel lines to their own store (never historical_lines.csv)."""
+    if alt_df is None or len(alt_df) == 0:
+        return
+    path = CONFIG['data_dir'] / _ALT_LINES_PATH_NAME
+    combined = alt_df.copy()
+    if path.exists():
+        combined = pd.concat([pd.read_csv(path, low_memory=False), combined], ignore_index=True)
+    combined = combined.drop_duplicates(
+        subset=['game_date', 'player', 'prop', 'line', 'snapshot_ts'], keep='last'
+    )
+    _atomic_csv(combined, path)
+    print(f"  Saved {len(alt_df)} alternate FanDuel lines -> {path.name}")
+
+
+def _select_best_contract_lines(picks_df: pd.DataFrame,
+                                pred_df: pd.DataFrame,
+                                lines_df: Optional[pd.DataFrame],
+                                calibrators: Optional[Dict[str, object]] = None) -> pd.DataFrame:
+    """Move each candidate to the best-EV FanDuel line for its player, prop and direction.
+
+    The candidate's direction has already cleared the model gates on the main line;
+    only the contract changes. Lines must carry paired prices, sit within
+    ``live_alt_line_max_distance`` of the main line and respect the favorite cap.
+    The main line is one of the options, so a candidate only moves when another
+    line has higher EV. Adds ``main_line`` and ``line_choice``.
+    """
+    if picks_df is None or len(picks_df) == 0:
+        return picks_df
+    working = picks_df.copy()
+    working['main_line'] = working['line']
+    working['line_choice'] = 'main'
+    if lines_df is None or len(lines_df) == 0 or pred_df is None or len(pred_df) == 0:
+        return working
+
+    market = lines_df.copy()
+    market['_pn'] = market['player'].astype(str).apply(_normalize_name)
+    market['_stat'] = market['prop'].astype(str).str.lower().map(
+        lambda p: _ODDS_PROP_TO_STAT.get(p.replace('_alternate', ''), '')
+    )
+    market['line'] = pd.to_numeric(market['line'], errors='coerce')
+    market = market.dropna(subset=['line'])
+    pred_lookup = pred_df.assign(_pn=pred_df['player'].astype(str).apply(_normalize_name))
+    pred_lookup = pred_lookup.drop_duplicates('_pn').set_index('_pn')
+
+    max_dist = float(CONFIG.get('live_alt_line_max_distance', 2.0))
+    max_fav = float(CONFIG.get('live_max_favorite_american', -200))
+    band_lo, band_hi = CONFIG.get('live_alt_line_raw_prob_band', (0.30, 0.70))
+    for idx, pick in working.iterrows():
+        pn = _normalize_name(pick['player'])
+        stat = str(pick['prop']).lower()
+        if pn not in pred_lookup.index:
+            continue
+        pred_row = pred_lookup.loc[pn]
+        direction = str(pick['direction']).upper()
+        main_line = float(pick['line'])
+        options = market[(market['_pn'] == pn) & (market['_stat'] == stat)
+                         & ((market['line'] - main_line).abs() <= max_dist)]
+        best = None
+        for _, opt in options.iterrows():
+            side_price = opt['under_price'] if direction == 'UNDER' else opt['over_price']
+            other_price = opt['over_price'] if direction == 'UNDER' else opt['under_price']
+            side_dec, other_dec = _american_to_decimal(side_price), _american_to_decimal(other_price)
+            if not (np.isfinite(side_dec) and np.isfinite(other_dec)) or side_price < max_fav:
+                continue
+            raw_over = _line_raw_over_probability(pred_row, stat, float(opt['line']))
+            if not np.isfinite(raw_over):
+                continue
+            if not math.isclose(float(opt['line']), main_line) and not (band_lo <= raw_over <= band_hi):
+                # Calibrator was fitted on main lines; outside this band it plateaus
+                # and conflates "far from the median" with "disagrees with the market".
+                continue
+            p_over = _line_over_probability(pred_row, stat, float(opt['line']), calibrators)
+            side_prob = 1.0 - p_over if direction == 'UNDER' else p_over
+            ev = side_prob * side_dec - 1.0
+            if best is None or ev > best[0]:
+                best = (ev, float(opt['line']), side_prob)
+        if best is not None and not math.isclose(best[1], main_line):
+            working.at[idx, 'line'] = best[1]
+            working.at[idx, 'dir_prob'] = round(best[2] * 100.0, 1)
+            working.at[idx, 'line_choice'] = 'alternate'
+    return working
+
+
 def _format_live_gate_failures(row: pd.Series) -> str:
     failures = []
+    if 'price_gate_pass' in row.index and not bool(row.get('price_gate_pass', False)):
+        failures.append(f"price: {row.get('price_gate_reason', '')}")
     if not bool(row.get('meta_gate_pass', False)):
         meta_val = row.get('meta_prob', np.nan)
         meta_floor = row.get('meta_floor', np.nan)
@@ -1375,6 +1666,10 @@ def _attach_probability_outputs(pred_df: pd.DataFrame,
         working[f'{target}_p_over_cal'] = np.round(cal_probs, 4)
         if 'rate' in details:
             working[f'{target}_rate'] = np.round(np.asarray(details['rate'], dtype=float), 4)
+        # Ordinal tail probabilities P(X >= k): persisted so any line, not only the
+        # main one, can be priced from the same distribution (DEC-066 alt lines).
+        for tag in [t for t in details if str(t).startswith('ge_')]:
+            working[f'{target}_{tag}'] = np.round(np.asarray(details[tag], dtype=float), 5)
 
     return working
 
@@ -1390,6 +1685,100 @@ def _atomic_text(text: str, path: Path) -> None:
     tmp = path.with_suffix(path.suffix + '.tmp')
     tmp.write_text(text, encoding='utf-8')
     os.replace(tmp, path)
+
+
+PICKS_HISTORY_KEY = ['game_date', 'player', 'prop', 'direction', 'line']
+
+
+def _betslip_history_key(frame: pd.DataFrame) -> pd.Series:
+    """Key a betslip by date, slip type and its sorted set of legs (order-independent)."""
+    def _one(row) -> str:
+        legs = []
+        for i in range(1, 11):
+            player = str(row.get(f'Pick_{i}_Player', '') or '').strip()
+            if not player or player.lower() == 'nan':
+                continue
+            line = pd.to_numeric(row.get(f'Pick_{i}_Line'), errors='coerce')
+            legs.append('/'.join([
+                player,
+                str(row.get(f'Pick_{i}_Prop', '') or '').strip().upper(),
+                str(row.get(f'Pick_{i}_Dir', '') or '').strip().upper(),
+                '' if pd.isna(line) else f"{float(line):g}",
+            ]))
+        legacy = str(row.get('picks', '') or '').strip() if not legs else ''
+        return '|'.join([
+            str(row.get('game_date', '') or '').strip(),
+            str(row.get('slip_type', '') or '').strip(),
+            ';'.join(sorted(legs)) or legacy,
+        ])
+    return frame.apply(_one, axis=1) if len(frame) else pd.Series([], dtype=str)
+
+
+def _history_key_series(frame: pd.DataFrame, key) -> pd.Series:
+    """Build a normalized string key per row (line as a number, prop/direction upper)."""
+    if callable(key):
+        return key(frame).astype(str)
+    parts = []
+    for col in key:
+        values = frame[col] if col in frame.columns else pd.Series('', index=frame.index)
+        values = values.fillna('').astype(str).str.strip()
+        if col == 'line':
+            numeric = pd.to_numeric(values, errors='coerce')
+            values = numeric.map(lambda v: '' if pd.isna(v) else f"{float(v):g}").where(
+                numeric.notna(), values
+            )
+        elif col in ('prop', 'direction'):
+            values = values.str.upper()
+        parts.append(values)
+    if not parts:
+        raise ValueError("history key needs at least one column")
+    out = parts[0]
+    for part in parts[1:]:
+        out = out + '|' + part
+    return out
+
+
+def _append_only_history(path: Path, new_rows: pd.DataFrame, key) -> Tuple[pd.DataFrame, int, int]:
+    """Append rows to a history CSV without ever deleting or modifying existing rows.
+
+    DEC-070 data-preservation rule: history files are append-only. Existing rows
+    and columns are kept exactly as stored; a new row is added only when its key is
+    not already present. New columns are added (blank for old rows); no column is
+    ever dropped. Deleting history is an operator decision, never the pipeline's.
+
+    Returns (combined_frame, n_added, n_already_recorded). Raises if the result
+    would somehow contain fewer rows than the existing file.
+    """
+    path = Path(path)
+    new_rows = new_rows.copy() if new_rows is not None else pd.DataFrame()
+    if path.exists():
+        existing = pd.read_csv(path, dtype=str, keep_default_na=False, low_memory=False)
+    else:
+        existing = pd.DataFrame()
+    if len(new_rows) == 0:
+        return existing, 0, 0
+    new_rows = new_rows.astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
+    new_keys = _history_key_series(new_rows, key)
+    first_in_batch = ~new_keys.duplicated(keep='first')
+    if len(existing) > 0:
+        existing_keys = set(_history_key_series(existing, key))
+        is_new = first_in_batch & ~new_keys.isin(existing_keys)
+    else:
+        is_new = first_in_batch
+    additions = new_rows[is_new]
+    n_already = int((~is_new).sum())
+    if len(additions) == 0:
+        return existing, 0, n_already
+    columns = list(existing.columns) + [c for c in additions.columns if c not in existing.columns]
+    combined = pd.concat(
+        [existing.reindex(columns=columns, fill_value=''),
+         additions.reindex(columns=columns, fill_value='')],
+        ignore_index=True,
+    )
+    if len(combined) < len(existing):
+        raise RuntimeError(f"append-only guard: {path.name} would shrink; nothing written")
+    _atomic_csv(combined, path)
+    return combined, int(len(additions)), n_already
 
 
 def _get_output_archive_dir(day_str: str) -> Path:
@@ -2220,6 +2609,60 @@ def _coerce_slate_date(value: object) -> Optional[str]:
     return ts.strftime('%Y-%m-%d')
 
 
+def _utc_now() -> pd.Timestamp:
+    """Return the current UTC time (patchable in tests)."""
+    return pd.Timestamp.now(tz='UTC')
+
+
+def _split_pregame_events(events, now_utc: pd.Timestamp) -> Tuple[list, list]:
+    """Split provider events into (pregame, started) by ``commence_time``.
+
+    An event whose start time is at or before ``now_utc`` is started. Events with
+    a missing or unparseable start time are kept as pregame, matching
+    ``_select_preferred_line_rows``; the price gate still blocks them at publish
+    time because their start time is unknown.
+    """
+    now_utc = pd.Timestamp(now_utc)
+    if now_utc.tzinfo is None:
+        raise ValueError("now_utc must be timezone-aware")
+    pregame, started = [], []
+    for event in events or []:
+        commence = pd.to_datetime(event.get('commence_time'), errors='coerce', utc=True)
+        if pd.notna(commence) and commence <= now_utc:
+            started.append(event)
+        else:
+            pregame.append(event)
+    return pregame, started
+
+
+def _describe_empty_slate(events, target_slate_date: str, remaining_credits=None,
+                          now: Optional[datetime] = None) -> str:
+    """Explain why the provider's event list has no game for the target slate date.
+
+    Logging only: reports observed facts (events listed, their local dates, the
+    local clock time, provider credits) so a zero-pick day states its cause
+    instead of a bare "no events" line.
+    """
+    now = now or datetime.now()
+    local_dates = sorted(
+        d for d in (_coerce_slate_date(e.get('commence_time')) for e in (events or [])) if d
+    )
+    if local_dates:
+        listed = f"{len(local_dates)} event(s) listed, local dates {local_dates[0]}..{local_dates[-1]}"
+    else:
+        listed = "no events listed"
+    credits = (
+        f"{remaining_credits} provider credits remaining"
+        if remaining_credits is not None else "provider credits unknown"
+    )
+    return (
+        f"  Odds API returned no NBA events for today's slate ({target_slate_date}): {listed}; "
+        f"local time {now.strftime('%H:%M')}; {credits}. "
+        "Possible reasons: no game is scheduled today, or today's games have already "
+        "started/finished (a run after tip-off cannot build a pre-game card)."
+    )
+
+
 def _resolve_active_slate_date(lines_df: pd.DataFrame,
                                as_of: Optional[datetime] = None) -> Optional[str]:
     if lines_df is None or len(lines_df) == 0 or 'game_date' not in lines_df.columns:
@@ -2513,17 +2956,40 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
         if remaining_header is None:
             raise RuntimeError("Odds API response omitted the remaining-credit header")
         remaining = int(remaining_header)
-        if check.status_code == 200 and remaining > 50:
+        low_credit_floor = int(CONFIG.get('odds_api_low_credit_warning', 0) or 0)
+        if low_credit_floor and remaining < low_credit_floor:
+            print(
+                f"  !!! ODDS API CREDITS LOW: {remaining:,} remaining (warning floor "
+                f"{low_credit_floor:,}). A full slate needs up to ~126 credits plus the "
+                f"{int(CONFIG.get('live_odds_min_remaining_credits', 100) or 0)}-credit reserve; "
+                "top up or rotate the key before the morning card is blocked. !!!"
+            )
+        if check.status_code == 200:
             events = check.json()
             if events:
                 all_lines = []
                 target_slate_date = datetime.now().strftime('%Y-%m-%d')
-                slate_events = [
+                todays_events = [
                     event for event in events
                     if _coerce_slate_date(event.get('commence_time')) == target_slate_date
                 ]
+                if not todays_events:
+                    print(_describe_empty_slate(events, target_slate_date, remaining))
+                    return pd.DataFrame(), (preferred_bookmaker or 'odds_api')
+                # /events also lists in-play games. Their props are live in-game
+                # lines, not pre-game contracts, so never pay for or store them.
+                slate_events, started_events = _split_pregame_events(todays_events, _utc_now())
+                if started_events:
+                    print(
+                        f"  Skipping {len(started_events)} of {len(todays_events)} slate event(s) "
+                        "that have already tipped off (in-play lines are not pre-game contracts)"
+                    )
                 if not slate_events:
-                    print(f"  Odds API returned no NBA events for today's slate ({target_slate_date})")
+                    print(
+                        f"  All {len(todays_events)} event(s) on {target_slate_date} have already "
+                        f"started (local time {datetime.now().strftime('%H:%M')}); no pre-game "
+                        f"lines to fetch. {remaining} provider credits remaining; none spent."
+                    )
                     return pd.DataFrame(), (preferred_bookmaker or 'odds_api')
                 markets = [
                     'player_points', 'player_rebounds', 'player_assists',
@@ -2531,6 +2997,22 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
                     'player_points_assists', 'player_steals', 'player_blocks',
                     'player_turnovers'
                 ]
+                if CONFIG.get('live_fetch_alternate_markets', False):
+                    markets = markets + list(CONFIG.get('live_alternate_markets', []))
+                request_ceiling = len(markets)
+                provider_reserve = int(
+                    CONFIG.get('live_odds_min_remaining_credits', 100) or 0
+                )
+                required_for_complete_slate = len(slate_events) * request_ceiling
+                required_balance = required_for_complete_slate + provider_reserve
+                if remaining < required_balance:
+                    raise OddsApiBudgetError(
+                        "Odds API full-slate budget insufficient: "
+                        f"{remaining} credits remain, but {len(slate_events)} events x "
+                        f"{request_ceiling} markets require up to {required_for_complete_slate} "
+                        f"credits plus the {provider_reserve}-credit reserve "
+                        f"({required_balance} required). No paid event request was sent."
+                    )
                 failed_events = 0
                 snapshot_ts = datetime.now().astimezone().isoformat()
                 for event in slate_events:
@@ -2636,6 +3118,12 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
                         drop_unknown=True,
                         require_roster=True,
                     )
+                    alt_mask = consolidated['prop'].astype(str).str.endswith('_alternate')
+                    if alt_mask.any():
+                        # Alternate contracts live in their own store so the main-line
+                        # data contract (historical_lines.csv) and training stay unchanged.
+                        _save_alternate_lines(consolidated[alt_mask])
+                        consolidated = consolidated[~alt_mask]
                     print(
                         f"  Fetched {len(consolidated)} validated player props "
                         f"({source_label} via Odds API, {len(slate_events) - failed_events}/"
@@ -2643,8 +3131,12 @@ def fetch_vegas_lines(prefer_prizepicks: bool = False,
                         f"{summary['canonicalized_rows']} canonicalized, {summary['dropped_rows']} dropped)"
                     )
                     return consolidated.reset_index(drop=True), source_label
-        else:
-            fallback_msg = "switching to PrizePicks" if allow_prizepicks_fallback else "no sportsbook refresh available"
+    except OddsApiBudgetError:
+        if not allow_prizepicks_fallback:
+            raise
+        print("  Odds API live-slate budget unavailable - switching to PrizePicks")
+        return fetch_prizepicks_lines(), 'prizepicks'
+        if False:  # pragma: no cover - retained only around a legacy encoded log line
             print(f"  Odds API: {remaining} credits remaining — {fallback_msg}")
     except Exception as e:
         fallback_msg = "switching to PrizePicks" if allow_prizepicks_fallback else "no sportsbook refresh available"
@@ -6036,7 +6528,10 @@ def generate_predictions(
             raise ValueError(
                 f"Models require {required_defense}, but generate_predictions received no slate_date"
             )
+        _stage_t0 = _time.perf_counter()
+        print(f"  Attaching point-in-time defense features ({len(latest)} players)...")
         latest = _attach_live_point_in_time_defense(latest, df, slate_date)
+        print(f"    done in {_time.perf_counter() - _stage_t0:.1f}s")
 
     required_availability = sorted(set(required_feature_cols) & set(LIVE_AVAILABILITY_FEATURES))
     if required_availability:
@@ -6044,7 +6539,10 @@ def generate_predictions(
             raise ValueError(
                 f"Models require {required_availability}, but generate_predictions received no slate_date"
             )
+        _stage_t0 = _time.perf_counter()
+        print(f"  Attaching live availability/minutes features ({len(latest)} players)...")
         latest = _attach_live_availability_minutes(latest, df, slate_date)
+        print(f"    done in {_time.perf_counter() - _stage_t0:.1f}s")
 
     # Check if feature columns exist in latest
     missing_cols = [c for c in required_feature_cols if c not in latest.columns]
@@ -6074,15 +6572,19 @@ def generate_predictions(
     
     # Generate predictions
     predictions = []
-    
+    _stage_t0 = _time.perf_counter()
+    print(f"  Scoring {len(latest)} players x {len(models)} prop models...")
+
     for idx, row in latest.iterrows():
         player = row['player']
         team = row.get('team', row.get('TEAM_ABBREVIATION', ''))
         player_fp_applied = False
         
+        opp = row.get('opp', '')
         player_preds = {
             'player': player,
             'team': team,
+            'opp': '' if opp is None or pd.isna(opp) else str(opp),
             'games_played': row['games_played'],
         }
         
@@ -6214,7 +6716,8 @@ def generate_predictions(
         player_preds['fp_applied'] = player_fp_applied
         
         predictions.append(player_preds)
-    
+
+    print(f"    scored {len(predictions)} players in {_time.perf_counter() - _stage_t0:.1f}s")
     pred_df = pd.DataFrame(predictions)
 
     # Apply injury adjustments (before Vegas merge so combo preds are boosted too)
@@ -8093,27 +8596,38 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
     return picks_df
 
 
+def _live_pick_target() -> Optional[int]:
+    """Configured live card size; None means no limit."""
+    value = CONFIG.get('live_pick_target')
+    return None if value is None else int(value)
+
+
 def build_live_pick_card(picks_df: pd.DataFrame,
-                         target_picks: int = 5,
+                         target_picks: Optional[int] = 5,
                          min_picks: int = 5,
                          slate_date: Optional[str] = None,
                          history_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     Build the published live card from a sanitized candidate pool.
 
-    Tiered accuracy mode:
+    ``target_picks=None`` publishes every pick that passes all accuracy gates
+    (the 'core' tier), with no size limit; the backfill tiers exist only to reach
+    a fixed card size and are not used. With an integer target, tiered mode:
     1. prefer strict publish-bar picks
     2. if the card is short, backfill with the best market-model picks that still
        pass the structural safety gates
     3. only use fill/emergency rows as a last resort to reach the requested card size
+    ``live_pick_max_per_prop`` (None = unlimited) caps picks per stat category.
     """
     if picks_df is None or len(picks_df) == 0:
         return pd.DataFrame() if picks_df is None else picks_df
 
-    target_picks = max(0, int(target_picks))
-    min_picks = max(0, min(int(min_picks), target_picks))
-    if target_picks == 0:
-        return picks_df.iloc[0:0].copy()
+    unlimited = target_picks is None
+    if not unlimited:
+        target_picks = max(0, int(target_picks))
+        min_picks = max(0, min(int(min_picks), target_picks))
+        if target_picks == 0:
+            return picks_df.iloc[0:0].copy()
 
     working = picks_df.copy()
     excluded_upper = _excluded_pick_props_upper()
@@ -8195,14 +8709,17 @@ def build_live_pick_card(picks_df: pd.DataFrame,
         ('market_structured', market_model_mask & working['meta_gate_pass'] & working['volatility_gate_pass']),
         ('structured', working['meta_gate_pass'] & working['volatility_gate_pass']),
     ]
+    if unlimited:
+        tier_specs = tier_specs[:1]
 
-    goal = max(target_picks, min_picks)
+    goal = float('inf') if unlimited else max(target_picks, min_picks)
     selected_rows = []
     seen_players = set()
     seen_pairs = set()
     prop_counts = {}
     used_indices = set()
-    max_per_prop = max(1, int(CONFIG.get('live_pick_max_per_prop', 1)))
+    max_per_prop_cfg = CONFIG.get('live_pick_max_per_prop')
+    max_per_prop = float('inf') if max_per_prop_cfg is None else max(1, int(max_per_prop_cfg))
 
     for tier_rank, (tier_name, tier_mask) in enumerate(tier_specs, start=1):
         tier_df = working.loc[tier_mask].copy()
@@ -8241,6 +8758,8 @@ def build_live_pick_card(picks_df: pd.DataFrame,
     final_sort = ['publish_tier_rank', 'projection_type_rank'] + sort_cols if sort_cols else ['publish_tier_rank', 'projection_type_rank']
     final_ascending = [True, True] + ([False] * len(sort_cols) if sort_cols else [])
     final_df = final_df.sort_values(final_sort, ascending=final_ascending).reset_index(drop=True)
+    if unlimited:
+        return final_df
     return final_df.head(target_picks).reset_index(drop=True)
 
 
@@ -9070,6 +9589,29 @@ def _calc_payout(wager: float, n_picks: int) -> float:
     return round(wager * mult, 2)
 
 
+def _slip_gross_multiplier(subset: pd.DataFrame) -> Optional[float]:
+    """Gross payout multiplier for a slip, or None when it cannot be placed as priced.
+
+    PrizePicks mode uses the fixed Power Play table. FanDuel mode prices a standard
+    parlay as the product of each leg's decimal odds; legs from the same event are
+    rejected because FanDuel prices same-game parlays with its own correlation
+    adjustment, so the product would overstate the payout.
+    """
+    n_legs = len(subset)
+    if not _fanduel_price_mode():
+        return float(_PP_MULTIPLIERS.get(n_legs, n_legs * 2.0))
+    decimals = pd.to_numeric(
+        subset.get('side_decimal_odds', pd.Series(np.nan, index=subset.index)), errors='coerce'
+    )
+    if decimals.isna().any() or (decimals <= 1.0).any():
+        return None
+    events = subset.get('event_id', pd.Series('', index=subset.index)).fillna('').astype(str)
+    events = events[events.str.strip().ne('') & events.str.lower().ne('nan')]
+    if events.duplicated().any():
+        return None
+    return float(np.prod(decimals.to_numpy(dtype=float)))
+
+
 def _power_play_break_even_prob(n_picks: int) -> float:
     mult = _PP_MULTIPLIERS.get(n_picks, n_picks * 2.0)
     return float((1.0 / max(mult, 1e-9)) ** (1.0 / max(int(n_picks), 1)))
@@ -9079,6 +9621,10 @@ def _coerce_pick_side_probability(row: pd.Series) -> float:
     dir_prob = row.get('dir_prob', row.get('ou_prob'))
     if dir_prob is not None and not pd.isna(dir_prob):
         prob = float(dir_prob)
+        # Pick rows store dir_prob as a percentage (72.0); clipping that to 0.99
+        # treated every slip leg as near-certain.
+        if prob > 1.0:
+            prob /= 100.0
     else:
         conf = pd.to_numeric(pd.Series([row.get('confidence')]), errors='coerce').iloc[0]
         prob = float(conf) / 100.0 if pd.notna(conf) else 0.50
@@ -9201,22 +9747,42 @@ def _sort_betslip_candidates(candidates: pd.DataFrame) -> pd.DataFrame:
 def _prepare_betslip_candidate_pool(picks_df: pd.DataFrame,
                                     *,
                                     direction: Optional[str] = None,
-                                    allowed_props: Optional[set] = None) -> pd.DataFrame:
+                                    allowed_props: Optional[set] = None,
+                                    funnel: Optional[List[str]] = None) -> pd.DataFrame:
+    """Filter and rank picks eligible for slips.
+
+    When ``funnel`` is a list, a human-readable "<count> <stage>" entry is appended
+    per filter so callers can log why the pool ended up empty.
+    """
+    def _note(stage: str, frame: pd.DataFrame) -> None:
+        if funnel is not None:
+            funnel.append(f"{len(frame)} {stage}")
+
     eligible_df = picks_df.copy()
+    _note('picks', eligible_df)
     excluded_upper = _excluded_pick_props_upper()
     if excluded_upper and 'prop' in eligible_df.columns:
         eligible_df = eligible_df[~eligible_df['prop'].astype(str).str.upper().isin(excluded_upper)]
+        _note('after excluded props', eligible_df)
     if 'pick_source' in eligible_df.columns:
         eligible_df = eligible_df[~eligible_df['pick_source'].isin(['volume_fill', 'emergency_fill'])]
+        _note('after fill exclusion', eligible_df)
     if 'confidence' in eligible_df.columns:
         conf = pd.to_numeric(eligible_df['confidence'], errors='coerce').fillna(0.0)
+        max_conf = f"{conf.max():.1f}" if len(conf) else 'n/a'
         eligible_df = eligible_df[conf >= 70.0]
+        _note(f'at confidence >= 70 (max {max_conf})', eligible_df)
     if direction is not None and 'direction' in eligible_df.columns:
         eligible_df = eligible_df[eligible_df['direction'].astype(str).str.upper() == str(direction).upper()]
+        _note(f'{str(direction).upper()} only', eligible_df)
     if allowed_props is not None and 'prop' in eligible_df.columns:
         prop_set = {str(prop).upper() for prop in allowed_props}
         eligible_df = eligible_df[eligible_df['prop'].astype(str).str.upper().isin(prop_set)]
-    return _sort_betslip_candidates(eligible_df)
+        _note('in allowed props', eligible_df)
+    sorted_df = _sort_betslip_candidates(eligible_df)
+    if len(sorted_df) != len(eligible_df):
+        _note('after one-per-player', sorted_df)
+    return sorted_df
 
 
 def _select_best_power_play_subset(candidates: pd.DataFrame,
@@ -9234,8 +9800,10 @@ def _select_best_power_play_subset(candidates: pd.DataFrame,
 
     for combo in combinations(range(len(pool)), size):
         subset = pool.iloc[list(combo)].reset_index(drop=True)
+        gross_mult = _slip_gross_multiplier(subset)
+        if gross_mult is None:
+            continue
         metrics = _estimate_joint_probabilities(subset)
-        gross_mult = float(_PP_MULTIPLIERS.get(size, size * 2.0))
         break_even_joint_prob = 1.0 / gross_mult
         ev_per_unit = metrics['joint_prob_adj'] * gross_mult - 1.0
         metrics.update({
@@ -9263,7 +9831,9 @@ def _build_betslip_row(subset: pd.DataFrame,
                        max_legs: int = 4) -> Dict[str, object]:
     metrics = _estimate_joint_probabilities(subset)
     n_legs = len(subset)
-    gross_mult = float(_PP_MULTIPLIERS.get(n_legs, n_legs * 2.0))
+    gross_mult = _slip_gross_multiplier(subset)
+    if gross_mult is None:
+        raise ValueError("Betslip legs cannot be priced as a FanDuel parlay")
     metrics.update({
         'break_even_joint_prob': 1.0 / gross_mult,
         'ev_per_unit': metrics['joint_prob_adj'] * gross_mult - 1.0,
@@ -9274,7 +9844,7 @@ def _build_betslip_row(subset: pd.DataFrame,
         'game_date': game_date,
         'slip_type': slip_type,
         'wager': wager,
-        'potential_payout': _calc_payout(wager, n_legs),
+        'potential_payout': round(wager * gross_mult, 2),
         'joint_prob_raw': round(metrics['joint_prob_raw'], 4),
         'estimated_correlation': round(metrics['estimated_correlation'], 3),
         'joint_prob_adj': round(metrics['joint_prob_adj'], 4),
@@ -9289,11 +9859,14 @@ def _build_betslip_row(subset: pd.DataFrame,
         row_data[f'Pick_{i}_Prop'] = str(leg['prop']).upper()
         row_data[f'Pick_{i}_Dir'] = str(leg['direction']).upper()
         row_data[f'Pick_{i}_Line'] = leg['line']
+        side_price = leg.get('side_price', np.nan)
+        row_data[f'Pick_{i}_Price'] = '' if side_price is None or pd.isna(side_price) else side_price
     for i in range(len(subset) + 1, max_legs + 1):
         row_data[f'Pick_{i}_Player'] = ''
         row_data[f'Pick_{i}_Prop'] = ''
         row_data[f'Pick_{i}_Dir'] = ''
         row_data[f'Pick_{i}_Line'] = ''
+        row_data[f'Pick_{i}_Price'] = ''
     return row_data
 
 
@@ -9320,8 +9893,10 @@ def _eligible_under_betslip_props() -> set:
 
 def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
     """
-    Auto-log suggested PrizePicks Power Play bet slips to betslips_history.csv.
-    Uses EV-ranked candidate selection under the current Power Play payout model.
+    Auto-log suggested bet slips to betslips_history.csv.
+    In FanDuel mode, slips are cross-game parlays priced as the product of each
+    leg's exact decimal odds (Pick_i_Price holds the leg's American price); in
+    PrizePicks mode the fixed Power Play table is used. Slips are EV-ranked.
     """
     slip_path = CONFIG['output_dir'] / 'betslips_history.csv'
 
@@ -9338,12 +9913,16 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
         'ev_per_unit',
         'ev_dollar',
     ]
+    price_cols = [f'Pick_{i}_Price' for i in range(1, MAX_LEGS + 1)]
     col_order = [
         'game_date', 'slip_type', 'wager', 'potential_payout',
-    ] + metric_cols + pick_cols + ['result', 'actual_payout']
+    ] + metric_cols + pick_cols + ['result', 'actual_payout'] + price_cols
+    slip_label = 'FanDuel Parlay' if _fanduel_price_mode() else 'Power Play'
+    under_label = 'FanDuel UNDER Parlay' if _fanduel_price_mode() else 'UNDER-Only'
 
     rows = []
-    power_pool = _prepare_betslip_candidate_pool(picks_df)
+    power_funnel: List[str] = []
+    power_pool = _prepare_betslip_candidate_pool(picks_df, funnel=power_funnel)
     for size in [2, 3, 4]:
         candidate_limit = {2: 6, 3: 8, 4: 10}.get(size, max(6, size * 2))
         subset, _ = _select_best_power_play_subset(power_pool, size, wager, candidate_limit)
@@ -9353,7 +9932,7 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
             _build_betslip_row(
                 subset,
                 game_date=game_date,
-                slip_type=f'{size}-pick Power Play',
+                slip_type=f'{size}-pick {slip_label}',
                 wager=wager,
                 max_legs=MAX_LEGS,
             )
@@ -9378,7 +9957,7 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
             _build_betslip_row(
                 subset,
                 game_date=game_date,
-                slip_type=f'{size}-pick UNDER-Only',
+                slip_type=f'{size}-pick {under_label}',
                 wager=wager,
                 max_legs=MAX_LEGS,
             )
@@ -9386,40 +9965,26 @@ def log_betslips(picks_df: pd.DataFrame, game_date: str, wager: float = 20.0):
     # ── End UNDER-Only track ─────────────────────────────────────────────────
 
     if not rows:
+        print(f"  No betslips — slip pool: {' -> '.join(power_funnel)}")
+        if len(power_pool) >= 2:
+            print(f"    {len(power_pool)} eligible legs, but no combination could be priced "
+                  f"(same-game legs or missing odds)")
+        elif len(power_pool) == 1:
+            print("    Only 1 eligible leg; slips need at least 2")
         empty_df = pd.DataFrame(columns=col_order)
-        if slip_path.exists():
-            existing = pd.read_csv(slip_path, dtype=str)
-            for col in col_order:
-                if col not in existing.columns:
-                    existing[col] = ''
-            if 'picks' in existing.columns:
-                existing = _migrate_picks_column(existing)
-            existing = existing[existing['game_date'] != game_date]
-            existing = existing.reindex(columns=col_order, fill_value='')
-            existing.to_csv(slip_path, index=False)
-        print(f"  Betslips logged -> {slip_path}  (0 slips for {game_date})")
+        # Append-only (DEC-070): zero slips this run never removes slips already
+        # recorded for this slate by an earlier run.
+        print(f"  Betslips: 0 new slips for {game_date}; betslips_history.csv left unchanged")
         return empty_df
 
     new_df = pd.DataFrame(rows)[col_order]
-
-    if slip_path.exists():
-        existing = pd.read_csv(slip_path, dtype=str)
-        # Ensure existing file has all columns (backward compat with old pipe format)
-        for col in col_order:
-            if col not in existing.columns:
-                existing[col] = ''
-        # If old file still has a 'picks' column, migrate it
-        if 'picks' in existing.columns:
-            existing = _migrate_picks_column(existing)
-        existing = existing[existing['game_date'] != game_date]  # replace today
-        existing = existing.reindex(columns=col_order, fill_value='')
-        combined = pd.concat([existing, new_df.astype(str)], ignore_index=True)
-    else:
-        combined = new_df
-
-    combined.to_csv(slip_path, index=False)
-    print(f"  Betslips logged -> {slip_path}  ({len(rows)} slips for {game_date})")
-    return new_df.reset_index(drop=True)
+    new_df['published_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    combined, n_added, n_already = _append_only_history(slip_path, new_df, _betslip_history_key)
+    print(
+        f"  Betslips logged -> {slip_path}  (+{n_added} new, {n_already} already recorded "
+        f"for {game_date}; existing slips never modified)"
+    )
+    return new_df.drop(columns=['published_at']).reset_index(drop=True)
 
 
 def backtest_under_only_slips(history_df: Optional[pd.DataFrame] = None, wager: float = 20.0) -> Tuple[pd.DataFrame, Dict[str, object]]:
@@ -9973,6 +10538,200 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
     return picks.loc[clean_idx].reset_index(drop=True)
 
 
+def _log_tracking_only_props(pred_df: pd.DataFrame,
+                             market_lines: Optional[pd.DataFrame],
+                             slate_date: str) -> pd.DataFrame:
+    """Record model leans on evidence-blocked props without publishing or betting them.
+
+    For each prop in ``live_tracking_only_props`` with a FanDuel line, logs the model's
+    favored side, its probability, the exact side price and EV to
+    ``output/tracking_only_history.csv`` (rows for ``slate_date`` are replaced). These
+    rows never enter picks_history or betslips; they exist to build a forward record
+    that can later justify, or keep blocking, the prop.
+    """
+    props = [str(p).lower() for p in CONFIG.get('live_tracking_only_props', []) or []]
+    if not props or pred_df is None or len(pred_df) == 0:
+        return pd.DataFrame()
+    try:
+        rows = []
+        for prop in props:
+            line_col, cal_col, clf_col = f'{prop}_line', f'{prop}_p_over_cal', f'{prop}_clf_prob'
+            if line_col not in pred_df.columns:
+                continue
+            for _, row in pred_df[pred_df[line_col].notna()].iterrows():
+                p_over = row.get(cal_col)
+                prob_source = 'calibrated_p_over'
+                if p_over is None or pd.isna(p_over):
+                    p_over, prob_source = row.get(clf_col), 'classifier_raw'
+                if p_over is None or pd.isna(p_over):
+                    continue
+                p_over = float(p_over)
+                direction = 'OVER' if p_over >= 0.5 else 'UNDER'
+                rows.append({
+                    'player': row['player'],
+                    'team': row.get('team', ''),
+                    'opponent': row.get('opp', ''),
+                    'prop': prop.upper(),
+                    'direction': direction,
+                    'line': row[line_col],
+                    'prediction': row.get(f'{prop}_pred'),
+                    'dir_prob': round(100.0 * (p_over if direction == 'OVER' else 1.0 - p_over), 1),
+                    'prob_source': prob_source,
+                })
+        if not rows:
+            print(f"  Tracking-only log: no lines for {', '.join(p.upper() for p in props)} on {slate_date}")
+            return pd.DataFrame()
+        tracked = _attach_live_market_prices(pd.DataFrame(rows), market_lines)
+        tracked.insert(0, 'game_date', slate_date)
+        tracked['tracking_only'] = True
+        tracked['logged_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # Leans for games already tipped carry in-play prices; do not record them.
+        n_started = 0
+        if 'commence_time' in tracked.columns:
+            commence = pd.to_datetime(tracked['commence_time'], errors='coerce', utc=True)
+            started = commence.notna() & commence.le(_utc_now())
+            n_started = int(started.sum())
+            tracked = tracked[~started].copy()
+        path = CONFIG['output_dir'] / 'tracking_only_history.csv'
+        # Append-only (DEC-070): earlier runs' rows for this slate are never removed.
+        _, n_added, n_already = _append_only_history(path, tracked, PICKS_HISTORY_KEY)
+        n_pos = int(tracked['price_gate_pass'].astype(bool).sum()) if len(tracked) else 0
+        print(
+            f"  Tracking-only log: {len(tracked)} {'/'.join(p.upper() for p in props)} leans "
+            f"({n_pos} would clear the price gate; +{n_added} new, {n_already} already recorded"
+            + (f", {n_started} skipped: game started" if n_started else "")
+            + f") -> {path.name}  [NOT BET]"
+        )
+        return tracked
+    except Exception as exc:
+        print(f"  WARNING: tracking-only log failed ({type(exc).__name__}: {exc}); live card unaffected")
+        return pd.DataFrame()
+
+
+CANDIDATE_HISTORY_KEY = ['game_date', 'player', 'prop', 'direction', 'line']
+CANDIDATE_HISTORY_COLUMNS = [
+    'game_date', 'player', 'team', 'opponent', 'prop', 'direction', 'line', 'line_choice',
+    'prediction', 'edge', 'confidence', 'calibrated_conf', 'meta_prob', 'dir_prob',
+    'estimated_hit_rate', 'pick_source', 'signal_grade',
+    'side_price', 'side_decimal_odds', 'break_even_prob', 'no_vig_side_prob',
+    'model_side_prob', 'ev_per_unit', 'price_gate_pass', 'price_gate_reason',
+    'accuracy_gate_pass', 'gate_failures', 'line_source', 'commence_time', 'event_id',
+    'line_snapshot_ts', 'published', 'gate_bucket', 'logged_at',
+    'result', 'actual', 'profit_units', 'graded_at',
+]
+
+
+def _candidate_gate_bucket(row: pd.Series) -> str:
+    """Classify a candidate as published, blocked by the price gate, or blocked elsewhere."""
+    if str(row.get('published', '')).strip().lower() == 'true':
+        return 'published'
+    price_pass = str(row.get('price_gate_pass', '')).strip().lower()
+    if price_pass == 'false':
+        return 'blocked_price'
+    return 'blocked_other'
+
+
+def _log_candidate_history(candidates: pd.DataFrame,
+                           published: pd.DataFrame,
+                           slate_date: Optional[str],
+                           now_utc: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+    """Append the model's final pre-card candidates to ``output/candidates_history.csv``.
+
+    Tracking only: rows never enter picks_history or betslips. Every candidate that
+    survived the injury/sanity check is kept, published or not, so the gates can be
+    judged later against graded results (``run_daily`` Step 1.8 grades them).
+
+    Rules:
+      * A candidate whose game had already tipped at run time is skipped. A late
+        rerun therefore cannot overwrite the pre-game record with in-play prices.
+      * Rows upsert on (game_date, player, prop, direction, line): the latest
+        pre-tip run's values win, but ``published`` is sticky once True, and rows
+        from earlier runs that are absent now are kept.
+      * Already-graded rows are never modified.
+    """
+    if candidates is None or len(candidates) == 0 or not slate_date:
+        return pd.DataFrame()
+    try:
+        now_utc = pd.Timestamp(now_utc) if now_utc is not None else _utc_now()
+        frame = candidates.copy()
+        frame['game_date'] = str(slate_date)
+        frame['prop'] = frame['prop'].astype(str).str.upper()
+        frame['direction'] = frame['direction'].astype(str).str.upper()
+        frame['line'] = pd.to_numeric(frame['line'], errors='coerce')
+
+        skipped_started = 0
+        if 'commence_time' in frame.columns:
+            commence = pd.to_datetime(frame['commence_time'], errors='coerce', utc=True)
+            started = commence.notna() & commence.le(now_utc)
+            skipped_started = int(started.sum())
+            frame = frame[~started].copy()
+        if len(frame) == 0:
+            print(
+                f"  Candidate history: all {skipped_started} candidate(s) are for games that "
+                "already started; pre-game record left unchanged"
+            )
+            return pd.DataFrame()
+
+        published_keys = set()
+        if published is not None and len(published) > 0:
+            for _, p in published.iterrows():
+                line_val = pd.to_numeric(p.get('line'), errors='coerce')
+                published_keys.add((
+                    str(p.get('player', '')), str(p.get('prop', '')).upper(),
+                    str(p.get('direction', '')).upper(),
+                    None if pd.isna(line_val) else float(line_val),
+                ))
+        frame['published'] = [
+            (str(r['player']), r['prop'], r['direction'],
+             None if pd.isna(r['line']) else float(r['line'])) in published_keys
+            for _, r in frame.iterrows()
+        ]
+        frame['logged_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        for col in CANDIDATE_HISTORY_COLUMNS:
+            if col not in frame.columns:
+                frame[col] = ''
+        frame = frame[CANDIDATE_HISTORY_COLUMNS].copy()
+        frame['line'] = frame['line'].map(lambda v: '' if pd.isna(v) else f"{float(v):g}")
+        frame = frame.astype(str).replace({'nan': '', 'None': ''})
+        frame['gate_bucket'] = frame.apply(_candidate_gate_bucket, axis=1)
+
+        path = CONFIG['output_dir'] / 'candidates_history.csv'
+        # Append-only (DEC-070): the first pre-tip record of a candidate is kept as
+        # stored. The single in-place change allowed is marking an existing, still
+        # ungraded row published=True when a later pre-tip run actually publishes it.
+        promoted = 0
+        if path.exists():
+            existing = pd.read_csv(path, dtype=str, keep_default_na=False)
+            ex_key = _history_key_series(existing, CANDIDATE_HISTORY_KEY)
+            now_published = set(
+                _history_key_series(frame[frame['published'] == 'True'], CANDIDATE_HISTORY_KEY)
+            ) if (frame['published'] == 'True').any() else set()
+            promote = (
+                ex_key.isin(now_published)
+                & existing['published'].str.lower().ne('true')
+                & existing['result'].str.strip().eq('')
+            )
+            promoted = int(promote.sum())
+            if promoted:
+                existing.loc[promote, 'published'] = 'True'
+                existing.loc[promote, 'gate_bucket'] = 'published'
+                _atomic_csv(existing, path)
+        _, n_added, n_already = _append_only_history(path, frame, CANDIDATE_HISTORY_KEY)
+        counts = frame['gate_bucket'].value_counts().to_dict()
+        print(
+            f"  Candidate history: {len(frame)} candidate(s) logged for {slate_date} "
+            f"(published {counts.get('published', 0)}, blocked by price "
+            f"{counts.get('blocked_price', 0)}, blocked by other gates "
+            f"{counts.get('blocked_other', 0)}"
+            + (f"; {skipped_started} skipped, game already started" if skipped_started else "")
+            + f") -> {path.name}  [TRACKING ONLY]"
+        )
+        return frame
+    except Exception as exc:
+        print(f"  WARNING: candidate history log failed ({type(exc).__name__}: {exc}); live card unaffected")
+        return pd.DataFrame()
+
+
 def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Optional[str] = None):
     """Save picks to CSV and generate simple HTML report."""
     _migrate_legacy_output_artifacts()
@@ -10027,6 +10786,20 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Option
         ('postseason_pick_score', np.nan),
         ('break_even_prob', np.nan),
         ('exceeds_ev_threshold', False),
+        ('over_price', np.nan),
+        ('under_price', np.nan),
+        ('side_price', np.nan),
+        ('side_decimal_odds', np.nan),
+        ('no_vig_side_prob', np.nan),
+        ('model_side_prob', np.nan),
+        ('ev_per_unit', np.nan),
+        ('commence_time', ''),
+        ('event_id', ''),
+        ('line_snapshot_ts', ''),
+        ('price_gate_pass', False),
+        ('price_gate_reason', ''),
+        ('main_line', np.nan),
+        ('line_choice', 'main'),
     ]:
         if col not in picks_df.columns:
             picks_df[col] = default
@@ -10045,18 +10818,19 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Option
     print(f"\n  Picks archived to {picks_run_path}")
     print(f"  Predictions archived to {predictions_run_path}")
 
-    # Append to cumulative history file for tracking
+    # Append-only cumulative history (DEC-070): a rerun never deletes or rewrites
+    # rows already recorded; it only adds picks not yet in the history.
     history_path = CONFIG['output_dir'] / 'picks_history.csv'
     daily = picks_df.copy()
     daily.insert(0, 'game_date', slate_date)
-    if history_path.exists():
-        existing = pd.read_csv(history_path, dtype=str)
-        existing = existing[existing['game_date'] != slate_date]  # replace current slate rows
-        combined = pd.concat([existing, daily.astype(str)], ignore_index=True)
-    else:
-        combined = daily
-    combined.to_csv(history_path, index=False)
-    print(f"  History updated -> {history_path}  ({len(combined):,} total rows)")
+    daily['published_at'] = run_dt.strftime('%Y-%m-%d %H:%M:%S')
+    combined, n_added, n_already = _append_only_history(
+        history_path, daily.astype(str), PICKS_HISTORY_KEY
+    )
+    print(
+        f"  History updated -> {history_path}  (+{n_added} new, {n_already} already recorded, "
+        f"{len(combined):,} total rows; existing rows never modified)"
+    )
 
     # Generate HTML dashboard
     html = generate_html_report(picks_df, run_stamp)
@@ -10726,6 +11500,7 @@ def main():
         today_str = datetime.now().strftime('%Y-%m-%d')
         lines_path = CONFIG['data_dir'] / 'historical_lines.csv'
         vegas = pd.DataFrame()
+        market_lines = pd.DataFrame()
         _line_source = 'unknown'
         active_slate_date = today_str
         line_source_mode = str(CONFIG.get('live_line_source_mode', 'fanduel') or 'fanduel').strip().lower()
@@ -10757,6 +11532,7 @@ def main():
                         f"from historical_lines.csv [source: {_line_source}]"
                     )
                 _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_hist.columns]
+                market_lines = active_hist.copy()
                 vegas = active_hist[['player', 'prop', 'line'] + _market_cols].copy()
                 vegas['num_books'] = active_hist['num_books'].values if 'num_books' in active_hist.columns else 1
             elif hist_slate_date:
@@ -10807,6 +11583,7 @@ def main():
                 active_slate_date = live_slate_date or today_str
                 if len(active_live) > 0:
                     _market_cols = [c for c in ['projection_type', 'is_promo'] if c in active_live.columns]
+                    market_lines = active_live.copy()
                     vegas = active_live[['player', 'prop', 'line'] + _market_cols].copy()
                     vegas['num_books'] = active_live['num_books'].values if 'num_books' in active_live.columns else 1
 
@@ -10857,8 +11634,8 @@ def main():
 
         # Build a deeper candidate pool, then publish the highest-history-accuracy card.
         candidate_pool_size = max(
-            int(CONFIG.get('live_pick_candidate_pool', 25)),
-            int(CONFIG.get('live_pick_min', 5)) * 10,
+            int(CONFIG.get('live_pick_candidate_pool', 500)),
+            int(CONFIG.get('live_pick_min', 0) or 0) * 10,
         )
         picks = filter_best_picks(
             pred_df,
@@ -10869,15 +11646,44 @@ def main():
         # Fetch fresh injury report and remove risky availability picks
         inj_report = fetch_injury_data()
         picks = sanity_check_picks(picks, df, inj_report)
+        price_gate_active = _fanduel_price_mode() and bool(CONFIG.get('live_price_gate_enabled', True))
+        if price_gate_active and len(picks) > 0:
+            contract_lines = market_lines
+            if len(market_lines) > 0 and 'snapshot_ts' in market_lines.columns:
+                alt_lines = _load_alternate_lines(
+                    active_slate_date, snapshot_ts=str(market_lines['snapshot_ts'].astype(str).max())
+                )
+                if len(alt_lines) > 0:
+                    # Alternates first so the main-line row wins any duplicate line.
+                    contract_lines = pd.concat([alt_lines, market_lines], ignore_index=True)
+                print(f"  Contract lines: {len(market_lines)} main + {len(alt_lines)} alternate FanDuel lines")
+            picks = _select_best_contract_lines(picks, pred_df, contract_lines)
+            n_alt = int((picks['line_choice'] == 'alternate').sum())
+            if n_alt:
+                print(f"  Alternate lines: {n_alt} candidate(s) moved to a higher-EV FanDuel line")
+            picks = _attach_live_market_prices(picks, contract_lines)
+            blocked = picks[~picks['price_gate_pass']]
+            print(
+                f"\n  Price gate: {int(picks['price_gate_pass'].sum())}/{len(picks)} candidates are +EV "
+                f"at the exact FanDuel price (min EV {float(CONFIG.get('live_min_ev_per_unit', 0.03)):+.2f}, "
+                f"favorite cap {float(CONFIG.get('live_max_favorite_american', -200)):+.0f})"
+            )
+            for _, r in blocked.head(10).iterrows():
+                print(f"    blocked {r['player']} {r['prop']} {r['direction']} {r['line']}: {r['price_gate_reason']}")
+        _log_tracking_only_props(pred_df, market_lines, active_slate_date)
         pre_card_candidates = _apply_live_accuracy_gates(picks.copy(), history_df=df)
         if len(pre_card_candidates) > 0:
             pre_card_candidates['line_source'] = _line_source
             pre_card_candidates['gate_failures'] = pre_card_candidates.apply(_format_live_gate_failures, axis=1)
         _atomic_csv(pre_card_candidates, CONFIG['output_dir'] / 'candidates_latest.csv')
+        if price_gate_active and len(picks) > 0:
+            # Hard filter before the tier cascade: lower tiers bypass accuracy gates,
+            # but nothing may publish without a +EV executable FanDuel price.
+            picks = picks[picks['price_gate_pass']].reset_index(drop=True)
         picks = build_live_pick_card(
             picks,
-            target_picks=int(CONFIG.get('live_pick_target', 5)),
-            min_picks=int(CONFIG.get('live_pick_min', 5)),
+            target_picks=_live_pick_target(),
+            min_picks=int(CONFIG.get('live_pick_min', 0) or 0),
             slate_date=active_slate_date,
             history_df=df,
         )
@@ -10885,11 +11691,15 @@ def main():
         if not line_source_policy_ok and len(picks) > 0:
             picks = picks.iloc[0:0].copy()
 
+        # Tracking only: keep every final candidate (published or gated out) so
+        # run_daily Step 1.8 can grade how the gates are doing.
+        _log_candidate_history(pre_card_candidates, picks, active_slate_date)
+
         print(f"\n{len(picks)} picks found after live-card filtering")
-        if len(picks) < int(CONFIG.get('live_pick_min', 5)):
+        if len(picks) < int(CONFIG.get('live_pick_min', 0) or 0):
             print(
                 f"  WARNING: only {len(picks)} live picks survived today "
-                f"(minimum target {int(CONFIG.get('live_pick_min', 5))})"
+                f"(minimum target {int(CONFIG.get('live_pick_min', 0) or 0)})"
             )
         if len(picks) == 0:
             print("\nNo picks cleared the publish bar today. Official card will be empty.")
@@ -10900,16 +11710,8 @@ def main():
         picks['line_source'] = _line_source
 
         if len(picks) > 0:
-            # Top 10 display: one pick per player in learned-accuracy order.
-            seen = []
-            top_display = []
-            for _, row in picks.iterrows():
-                if row['player'] not in seen:
-                    seen.append(row['player'])
-                    top_display.append(row)
-                if len(top_display) >= 10:
-                    break
-            top_display_df = pd.DataFrame(top_display)
+            # Display every published pick in card order (the card has no size limit).
+            top_display_df = picks
             print()
             print("=" * 72)
             print("  TODAY'S PICKS")
@@ -11043,8 +11845,8 @@ def main():
         pred_df = generate_predictions(df, vegas, use_feature_cache=False)
         reg_candidates = compute_regression_candidates(df)
         candidate_pool_size = max(
-            int(CONFIG.get('live_pick_candidate_pool', 25)),
-            int(CONFIG.get('live_pick_min', 5)) * 10,
+            int(CONFIG.get('live_pick_candidate_pool', 500)),
+            int(CONFIG.get('live_pick_min', 0) or 0) * 10,
         )
         picks = filter_best_picks(
             pred_df,
@@ -11055,8 +11857,8 @@ def main():
         picks = sanity_check_picks(picks, df, inj_report_all)
         picks = build_live_pick_card(
             picks,
-            target_picks=int(CONFIG.get('live_pick_target', 5)),
-            min_picks=int(CONFIG.get('live_pick_min', 5)),
+            target_picks=_live_pick_target(),
+            min_picks=int(CONFIG.get('live_pick_min', 0) or 0),
             slate_date=active_slate_date_all,
             history_df=df,
         )

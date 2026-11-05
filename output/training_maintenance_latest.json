@@ -1,17 +1,6 @@
 {
-  "candidate": {
-    "candidate_id": "full_layers_20261027_150127",
-    "created_at": "2026-10-27T15:01:53.091833-05:00",
-    "future_holdout_start": "2026-10-28",
-    "minimum_dates": 15,
-    "minimum_rows": 100,
-    "model_dir": "models/weekly_candidates/full_layers_20261027_150127",
-    "probability_holdout_summary": "output/full_layers_20261027_150127_probability_holdout_summary.json",
-    "same_row_oof_summary": "output/full_layers_20261027_150127_same_row_oof_summary.json",
-    "status": "shadow_pending_future_results"
-  },
-  "ended_at": "2026-10-27T15:17:12.604177-05:00",
-  "mode": "audit",
+  "ended_at": "2026-11-04T09:32:28.115847-06:00",
+  "mode": "refresh",
   "production_hashes_after": {
     "models\\bias_advanced.json": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c",
     "models\\clf_ast_advanced.pkl": "0b19acb67f3b8918b393f84816af9b37fe6b57462622a22aa105fbd3fdacc02b",
@@ -129,46 +118,91 @@
     "models\\xgb_trb_advanced.pkl": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806"
   },
   "production_unchanged": true,
-  "started_at": "2026-10-27T15:16:36.942000-05:00",
+  "started_at": "2026-11-04T09:30:10.421210-06:00",
   "status": "complete",
   "steps": [
     {
       "command": [
-        "scripts/evaluate_defense_rating_retrain.py",
-        "--production",
-        "models/probability_oof_advanced.csv",
-        "--candidate",
-        "models\\weekly_candidates\\full_layers_20261027_150127\\probability_oof_advanced.csv",
-        "--production-features",
-        "models/selected_features_advanced.json",
-        "--candidate-features",
-        "models\\weekly_candidates\\full_layers_20261027_150127\\selected_features_advanced.json",
-        "--detail",
-        "output\\full_layers_20261027_150127_same_row_oof.csv",
-        "--summary",
-        "output\\full_layers_20261027_150127_same_row_oof_summary.json"
+        "feature_pipeline.py"
       ],
-      "ended_at": "2026-10-27T15:16:47.550619-05:00",
-      "name": "Same-row chronological OOF audit",
+      "ended_at": "2026-11-04T09:30:40.807240-06:00",
+      "name": "Advanced feature table",
       "returncode": 0,
-      "started_at": "2026-10-27T15:16:36.958005-05:00"
+      "started_at": "2026-11-04T09:30:10.421210-06:00"
     },
     {
       "command": [
-        "scripts/evaluate_probability_under_selection.py",
-        "--oof",
-        "models\\weekly_candidates\\full_layers_20261027_150127\\probability_oof_advanced.csv",
-        "--detail-output",
-        "output\\full_layers_20261027_150127_probability_holdout.csv",
-        "--summary-output",
-        "output\\full_layers_20261027_150127_probability_holdout_summary.json",
-        "--holdout-dates",
-        "20"
+        "scripts/train_availability_minutes_model.py"
       ],
-      "ended_at": "2026-10-27T15:17:12.173213-05:00",
-      "name": "Reserved latest-date probability audit",
+      "ended_at": "2026-11-04T09:31:28.964798-06:00",
+      "name": "Availability/minutes OOF model",
       "returncode": 0,
-      "started_at": "2026-10-27T15:16:47.550619-05:00"
+      "started_at": "2026-11-04T09:30:40.807240-06:00"
+    },
+    {
+      "command": [
+        "scripts/audit_availability_minutes_model.py"
+      ],
+      "ended_at": "2026-11-04T09:31:31.999227-06:00",
+      "name": "Availability/minutes holdout audit",
+      "returncode": 0,
+      "started_at": "2026-11-04T09:31:28.964798-06:00"
+    },
+    {
+      "command": [
+        "scripts/build_prop_availability_training_data.py",
+        "--prop-input",
+        "data/model_data_advanced.csv",
+        "--output",
+        "data/model_data_availability_advanced.csv",
+        "--summary",
+        "output/availability_prop_training_join_summary.json"
+      ],
+      "ended_at": "2026-11-04T09:31:44.071899-06:00",
+      "name": "Availability feature join",
+      "returncode": 0,
+      "started_at": "2026-11-04T09:31:31.999227-06:00"
+    },
+    {
+      "command": [
+        "scripts/build_pointintime_team_defense.py"
+      ],
+      "ended_at": "2026-11-04T09:32:13.828357-06:00",
+      "name": "Point-in-time team defense",
+      "returncode": 0,
+      "started_at": "2026-11-04T09:31:44.071899-06:00"
+    },
+    {
+      "command": [
+        "scripts/build_prop_defense_rating_training_data.py",
+        "--prop-input",
+        "data/model_data_availability_advanced.csv",
+        "--output",
+        "data\\model_data_full_advanced.csv",
+        "--summary",
+        "output/full_prop_training_join_summary.json"
+      ],
+      "ended_at": "2026-11-04T09:32:25.124735-06:00",
+      "name": "Unified availability + defense join",
+      "returncode": 0,
+      "started_at": "2026-11-04T09:32:13.828357-06:00"
     }
-  ]
+  ],
+  "training_profile": {
+    "freshness_gap_days": 0,
+    "raw": {
+      "columns": 74,
+      "date_max": "2026-11-02",
+      "date_min": "2023-10-24",
+      "path": "data/nba_data.csv",
+      "rows": 83478
+    },
+    "unified_training": {
+      "columns": 296,
+      "date_max": "2026-11-02",
+      "date_min": "2024-03-08",
+      "path": "data/model_data_full_advanced.csv",
+      "rows": 54078
+    }
+  }
 }
