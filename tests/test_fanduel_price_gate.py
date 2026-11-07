@@ -56,10 +56,19 @@ class FanDuelPriceGateTests(unittest.TestCase):
         self.assertEqual(row["event_id"], "ev1")
 
     def test_thin_ev_is_blocked(self):
+        # DEC-071 bar is +0.01: 52% at -110 is EV -0.7% (blocked); 53% is +1.2% (passes).
         lines = _lines(prop="player_assists", line=3.5, over_price=-110.0, under_price=-110.0)
-        out = nba_props._attach_live_market_prices(_pick(53.0, prop="AST", line=3.5), lines, now_utc=NOW)
+        out = nba_props._attach_live_market_prices(_pick(52.0, prop="AST", line=3.5), lines, now_utc=NOW)
         self.assertFalse(bool(out.iloc[0]["price_gate_pass"]))
         self.assertIn("EV", out.iloc[0]["price_gate_reason"])
+        out = nba_props._attach_live_market_prices(_pick(53.0, prop="AST", line=3.5), lines, now_utc=NOW)
+        self.assertTrue(bool(out.iloc[0]["price_gate_pass"]))
+
+    def test_min_ev_bar_is_config_driven(self):
+        lines = _lines(prop="player_assists", line=3.5, over_price=-110.0, under_price=-110.0)
+        with patch.dict(nba_props.CONFIG, {"live_min_ev_per_unit": 0.03}):
+            out = nba_props._attach_live_market_prices(_pick(53.0, prop="AST", line=3.5), lines, now_utc=NOW)
+        self.assertFalse(bool(out.iloc[0]["price_gate_pass"]))
 
     def test_unmatched_line_and_started_game_are_blocked(self):
         lines = _lines(prop="player_assists", line=3.5, over_price=-110.0, under_price=-110.0)

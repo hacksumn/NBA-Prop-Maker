@@ -3900,3 +3900,61 @@ Unaffected: timestamped archive copies (never rewritten), `*_latest` working fil
 
 - Whether restored rows should count in headline performance figures (they are flagged).
 - Whether to remove any data; the pipeline never will.
+
+## DEC-071 — Loosen Two Gates on Forward Evidence: Volatility CV 0.70 -> 1.00, Min EV +0.03 -> +0.01
+
+- **Date:** 2026-11-05
+- **Status:** Implemented (config values; one-line rollback each). PICK-AFFECTING: more candidates reach and pass the price gate.
+- **Decision owner:** Jake (requested loosening because cards were empty)
+
+### Context
+
+Jake reported zero picks getting through. Log review showed most zero-pick slates (10-26, 10-29, 10-30 morning, 11-03, 11-04) had **no lines at all** (Odds API credit exhaustion, fixed by the DEC-068 key rotation), so no gate ran. On slates with lines the card was 1-3 picks (11-02: 12-13). The largest cut was `sanity_check_picks` HIGH VOLATILITY (6-20 removals/slate), then the price gate (~50% pass).
+
+### Evidence (forward, pre-game logged, graded against nba_data.csv)
+
+- Sanity-check removals parsed from all `logs/run_2026*.log` and graded: volatility removals hit 71.4% (n=440, Apr-May 2026) and 65.7% (n=70, 2026-27; ROI +6.1% at recorded FanDuel prices, n=68) vs published picks 69.3% (n=215) and 63.3% (n=30). By CV band (all): 0.70-0.85 69.5% (164), 0.85-1.00 67.1% (140), 1.00-1.25 70.5% (112), >1.25 76.4% (106); this season 1.00-1.25 was weakest (58.8%, n=17). No band shows the filter removing losers.
+- `output/clv_model_leans.csv` (3,614 graded 2026-27 leans, 8 slates, exact FanDuel prices, -200 cap applied): EV (0,0.01] ROI +5.2% (215), (0.01,0.02] +8.5% (158), (0.02,0.03] +5.7% (145), (0.03,0.05] -3.3% (123), (0.05,0.08] +2.2% (117), >0.08 +3.8% (361). The model's EV does not rank above zero, so +0.03 mainly discards volume. Prices worse than -200 with EV>=0 lost 13.1% (n=18): cap kept.
+- Caveats: 8 slates; SEs 5-9% per bucket; DEC-068 found no edge vs closing lines. Directional evidence, not proof.
+
+### Decision
+
+- `CONFIG['sanity_volatility_cv_limit'] = 1.00` (was hard-coded 0.70); relaxed micro-profiles are never stricter than the base. Spike rule, injury/day-to-day removals and all other sanity rules unchanged.
+- `CONFIG['live_min_ev_per_unit'] = 0.01` (was 0.03). `live_max_favorite_american` stays -200. Accuracy gates unchanged.
+- DEC-061 shadow holdout is unaffected (it compares model predictions on identical rows, not card gates).
+- Tests: `test_fanduel_price_gate.py` thin-EV test moved to the new boundary (52% at -110 blocked, 53% passes) plus a config-driven bar test. Full suite 224 passed.
+
+### Review / Rollback
+
+- Rollback: set the two config values back to 0.70 / 0.03.
+- Review after ~3 weeks using `candidates_history.csv` (DEC-069) and graded picks: compare picks that pass only because of the new limits (CV 0.70-1.00, EV 0.01-0.03) against the rest at real prices. Tighten again if they underperform.
+
+
+## DEC-072 — Scheduler Wrapper No Longer Aborts on Python stderr Output
+
+- **Date:** 2026-11-07
+- **Status:** Implemented (`scripts/project_operator.ps1`, `Invoke-PythonStep` only). No pick, model, gate, schema or data change.
+- **Decision owner:** Jake (requested the wrapper fix after the read-only project audit)
+
+### Context
+
+`logs/scheduled_dailysafe.log` recorded `FAILED DailySafe` on all 10 days from 2026-10-28 to 2026-11-06, with no COMPLETE line, even on days whose `run_*.log` ended `All steps completed successfully` (e.g. 11-06). Six failures carried a Python `[INFO]` line as the error message, such as `Fitting Ridge Regression over 2642 observations...`. That line is written to stderr by `ppp_engine.py` (`logging.basicConfig`, default stream) when the last DailySafe step (`scripts/capture_candidate_future_holdout.py`, which imports `nba_props`) runs. `run_scheduled_action.ps1` sets `$ErrorActionPreference='Stop'` and merges streams with `*>&1 | Tee-Object`; under Windows PowerShell 5.1 (the interpreter used by `install_project_automation.ps1`) native stderr then becomes a terminating error.
+
+### Evidence
+
+Reproduced in an isolated scratch test (outside the project, 5.1.26100): a native command that wrote one harmless stderr line and exited 0 aborted the step before the next stdout line and logged `FAILED :: 12:00:00 [INFO] harmless` through the same `*>&1 | Tee-Object` wrapper pattern. The patched function was then extracted from the real file by PowerShell AST and run under that wrapper with a `python.cmd` shim: stderr+exit 0 continues (output logged), plain stdout continues, stderr+exit 3 throws `... failed with exit code 3`, and `$ErrorActionPreference` is restored to `Stop` afterward. The file parses with zero parser errors.
+
+### Decision
+
+`Invoke-PythonStep` temporarily sets `$ErrorActionPreference='Continue'`, runs `& python @PythonArgs 2>&1`, converts ErrorRecords to plain strings, restores the preference in `finally`, and decides success from `$LASTEXITCODE` only. Real failures still throw with the exit code. `Invoke-ProtectedPythonStep` hash checks are unchanged.
+
+### Consequences / Not done
+
+- Expect DailySafe to log COMPLETE when the pipeline and holdout step succeed. If the holdout step then writes `data/candidate_future_holdout_predictions.csv` for the first time, the DEC-061 holdout starts accumulating from that date, not from 2026-10-28; check the capture QA item in TASKS.md. The earlier "FAILED" lines did not prove the capture itself failed (cause unproven).
+- Not verified on the real scheduler: the next scheduled run is the confirmation.
+- `scripts/retrain_updated_models.ps1` has the same latent pattern (`$ErrorActionPreference='Stop'` plus bare `& python`). It is a manual script and was left unchanged.
+- Unrelated failures seen in the same logs remain: 2026-10-29 Application Control block of `python.exe`; 2026-11-06 `WinError 5` on a `.pyc` rename and an availability-join traceback (probably overlapping manual runs); real Odds API credit shortages.
+
+### Rollback
+
+`git checkout -- scripts/project_operator.ps1` (or restore the three-line `& python @PythonArgs` / `$LASTEXITCODE` form).

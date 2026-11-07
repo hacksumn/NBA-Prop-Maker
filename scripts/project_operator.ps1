@@ -47,9 +47,24 @@ function Invoke-PythonStep {
         [Parameter(Mandatory = $true)][string[]]$PythonArgs
     )
     Write-Host "`n[$Label]"
-    & python @PythonArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Label failed with exit code $LASTEXITCODE"
+    # Windows PowerShell 5.1 turns native stderr into an ErrorRecord, and with
+    # $ErrorActionPreference='Stop' the first stderr line (for example a Python
+    # logging.INFO line) aborts the step even when the exit code is 0 (DEC-072).
+    # Run the native command with 'Continue', render stderr as plain text, and
+    # decide success from the exit code only.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & python @PythonArgs 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
+        }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "$Label failed with exit code $exitCode"
     }
 }
 

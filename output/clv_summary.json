@@ -1,65 +1,66 @@
 {
-  "generated_at": "2026-11-05 04:05:42",
+  "generated_at": "2026-11-07 01:51:45",
   "start_date": "2026-10-26",
   "definition": "ev_vs_close = close no-vig side prob * bet decimal odds - 1; exact same line only",
   "picks": {
-    "all_rows": 28,
+    "all_rows": 44,
     "close_quality_counts": {
-      "no_later_snapshot": 17,
-      "exact_line": 11
+      "no_later_snapshot": 26,
+      "exact_line": 14,
+      "line_moved": 4
     },
     "overall": {
-      "rows": 11,
-      "rows_with_exact_close": 11,
-      "mean_ev_vs_close": -0.0458,
-      "ev_vs_close_std_error": 0.0171,
-      "beat_close_rate": 0.1818,
-      "mean_no_vig_move": 0.0098,
-      "moved_toward_side_rate": 0.7273,
-      "moved_away_rate": 0.1818,
+      "rows": 18,
+      "rows_with_exact_close": 14,
+      "mean_ev_vs_close": -0.0499,
+      "ev_vs_close_std_error": 0.0135,
+      "beat_close_rate": 0.1429,
+      "mean_no_vig_move": 0.0074,
+      "moved_toward_side_rate": 0.5714,
+      "moved_away_rate": 0.2143,
       "mean_line_clv": 0.0,
-      "median_close_minutes_before_tip": 8.5,
-      "graded": 11,
-      "hit_rate": 0.3636,
-      "roi_units_per_bet": -0.3613
+      "median_close_minutes_before_tip": 8.6,
+      "graded": 18,
+      "hit_rate": 0.6111,
+      "roi_units_per_bet": 0.0486
     },
     "groups": {
       "ast": {
-        "rows": 9,
-        "rows_with_exact_close": 9,
-        "mean_ev_vs_close": -0.0425,
-        "ev_vs_close_std_error": 0.0209,
-        "beat_close_rate": 0.2222,
-        "mean_no_vig_move": 0.0113,
-        "moved_toward_side_rate": 0.7778,
-        "moved_away_rate": 0.2222,
+        "rows": 14,
+        "rows_with_exact_close": 10,
+        "mean_ev_vs_close": -0.0438,
+        "ev_vs_close_std_error": 0.0188,
+        "beat_close_rate": 0.2,
+        "mean_no_vig_move": 0.0101,
+        "moved_toward_side_rate": 0.7,
+        "moved_away_rate": 0.2,
         "mean_line_clv": 0.0,
-        "median_close_minutes_before_tip": 8.6,
-        "graded": 9,
-        "hit_rate": 0.3333,
-        "roi_units_per_bet": -0.3902
+        "median_close_minutes_before_tip": 16.6,
+        "graded": 14,
+        "hit_rate": 0.5714,
+        "roi_units_per_bet": 0.0248
       },
       "stl": {
-        "rows": 2,
-        "rows_with_exact_close": 2,
-        "mean_ev_vs_close": -0.0607,
-        "ev_vs_close_std_error": 0.0051,
+        "rows": 4,
+        "rows_with_exact_close": 4,
+        "mean_ev_vs_close": -0.0649,
+        "ev_vs_close_std_error": 0.0036,
         "beat_close_rate": 0.0,
-        "mean_no_vig_move": 0.0034,
-        "moved_toward_side_rate": 0.5,
-        "moved_away_rate": 0.0,
+        "mean_no_vig_move": 0.0006,
+        "moved_toward_side_rate": 0.25,
+        "moved_away_rate": 0.25,
         "mean_line_clv": 0.0,
-        "median_close_minutes_before_tip": 8.2,
-        "graded": 2,
-        "hit_rate": 0.5,
-        "roi_units_per_bet": -0.2312
+        "median_close_minutes_before_tip": 8.5,
+        "graded": 4,
+        "hit_rate": 0.75,
+        "roi_units_per_bet": 0.1318
       }
     }
   },
   "model_leans": {
-    "all_rows": 3790,
+    "all_rows": 4569,
     "close_quality_counts": {
-      "no_later_snapshot": 2508,
+      "no_later_snapshot": 3287,
       "exact_line": 857,
       "line_moved": 425
     },

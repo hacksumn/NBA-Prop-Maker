@@ -4,12 +4,12 @@
     "GAME_ID",
     "team"
   ],
-  "source_rows": 54078,
-  "rating_rows": 8132,
-  "matched_rows": 54078,
+  "source_rows": 54333,
+  "rating_rows": 8160,
+  "matched_rows": 54333,
   "match_rate": 1.0,
   "date_min": "2024-03-08",
-  "date_max": "2026-11-02",
+  "date_max": "2026-11-04",
   "rating_chronology_violations": 0,
   "rating_duplicate_keys": 0,
   "feature_columns": [
@@ -21,13 +21,13 @@
   "repaired_opponent_rows": 0,
   "repaired_is_home_rows": 0,
   "rating_source_counts": {
-    "current_season_expanding": 51831,
+    "current_season_expanding": 52086,
     "prior_season_final": 2247
   },
   "prop_input": "data\\model_data_availability_advanced.csv",
-  "prop_input_sha256": "efec13904856df18ff8adf4c10410fc934d9ab833ec561da9313b2ee69e6566c",
+  "prop_input_sha256": "0fa38273eebfdd3b6f9b2030eaf02c4bcfba171ef0afdabd6f172b791652d8d6",
   "rating_input": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\data\\pointintime_team_defense_ratings.csv",
-  "rating_input_sha256": "8ca4a67a3a84e808d183716f9260108d50f4901e914c5d04db86fe6d4f22dc4c",
+  "rating_input_sha256": "1ceba61a2d7631414a8369e5126a861e31b8d1eab4ae182097323af9c99eeacb",
   "output": "data\\model_data_full_advanced.csv",
-  "output_sha256": "17032a7b926e26df57e42859ccc3e8b1a1c5c6bcd942e783820d1ec0b62f306f"
+  "output_sha256": "5984d8519401837ccad715de6b4f283c0876ce405d1d20562d755944068873a4"
 }

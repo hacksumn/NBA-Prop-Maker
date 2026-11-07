@@ -4,6 +4,14 @@
 
 ## NOW
 
+- [x] **[DEC-072] Stop the scheduler wrapper treating Python stderr as a failure.** `Invoke-PythonStep` patched; isolated 3-case test passed.
+- [ ] **[VERIFY — DEC-072] After the next scheduled DailySafe run, confirm `logs/scheduled_dailysafe.log` ends `COMPLETE DailySafe` and that `data/candidate_future_holdout_predictions.csv` and `output/candidate_future_holdout_summary.json` now exist.** If the files are still missing, run `python scripts/capture_candidate_future_holdout.py` under supervision and read its error.
+- [ ] **[OPTIONAL — DEC-072] Apply the same fix to `scripts/retrain_updated_models.ps1`** (same latent pattern, manual script).
+- [ ] **[AUDIT — DEC-072] Open items from the 2026-11-07 audit:** pin one project-owned Python/lockfile (scheduler has used the `hermes-agent` venv; 10-29 Application Control block), add a run lock for overlapping manual/scheduled runs, add timeouts at `nba_props.py:3290/3307/3313`. Report: `C:\Users\jakep\AI-Agents\NBA-Project-Auditor\NBA_Fresh_Start_Initial_Project_Audit.md`.
+
+- [x] **[DEC-071] Loosen gates: volatility CV 0.70 -> 1.00, min EV +0.03 -> +0.01.** Pick-affecting; full suite 224 passed.
+- [ ] **[REVIEW — DEC-071] ~2026-11-26: grade picks that passed only because of the new limits (CV 0.70-1.00 or EV 0.01-0.03) vs the rest at real prices; tighten back if they underperform.**
+
 - [x] **[DEC-070] Make every data/history write append-only and restore lost rows.** 9 paths fixed; 70 picks + 116 slips restored; `tests/test_append_only_history.py` (8); `scripts/recover_lost_history_rows.py`.
 - [ ] **[VERIFY — DEC-070] Next morning run: confirm Step 1.5/1.6 grade the restored rows and Step 9 logs `+N new, M already recorded`.**
 - [ ] **[DECISION — DEC-070] Decide whether restored (`history_source=archive_recovered`) picks/slips count in headline performance figures.**

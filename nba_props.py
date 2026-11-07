@@ -99,8 +99,13 @@ CONFIG = {
     # publishable. Heavy favorites are capped because a few points of calibration
     # error flips their EV sign (e.g. -240 needs 70.6% just to break even).
     'live_price_gate_enabled': True,
-    'live_min_ev_per_unit': 0.03,
+    # DEC-071 (2026-11-05): lowered from 0.03. Graded 2026-27 leans at +1..+3% EV
+    # returned +7% ROI (n=303) vs ~+2% above +3% (n=601); 8 days only - review.
+    'live_min_ev_per_unit': 0.01,
     'live_max_favorite_american': -200,
+    # DEC-071: sanity-check HIGH VOLATILITY limit (L10 CV) raised from 0.70.
+    # Picks removed at CV 0.70-1.00 hit 68% (n=304, 2026) - no worse than published.
+    'sanity_volatility_cv_limit': 1.00,
     # Props blocked by the evidence policy that are still logged (never bet) so a
     # forward record accumulates: output/tracking_only_history.csv.
     'live_tracking_only_props': ['pts'],
@@ -10540,10 +10545,12 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
                     )
                     relaxed_micro_profile = elite_under_profile or low_line_binary_profile
 
-                cv_limit = 0.70
+                base_cv_limit = float(CONFIG.get('sanity_volatility_cv_limit', 0.70))
+                cv_limit = base_cv_limit
                 spike_limit = avg_val * 3.0 if avg_val > 0 else None
                 if relaxed_micro_profile:
-                    cv_limit = 1.75 if line <= 1.5 else 0.95
+                    # Relaxed profiles are never stricter than the base limit.
+                    cv_limit = max(1.75 if line <= 1.5 else 0.95, base_cv_limit)
                     spike_limit = max(line + 1.5, avg_val * (4.5 if line <= 1.5 else 4.0))
 
                 if cv_val is not None and cv_val > cv_limit:
