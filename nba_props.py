@@ -20,6 +20,7 @@ import requests
 import json
 import pickle
 import hashlib
+import uuid
 import io
 import os
 import sys
@@ -43,12 +44,15 @@ from probability_utils import (
     quantile_tags,
 )
 from injury_feed import fetch_injury_data
+from gate_decisions import start_run, save_run, record_generation_rejection
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 _HERE = Path(__file__).parent.resolve()
+from artifact_retention import install_retention, artifact_lock
+install_retention()
 
 CONFIG = {
     # Paths — always relative to this script's location, regardless of CWD
@@ -83,9 +87,11 @@ CONFIG = {
     'live_pick_target': None,  # Max card size; None = publish every fully gated pick
     'live_pick_candidate_pool': 500,  # Candidate pool depth before sanity/price gates
     'live_pick_max_per_prop': None,  # Max picks per stat category; None = unlimited
-    'live_pick_meta_floor_min': 45.0,      # Final-card hard floor for meta_prob (%)
+    # DEC-073: min 45 -> 42 and slack 10 -> 14 (AST floor 46 -> 42; TRB/TOV 49 -> 45;
+    # STL/BLK 45 -> 42). Near-miss meta rejections (42-46) won in forward tracking.
+    'live_pick_meta_floor_min': 42.0,      # Final-card hard floor for meta_prob (%)
     'live_pick_meta_floor_max': 60.0,      # Prevent over-tightening on thin slates
-    'live_pick_meta_floor_slack': 10.0,    # Allow some slack below prop policy floor
+    'live_pick_meta_floor_slack': 14.0,    # Allow some slack below prop policy floor
     'live_pick_volatility_ceiling_mult': 1.0,  # 1.0 = use learned p75/high-vol reference directly
     'live_pick_estimated_hit_rate_floor': 54.5,  # Lowered from 65.0: true break-even for PrizePicks
     'live_pick_market_model_only': False,  # Allow all pick sources to compete on merit, not just market_model
@@ -93,7 +99,7 @@ CONFIG = {
     'live_sportsbook_key': 'fanduel',
     'live_fanduel_min_side_prob': 0.50,
     'live_fanduel_min_residual_edge': 0.05,
-    'live_fanduel_volatility_ceiling_mult': 1.25,
+    'live_fanduel_volatility_ceiling_mult': 1.50,  # DEC-073: was 1.25 (AST ceiling 2.92 -> 3.51)
     # Price gate (DEC-064): a FanDuel pick must be +EV at the exact offered price for
     # the chosen side. Picks with no paired price, or whose game has started, are not
     # publishable. Heavy favorites are capped because a few points of calibration
@@ -1257,7 +1263,7 @@ def _fanduel_price_mode() -> bool:
 def _american_to_decimal(price: object) -> float:
     """Convert an American price to decimal odds (stake included). NaN when invalid."""
     value = pd.to_numeric(pd.Series([price]), errors='coerce').iloc[0]
-    if pd.isna(value) or value == 0 or -100 < value < 100:
+    if pd.isna(value) or not np.isfinite(value) or value == 0 or -100 < value < 100:
         return float('nan')
     value = float(value)
     return 1.0 + (value / 100.0 if value > 0 else 100.0 / -value)
@@ -1321,13 +1327,18 @@ def _attach_live_market_prices(picks_df: pd.DataFrame,
 
     min_ev = float(CONFIG.get('live_min_ev_per_unit', 0.03))
     max_fav = float(CONFIG.get('live_max_favorite_american', -200))
-    commence = pd.to_datetime(working['commence_time'], errors='coerce', utc=True)
+    commence = pd.to_datetime(working['commence_time'], errors='coerce', utc=True, format="mixed")
+    snapshot = pd.to_datetime(working['line_snapshot_ts'], errors='coerce', utc=True, format="mixed")
     reasons = []
     for idx in working.index:
         if pd.isna(working.at[idx, 'side_decimal_odds']) or pd.isna(other_decimal.at[idx]):
             reasons.append('no paired FanDuel price for this line')
+        elif not np.isfinite(model_prob.at[idx]):
+            reasons.append('invalid model side probability')
         elif pd.isna(commence.at[idx]) or commence.at[idx] <= now_utc:
             reasons.append('game started or start time unknown')
+        elif pd.isna(snapshot.at[idx]) or snapshot.at[idx] > now_utc:
+            reasons.append('line snapshot time unknown or in the future')
         elif working.at[idx, 'side_price'] < max_fav:
             reasons.append(f"price {working.at[idx, 'side_price']:+.0f} beyond {max_fav:+.0f} cap")
         elif working.at[idx, 'ev_per_unit'] < min_ev:
@@ -1511,6 +1522,8 @@ def _format_live_gate_failures(row: pd.Series) -> str:
         failures.append(f"hit {float(hit_val):.1f}<{float(hit_floor):.1f}" if pd.notna(hit_val) and pd.notna(hit_floor) else "hit")
     if not bool(row.get('pick_source_gate_pass', False)):
         failures.append(f"source={row.get('pick_source', '')}")
+    if str(row.get("pick_source", "")) in {"volume_fill", "emergency_fill"}:
+        failures.append(f"excluded fallback source={row.get('pick_source')}")
     if not failures:
         failures.append("tier selection/diversity")
     return ", ".join(failures)
@@ -1719,7 +1732,7 @@ def _backup_before_shrink(path: Path, new_row_count: int) -> Optional[Path]:
         return None
     backup_dir = path.parent / 'backups'
     backup_dir.mkdir(parents=True, exist_ok=True)
-    backup = backup_dir / f"{path.stem}_before_shrink_{datetime.now().strftime('%Y%m%d_%H%M%S')}{path.suffix}"
+    backup = backup_dir / f"{path.stem}_before_shrink_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{path.suffix}"
     import shutil
     shutil.copy2(path, backup)
     print(
@@ -1810,36 +1823,37 @@ def _append_only_history(path: Path, new_rows: pd.DataFrame, key) -> Tuple[pd.Da
     Returns (combined_frame, n_added, n_already_recorded). Raises if the result
     would somehow contain fewer rows than the existing file.
     """
-    path = Path(path)
-    new_rows = new_rows.copy() if new_rows is not None else pd.DataFrame()
-    if path.exists():
-        existing = pd.read_csv(path, dtype=str, keep_default_na=False, low_memory=False)
-    else:
-        existing = pd.DataFrame()
-    if len(new_rows) == 0:
-        return existing, 0, 0
-    new_rows = new_rows.astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
-    new_keys = _history_key_series(new_rows, key)
-    first_in_batch = ~new_keys.duplicated(keep='first')
-    if len(existing) > 0:
-        existing_keys = set(_history_key_series(existing, key))
-        is_new = first_in_batch & ~new_keys.isin(existing_keys)
-    else:
-        is_new = first_in_batch
-    additions = new_rows[is_new]
-    n_already = int((~is_new).sum())
-    if len(additions) == 0:
-        return existing, 0, n_already
-    columns = list(existing.columns) + [c for c in additions.columns if c not in existing.columns]
-    combined = pd.concat(
-        [existing.reindex(columns=columns, fill_value=''),
-         additions.reindex(columns=columns, fill_value='')],
-        ignore_index=True,
-    )
-    if len(combined) < len(existing):
-        raise RuntimeError(f"append-only guard: {path.name} would shrink; nothing written")
-    _atomic_csv(combined, path)
-    return combined, int(len(additions)), n_already
+    with artifact_lock(path):
+        path = Path(path)
+        new_rows = new_rows.copy() if new_rows is not None else pd.DataFrame()
+        if path.exists():
+            existing = pd.read_csv(path, dtype=str, keep_default_na=False, low_memory=False)
+        else:
+            existing = pd.DataFrame()
+        if len(new_rows) == 0:
+            return existing, 0, 0
+        new_rows = new_rows.astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
+        new_keys = _history_key_series(new_rows, key)
+        first_in_batch = ~new_keys.duplicated(keep='first')
+        if len(existing) > 0:
+            existing_keys = set(_history_key_series(existing, key))
+            is_new = first_in_batch & ~new_keys.isin(existing_keys)
+        else:
+            is_new = first_in_batch
+        additions = new_rows[is_new]
+        n_already = int((~is_new).sum())
+        if len(additions) == 0:
+            return existing, 0, n_already
+        columns = list(existing.columns) + [c for c in additions.columns if c not in existing.columns]
+        combined = pd.concat(
+            [existing.reindex(columns=columns, fill_value=''),
+             additions.reindex(columns=columns, fill_value='')],
+            ignore_index=True,
+        )
+        if len(combined) < len(existing):
+            raise RuntimeError(f"append-only guard: {path.name} would shrink; nothing written")
+        _atomic_csv(combined, path)
+        return combined, int(len(additions)), n_already
 
 
 def _get_output_archive_dir(day_str: str) -> Path:
@@ -2018,7 +2032,7 @@ def _select_preferred_line_rows(lines_df: pd.DataFrame,
     if len(working) == 0:
         return working
 
-    working['_snapshot_sort'] = pd.to_datetime(working['snapshot_ts'], errors='coerce', utc=True)
+    working['_snapshot_sort'] = pd.to_datetime(working['snapshot_ts'], errors='coerce', utc=True, format="mixed")
     if require_known_snapshot:
         working = working.loc[working['_snapshot_sort'].notna()].copy()
     if as_of is not None:
@@ -2031,7 +2045,7 @@ def _select_preferred_line_rows(lines_df: pd.DataFrame,
 
     # Never select a known post-tip observation for historical evaluation.
     if 'commence_time' in working.columns:
-        commence = pd.to_datetime(working['commence_time'], errors='coerce', utc=True)
+        commence = pd.to_datetime(working['commence_time'], errors='coerce', utc=True, format="mixed")
         pregame = commence.isna() | (
             working['_snapshot_sort'].notna()
             & working['_snapshot_sort'].le(commence)
@@ -2111,7 +2125,7 @@ def _write_historical_lines(df: pd.DataFrame, path: Optional[Path] = None) -> Pa
 
 def _archive_line_snapshot(df: pd.DataFrame, game_date: str, stem: str = 'lines') -> Tuple[Path, Path]:
     archive_dir = _get_line_archive_dir(game_date)
-    stamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+    stamp = datetime.now().strftime('%Y-%m-%d_%H%M%S_%f')
     daily_path = archive_dir / f'{stem}_{game_date}.csv'
     run_path = archive_dir / f'{stem}_{stamp}.csv'
     _atomic_csv(df, daily_path)
@@ -2252,8 +2266,10 @@ def _migrate_legacy_output_artifacts() -> None:
         archive_dir = _get_output_archive_dir(day_str)
         dest = archive_dir / f'{stem}_{day_str}_{hms}.{ext}'
         if dest.exists():
-            path.unlink()
-            continue
+            if path.read_bytes() == dest.read_bytes():
+                path.unlink()
+                continue
+            dest = dest.with_name(f"{dest.stem}_{uuid.uuid4().hex}{dest.suffix}")
         path.replace(dest)
 
 
@@ -2690,7 +2706,7 @@ def _split_pregame_events(events, now_utc: pd.Timestamp) -> Tuple[list, list]:
         raise ValueError("now_utc must be timezone-aware")
     pregame, started = [], []
     for event in events or []:
-        commence = pd.to_datetime(event.get('commence_time'), errors='coerce', utc=True)
+        commence = pd.to_datetime(event.get('commence_time'), errors='coerce', utc=True, format="mixed")
         if pd.notna(commence) and commence <= now_utc:
             started.append(event)
         else:
@@ -7775,7 +7791,8 @@ def _row_volatility_context(row: pd.Series,
 
 
 def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, Dict]] = None,
-                      regression_candidates: Optional[dict] = None, max_picks: int = 10) -> pd.DataFrame:
+                      regression_candidates: Optional[dict] = None, max_picks: int = 10,
+                      rejection_events: Optional[list] = None) -> pd.DataFrame:
     """Filter to best betting opportunities using validated model edge."""
 
     picks = []
@@ -7785,6 +7802,10 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
     sigma_p25, sigma_p75 = _load_sigma_thresholds()  # p25: {'ast': 1.68, 'trb': 2.10, ...}  p75: {'ast': 2.40, 'trb': 2.87, ...}
 
     for _, row in pred_df.iterrows():
+        if rejection_events is not None:
+            for disabled_prop in quality:
+                if disabled_prop not in props and pd.notna(row.get(f"{disabled_prop}_line")):
+                    record_generation_rejection(rejection_events, row, disabled_prop, "prop disabled by policy or configuration")
         for prop in props:
             line = row.get(f'{prop}_line')
             pred = row.get(f'{prop}_pred')
@@ -7795,6 +7816,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if anchor_val is None or pd.isna(anchor_val):
                 anchor_val = _row_prop_feature(row, prop, 'recency_anchor')
             if line is None or pred is None or pd.isna(line) or pd.isna(pred):
+                record_generation_rejection(rejection_events, row, prop, 'missing line or prediction')
                 continue
 
             model_edge = float(pred) - float(line)
@@ -7805,15 +7827,19 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             else:
                 combined_edge = model_edge
             if abs(combined_edge) < 1e-9:
+                record_generation_rejection(rejection_events, row, prop, 'zero combined edge')
                 continue
             min_residual_edge = float(quality[prop].get('min_residual_edge', 0.0))
             direction = 'OVER' if combined_edge > 0 else 'UNDER'
             if min_residual_edge > 0 and market_edge_pred is not None:
                 if abs(market_edge_pred) < min_residual_edge or np.sign(market_edge_pred) != np.sign(combined_edge):
+                    record_generation_rejection(rejection_events, row, prop, 'residual edge too small or disagrees')
                     continue
             if direction == 'OVER' and not quality[prop].get('allow_over', quality[prop].get('allowed', False)):
+                record_generation_rejection(rejection_events, row, prop, 'OVER direction disabled')
                 continue
             if direction == 'UNDER' and not quality[prop].get('allow_under', quality[prop].get('allowed', False)):
+                record_generation_rejection(rejection_events, row, prop, 'UNDER direction disabled')
                 continue
 
             # Promo-line gate: PrizePicks does not offer UNDER on goblin lines (artificially
@@ -7822,10 +7848,13 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             proj_type = _normalize_projection_type(row.get(f'{prop}_projection_type') or 'standard')
             is_promo = bool(row.get(f'{prop}_is_promo', False))
             if direction == 'UNDER' and proj_type == 'goblin':
+                record_generation_rejection(rejection_events, row, prop, 'goblin UNDER unavailable')
                 continue
             if direction == 'OVER' and proj_type == 'demon':
+                record_generation_rejection(rejection_events, row, prop, 'demon OVER unavailable')
                 continue
             if direction == 'UNDER' and is_promo:
+                record_generation_rejection(rejection_events, row, prop, 'promo UNDER unavailable')
                 continue
 
             # σ-tier: flag low-σ UNDER picks where the book is systematically mispriced.
@@ -7839,24 +7868,19 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 sigma_p75=sigma_p75,
                 direction=direction,
             )
-            p25_threshold = sigma_p25.get(prop)
-
             min_edge = float(
                 quality[prop].get('min_edge_over' if direction == 'OVER' else 'min_edge_under',
                                   quality[prop]['min_edge'])
             )
-            # σ-tiered edge gate: only applied to UNDER picks where σ signal is available.
-            # Low-σ (σ < p25) → book is systematically mispriced → lower bar by 25%.
-            # High-σ (σ > p75) → real variance dominates → raise bar by 25%.
-            # PTS has near-zero σ signal (buckets 45–49%); adjustment still applies but
-            # is conservative since the σ spread itself is tight for PTS.
+            # High-sigma UNDER picks require 25% more edge. Low-sigma picks keep
+            # the configured minimum. The previous max(min_edge, .75*min_edge)
+            # expression did not reduce a positive floor.
             if direction == 'UNDER' and sigma_val is not None:
                 p75_threshold = sigma_p75.get(prop)
-                if p25_threshold is not None and sigma_val < p25_threshold:
-                    min_edge = max(min_edge, min_edge * 0.75)
-                elif p75_threshold is not None and sigma_val > p75_threshold:
+                if p75_threshold is not None and sigma_val > p75_threshold:
                     min_edge = min_edge * 1.25
             if abs(combined_edge) < min_edge:
+                record_generation_rejection(rejection_events, row, prop, 'edge below sigma-adjusted minimum')
                 continue
 
             l10_edge = None
@@ -7917,6 +7941,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
             if (not use_calibrated_prob and
                     CONFIG.get('require_meta_for_live_picks', False) and
                     meta_prob is None and meta_gate_mode == 'hard'):
+                record_generation_rejection(rejection_events, row, prop, 'required meta score missing')
                 continue
             regime_score = row.get(f'{prop}_regime_score')
             regime_score = float(regime_score) if regime_score is not None and not pd.isna(regime_score) else 0.0
@@ -7956,25 +7981,33 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                         min_prob += 0.01
                 elif meta_prob < min_meta_prob:
                     if meta_gate_mode == 'hard':
+                        record_generation_rejection(rejection_events, row, prop, 'primary hard meta floor')
                         continue
                     if meta_gate_mode == 'medium':
                         min_prob += 0.015
                     else:
                         min_prob += 0.01
             if regime_score >= 0.55 and edge_disagreement >= min_edge * 0.75:
+                record_generation_rejection(rejection_events, row, prop, 'regime and disagreement')
                 continue
             if dir_prob < min_prob:
+                record_generation_rejection(rejection_events, row, prop, 'direction probability below minimum')
                 continue
 
             if direction == 'OVER' and l10_agrees is not True and abs(combined_edge) < min_edge * 1.50:
+                record_generation_rejection(rejection_events, row, prop, 'OVER lacks L10 support')
                 continue
             if anchor_agrees is False and abs(combined_edge) < min_edge * 1.20:
+                record_generation_rejection(rejection_events, row, prop, 'anchor disagreement')
                 continue
             if l10_agrees is False and abs(combined_edge) < min_edge * 1.35:
+                record_generation_rejection(rejection_events, row, prop, 'L10 disagreement')
                 continue
             if l5_agrees is False and abs(combined_edge) < min_edge * 1.25:
+                record_generation_rejection(rejection_events, row, prop, 'L5 disagreement')
                 continue
             if market_edge_pred is not None and np.sign(model_edge) != np.sign(market_edge_pred) and abs(combined_edge) < min_edge * 1.50:
+                record_generation_rejection(rejection_events, row, prop, 'model and residual disagree')
                 continue
             # Extreme dampening gate: edge model sees >60% less downside than raw model AND
             # combined_edge is barely above threshold — market context provides no independent signal.
@@ -7982,6 +8015,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                     and np.sign(model_edge) == np.sign(market_edge_pred)
                     and abs(market_edge_pred) < abs(model_edge) * 0.40
                     and abs(combined_edge) < min_edge * 1.15):
+                record_generation_rejection(rejection_events, row, prop, 'residual support too weak')
                 continue
 
             line_move = row.get(f'{prop}_line_move')
@@ -7989,6 +8023,7 @@ def filter_best_picks(pred_df: pd.DataFrame, quality_policy: Optional[Dict[str, 
                 move_with = (direction == 'OVER' and line_move > 0) or \
                             (direction == 'UNDER' and line_move < 0)
                 if not move_with and abs(float(line_move)) >= 0.9:
+                    record_generation_rejection(rejection_events, row, prop, 'line moved against pick')
                     continue
             else:
                 move_with = None
@@ -9684,6 +9719,8 @@ def _coerce_pick_side_probability(row: pd.Series) -> float:
     dir_prob = row.get('dir_prob', row.get('ou_prob'))
     if dir_prob is not None and not pd.isna(dir_prob):
         prob = float(dir_prob)
+        if not np.isfinite(prob) or not 0.0 <= prob <= 100.0:
+            return float('nan')
         # Pick rows store dir_prob as a percentage (72.0); clipping that to 0.99
         # treated every slip leg as near-certain.
         if prob > 1.0:
@@ -9691,6 +9728,8 @@ def _coerce_pick_side_probability(row: pd.Series) -> float:
     else:
         conf = pd.to_numeric(pd.Series([row.get('confidence')]), errors='coerce').iloc[0]
         prob = float(conf) / 100.0 if pd.notna(conf) else 0.50
+    if not np.isfinite(prob) or not 0.0 <= prob <= 1.0:
+        return float('nan')
     return float(np.clip(prob, 0.01, 0.99))
 
 
@@ -10351,7 +10390,8 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
     return picks.loc[clean_idx].reset_index(drop=True)
 
 
-def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict = None) -> pd.DataFrame:
+def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict = None,
+                       rejection_events: Optional[list] = None) -> pd.DataFrame:
     """
     Remove picks that fail a role-change or injury sanity check.
 
@@ -10584,6 +10624,8 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
                     reason = f"LINE/PRED MISMATCH: prediction {pred} is {pred/line:.1f}x line {line} -- model may be using stale data"
 
         if reason:
+            if rejection_events is not None:
+                rejection_events.append({**row.to_dict(), "reason": reason})
             flagged.append({
                 'player': player,
                 'prop': row.get('prop', ''),
@@ -10653,7 +10695,7 @@ def _log_tracking_only_props(pred_df: pd.DataFrame,
         # Leans for games already tipped carry in-play prices; do not record them.
         n_started = 0
         if 'commence_time' in tracked.columns:
-            commence = pd.to_datetime(tracked['commence_time'], errors='coerce', utc=True)
+            commence = pd.to_datetime(tracked['commence_time'], errors='coerce', utc=True, format="mixed")
             started = commence.notna() & commence.le(_utc_now())
             n_started = int(started.sum())
             tracked = tracked[~started].copy()
@@ -10726,7 +10768,7 @@ def _log_candidate_history(candidates: pd.DataFrame,
 
         skipped_started = 0
         if 'commence_time' in frame.columns:
-            commence = pd.to_datetime(frame['commence_time'], errors='coerce', utc=True)
+            commence = pd.to_datetime(frame['commence_time'], errors='coerce', utc=True, format="mixed")
             started = commence.notna() & commence.le(now_utc)
             skipped_started = int(started.sum())
             frame = frame[~started].copy()
@@ -10872,7 +10914,7 @@ def save_picks(picks_df: pd.DataFrame, pred_df: pd.DataFrame, slate_date: Option
             picks_df[col] = default
 
     run_dt = datetime.now()
-    run_stamp = run_dt.strftime('%Y-%m-%d_%H%M%S')
+    run_stamp = run_dt.strftime('%Y-%m-%d_%H%M%S_%f')
     slate_date = slate_date or run_dt.strftime('%Y-%m-%d')
 
     # Save full history-independent snapshots in a dated archive tree.
@@ -11495,18 +11537,18 @@ tr:hover td {{ background: var(--bg4) !important; }}
 # MAIN CLI
 # =============================================================================
 
-def main():
-    """Main entry point."""
+def main(command: Optional[str] = None, use_feature_cache: bool = True):
+    """Run a CLI command, sharing the live prediction path with ``all``."""
     # Ensure UTF-8 output on Windows terminals
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-    if len(sys.argv) < 2:
+    if command is None and len(sys.argv) < 2:
         print(__doc__)
         print("\nAvailable commands: update, train, predict, backtest, backfill, rebuild-lines, all")
         return
     
-    command = sys.argv[1].lower()
+    command = (command if command is not None else sys.argv[1]).lower()
     
     print("\n" + "="*60)
     print(f"NBA PROPS - {command.upper()}")
@@ -11580,6 +11622,7 @@ def main():
             active_hist, hist_slate_date, hist_source, hist_mode = _select_cached_lines_for_predict(
                 _hist,
                 today_str,
+                as_of=_utc_now(),
                 allowed_sources=allowed_cached_sources,
                 standard_only=not use_prizepicks_lines,
                 allow_future_slate=use_prizepicks_lines,
@@ -11691,9 +11734,13 @@ def main():
                 f"{'!'*60}"
             )
 
+        gate_run = start_run(CONFIG, _load_target_quality_policy())
+        generation_rejections = []
+        sanity_rejections = []
+
         # Generate predictions
         pred_df = generate_predictions(
-            df, vegas, use_feature_cache=True, slate_date=active_slate_date
+            df, vegas, use_feature_cache=use_feature_cache, slate_date=active_slate_date
         )
 
         # Compute regression-to-mean candidates from historical data
@@ -11708,11 +11755,12 @@ def main():
             pred_df,
             regression_candidates=reg_candidates,
             max_picks=candidate_pool_size,
+            rejection_events=generation_rejections,
         )
 
         # Fetch fresh injury report and remove risky availability picks
         inj_report = fetch_injury_data()
-        picks = sanity_check_picks(picks, df, inj_report)
+        picks = sanity_check_picks(picks, df, inj_report, rejection_events=sanity_rejections)
         price_gate_active = _fanduel_price_mode() and bool(CONFIG.get('live_price_gate_enabled', True))
         if price_gate_active and len(picks) > 0:
             contract_lines = market_lines
@@ -11839,6 +11887,13 @@ def main():
                         print(f"    {p['player']} ({p['prop']}): {p.get('teammates_out', '')}")
 
         save_picks(picks, pred_df, slate_date=active_slate_date)
+        try:
+            receipt_path = save_run(gate_run, CONFIG["output_dir"], active_slate_date,
+                                    generation_rejections, sanity_rejections,
+                                    pre_card_candidates, picks, market_lines, injury_report=inj_report)
+            print(f"  Gate run evidence saved -> {receipt_path.name}")
+        except Exception as exc:
+            print(f"  WARNING: gate run evidence failed ({type(exc).__name__}); inspect output storage")
 
     elif command == 'backfill':
         days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
@@ -11899,52 +11954,10 @@ def main():
         train_ou_classifiers(df)
 
         print("\n[4/4] Generating predictions...")
-        vegas_raw, _line_source_all = fetch_vegas_lines()
-        active_slate_date_all = datetime.now().strftime('%Y-%m-%d')
-        vegas = pd.DataFrame()
-        if len(vegas_raw) > 0:
-            save_lines_snapshot(vegas_raw, source=_line_source_all)
-            active_live_all, live_slate_date_all = _select_active_slate_lines(vegas_raw)
-            active_slate_date_all = live_slate_date_all or active_slate_date_all
-            _market_cols_all = [c for c in ['projection_type', 'is_promo'] if c in active_live_all.columns]
-            vegas = active_live_all[['player', 'prop', 'line'] + _market_cols_all].copy()
-            vegas['num_books'] = active_live_all['num_books'].values if 'num_books' in active_live_all.columns else 1
-        pred_df = generate_predictions(df, vegas, use_feature_cache=False)
-        reg_candidates = compute_regression_candidates(df)
-        candidate_pool_size = max(
-            int(CONFIG.get('live_pick_candidate_pool', 500)),
-            int(CONFIG.get('live_pick_min', 0) or 0) * 10,
-        )
-        picks = filter_best_picks(
-            pred_df,
-            regression_candidates=reg_candidates,
-            max_picks=candidate_pool_size,
-        )
-        inj_report_all = fetch_injury_data()
-        picks = sanity_check_picks(picks, df, inj_report_all)
-        picks = build_live_pick_card(
-            picks,
-            target_picks=_live_pick_target(),
-            min_picks=int(CONFIG.get('live_pick_min', 0) or 0),
-            slate_date=active_slate_date_all,
-            history_df=df,
-        )
+        # Use the same source, pregame, exact-price and final-card gates as predict.
+        # Fresh features remain required after the update/train stages above.
+        main(command='predict', use_feature_cache=False)
 
-        if len(picks) == 0:
-            print("\nNo picks cleared the publish bar today. Official card will be empty.")
-
-        picks['line_source'] = _line_source_all
-
-        if len(picks) > 0:
-            print(f"\n{len(picks)} picks found:")
-
-            print("\n=== TOP 20 PICKS (by tiered accuracy ranking) ===")
-            display_cols = ['player', 'prop', 'direction', 'line', 'prediction', 'edge', 'season_stage', 'publish_tier', 'top_tier_lane_pass', 'postseason_pick_score', 'estimated_hit_rate', 'meta_floor', 'meta_prob', 'volatility_metric', 'volatility_ceiling', 'postseason_role_score', 'consistency_score', 'confidence', 'dir_prob', 'p_over_cal', 'p_over_raw', 'market_edge', 'model_wr', 'pick_source', 'l10_avg', 'prob_source']
-            display_cols = [c for c in display_cols if c in picks.columns]
-            print(picks.head(20)[display_cols].to_string(index=False))
-
-        save_picks(picks, pred_df, slate_date=active_slate_date_all)
-        
     else:
         print(f"Unknown command: {command}")
         print("Available commands: update, train, predict, backtest, backfill, rebuild-lines, all")

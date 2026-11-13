@@ -119,9 +119,9 @@ def load_lines(allowed_source_terms: list[str] | None = None) -> pd.DataFrame:
         [3, 2, 1],
         default=0,
     )
-    lines["_snapshot_sort"] = pd.to_datetime(lines["snapshot_ts"], errors="coerce", utc=True)
+    lines["_snapshot_sort"] = pd.to_datetime(lines["snapshot_ts"], errors="coerce", utc=True, format="mixed")
     if "commence_time" in lines.columns:
-        commence = pd.to_datetime(lines["commence_time"], errors="coerce", utc=True)
+        commence = pd.to_datetime(lines["commence_time"], errors="coerce", utc=True, format="mixed")
         lines = lines[
             lines["_snapshot_sort"].isna() | commence.isna() | lines["_snapshot_sort"].le(commence)
         ].copy()

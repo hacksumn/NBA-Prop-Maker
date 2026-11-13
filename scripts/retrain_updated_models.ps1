@@ -24,6 +24,9 @@ function Invoke-PythonStep {
         [Parameter(Mandatory = $true)][string[]]$PythonArgs
     )
     Write-Host "`n[$Label]"
+    if ($PythonArgs[0] -match "\.py$") {
+        $PythonArgs = @(".\artifact_retention.py", "--run") + $PythonArgs
+    }
     & python @PythonArgs
     if ($LASTEXITCODE -ne 0) {
         throw "$Label failed with exit code $LASTEXITCODE"

@@ -4,6 +4,12 @@
 
 ## NOW
 
+- [x] **[DEC-074] Step 1.5 prints the last slate's picks with W/L on every run** (`_log_last_slate_results`, display only; verified on real history, 224 tests passed).
+- [ ] **[VERIFY — DEC-074] Confirm the `Last slate's picks` block appears in the next scheduled `logs/run_*.log` and that Step 1.5 still reports its grading line.** (The DEC-073 rerun check predates this change.)
+- [x] **[DEC-073] Loosen final-card accuracy gates: meta floor (AST 46 -> 42, TRB/TOV 49 -> 45, STL/BLK 45 -> 42) and FanDuel volatility ceiling mult 1.25 -> 1.50.** Pick-affecting; full suite 224 passed.
+- [x] **[VERIFY — DEC-073] Same-day rerun check:** isolated rerun check PASSED 2026-11-10: `nba_props.py predict` run twice in a scratch copy, both exit 0 with no errors; run 1 published 2 extra picks under the new limits (Desmond Bane AST U2.5 meta 44.4, Isaiah Hartenstein AST U3.5 meta 44.8; card 5 -> 7); run 2 added 0 rows and left picks/candidates/betslips/historical_lines byte-identical; every original row in all five history files unchanged (only the 2 candidate rows flipped published False->True, the DEC-070-allowed promotion); real project files' hashes unchanged. Steps 1-2 (box score/line fetch) not rerun to avoid Odds API spend.
+- [ ] **[REVIEW — DEC-073] ~2026-11-30: in `candidates_history.csv`/`picks_history.csv`, grade picks published only because of the new limits (meta 42-46 AST, vol 1.25-1.50x ref) vs core picks at real prices; tighten back if they underperform.** Fill picks (`volume_fill`/`emergency_fill`) and the price gate were deliberately left unchanged.
+
 - [x] **[DEC-072] Stop the scheduler wrapper treating Python stderr as a failure.** `Invoke-PythonStep` patched; isolated 3-case test passed.
 - [ ] **[VERIFY — DEC-072] After the next scheduled DailySafe run, confirm `logs/scheduled_dailysafe.log` ends `COMPLETE DailySafe` and that `data/candidate_future_holdout_predictions.csv` and `output/candidate_future_holdout_summary.json` now exist.** If the files are still missing, run `python scripts/capture_candidate_future_holdout.py` under supervision and read its error.
 - [ ] **[OPTIONAL — DEC-072] Apply the same fix to `scripts/retrain_updated_models.ps1`** (same latent pattern, manual script).
@@ -229,3 +235,58 @@ Exact commands or checks required before marking complete:
 
 ### Done when
 Concrete acceptance criteria:
+
+
+## 2026-11-10 ? DEC-075 audit follow-up
+
+- [x] Repair mixed timestamp parsing in canonical line selection, advanced lookup, live time gates, daily freshness and naive-baseline audit; add regression tests.
+- [x] Keep complete dates separate in advanced and minutes model CV.
+- [x] Protect frozen future capture against post-tip scoring and rerun replacement; evaluate first exact contracts and align bootstrap weighting with the reported metric.
+- [x] Add read-only `scripts/audit_project_integrity.py` and detailed audit/evidence; full suite 238 passed.
+- [ ] Retrain/recalibrate only in an isolated candidate directory using corrected timestamps and date-grouped CV; re-audit common-row performance and genuinely future results before promotion. Old OOF/evaluation results retain the previous procedure.
+- [ ] Version policy/config/model/data at capture time; freeze gate experiments prospectively and evaluate at exact offered prices.
+- [ ] Resolve effective-date roster/absence mappings in shadow mode with before/after card and player diffs (DEC-067).
+- [ ] Define strict verified-pregame evaluation cohorts, separating unknown-time legacy data without deleting it; align training/live main-line selection for alternate markets.
+- [ ] Investigate partial-slate betslip grading: missing player rows must not imply DNP before that player's event is final.
+- [ ] Refresh stale April/PrizePicks docs; isolate Python environment, add run lock, and refactor duplicate function definitions under behavioral checks.
+
+Full findings and acceptance criteria: `output/PROJECT_AUDIT_2026-11-10.md`. No claimed win-rate improvement and no production promotion.
+
+
+## 2026-11-10 ? Isolated-refresh path correction (DEC-076)
+
+User execution exposed hard-coded CLI defaults in feature_pipeline.py that wrote original-project data/model_data_advanced.csv and feature_cols_advanced.json despite execution from the isolated copy. Earlier isolation assurances were incorrect. Corrected defaults to the script directory and made run_training_maintenance pass explicit input/output/features paths. Applied surgical source fixes to both the original and Fresh_Start_NBA_retrain_20261110_095208 copies. Two new regression tests pass; copied scripts parse. No refresh/retrain was launched by the agent, and original generated files were not reverted. Rerun refresh in the corrected isolated copy before training.
+
+
+## 2026-11-12 ? Live-gate review follow-up
+
+- [x] Route `all` through canonical `predict` publication checks; reject invalid numerical prices/probabilities and unknown/future snapshot times. Full suite 245 passed, 10 subtests.
+- [x] Independently reconcile all 149 settled candidate outcomes and split price-cap/EV rejections. Report `output/LIVE_GATE_REVIEW_2026-11-12.md`.
+- [ ] Add immutable per-run gate-decision events including early generation/sanity rejects, actual publication prices and policy/model hashes. Preserve first-candidate history.
+- [ ] Reconcile changed box-score actuals with provenance; event-final evidence required before confident DNP grading. Two Wembanyama BLK actual discrepancies currently leave W/L unchanged.
+- [ ] Freeze current gate policy for a predeclared future comparison with same-offer alternatives, calibration/market baselines and date-cluster uncertainty. Meta 42?46 has two published settled losses; new AST volatility band has no settled published observations.
+- [ ] Resolve low-sigma edge no-op, misleading fill diagnostics, guaranteed-excluded fill computation and shadowed duplicate definitions in scoped changes.
+- [ ] Define production policy-unavailable behavior, explicit probability provenance, quote-age policy and sanitized transient-provider retries.
+
+
+## 2026-11-12 ? Follow-through completed and next checks
+
+- [x] Add run receipts for primary generation, disabled prop offers, sanity rejections, final flags and exact saved publication rows, with configuration/model/code fingerprints and injury-report evidence.
+- [x] Initialize prospective incumbent versus meta46/volatility1.25 comparison starting November 13. Daily grading now refreshes status. Review minimum chosen as 30 completed dates and 300 binary contracts.
+- [x] Add immutable observations for existing-grade versus refreshed-box conflicts. Five conflicts found, including one March 25 integer-line tie stored as LOSS. Historical outcomes require source/convention review before changing raw grades.
+- [x] Name fallback-source exclusions explicitly and remove the low-sigma no-op without lowering the configured minimum.
+- [ ] Verify next real prediction creates `output/gate_runs/<date>_<run>.json`, and the next morning prints future-review and reconciliation status. Synthetic tests passed.
+- [ ] Extend structured first-rejection coverage into structural/fill/emergency generation and pre-feature roster/min-games filters. Current receipt documents those coverage limits.
+- [ ] Use retained decision events to design independent injury/minutes/role ablations. Final-gate experiment does not replay upstream removals or rerank alternative full cards.
+- [ ] Complete event-final/participation evidence for DNP decisions and reconcile approved grade corrections into performance views.
+- [ ] Profile and consolidate guaranteed-excluded fallback generation, duplicate functions and per-run policy/history reloads with selection equivalence checks.
+
+
+## 2026-11-12 ? Data-retention completion
+
+- [x] Checkpoint all currently available workspace data/output/model/log artifacts and feature lists. Baseline 13,141 files.
+- [x] Preserve previous file bytes before direct writes, atomic replacements and deletions, with deduplicated compressed objects and no automatic pruning.
+- [x] Protect daily, training and operator subprocesses, direct core writers and watcher-log redirection.
+- [x] Serialize cumulative-history appends across processes and increase run timestamp precision.
+- [x] Verify 12,569 objects by decompression and SHA-256, restore pick history into a temporary file, and pass 256 tests plus 10 subtests.
+- [ ] On the next actual scheduled run, confirm new retained path versions/checkpoint entries accompany refreshed datasets. The protected launcher and write paths were tested with local fixtures.

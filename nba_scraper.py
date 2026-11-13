@@ -18,6 +18,8 @@ import time
 import logging
 import pandas as pd
 from datetime import datetime
+from artifact_retention import install_retention
+install_retention()
 
 from nba_api.stats.endpoints import leaguegamelog
 

@@ -47,6 +47,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from injury_feed import fetch_injury_data
+from artifact_retention import install_retention
+install_retention()
 
 # Force UTF-8 output on Windows so Unicode chars in log messages don't crash
 if hasattr(sys.stdout, "reconfigure"):
@@ -340,7 +342,7 @@ def _save_timestamped_snapshot(df, stem: str):
             return None
         folder = DATA_DIR / "snapshots" / stem
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        path = folder / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.csv"
         _atomic_csv(df, path)
         return path
     except Exception as exc:
@@ -433,7 +435,7 @@ def _run_python_step(step_no, title: str, script_args, errors, error_label: str,
                      success_msg: str, skip_msg: Optional[str] = None) -> bool:
     """Run a Python subprocess, stream output into the daily log, and track failures."""
     _step_header(step_no, title)
-    cmd = [sys.executable, "-u", *script_args]
+    cmd = [sys.executable, "-u", str(SCRIPT_DIR / "artifact_retention.py"), "--run", *script_args]
     logger.info(f"  Running: {' '.join(str(part) for part in cmd)}")
     try:
         env = os.environ.copy()
@@ -833,6 +835,7 @@ def step1_5_grade_picks(errors):
         ungraded = hist[_blank_text_mask(hist["result"])]
         if len(ungraded) == 0:
             _ok("All picks already graded")
+            _log_last_slate_results(hist)
             return
 
         def _norm(name):
@@ -979,9 +982,64 @@ def step1_5_grade_picks(errors):
             for date, cnt in sorted(pending_by_date.items()):
                 logger.info(f"    {date}: {cnt} pending (not gradeable yet)")
         logger.info("  ─────────────────────────────────────────────────────")
+        _log_last_slate_results(hist)
 
     except Exception as exc:
         _warn(f"Auto-grading picks failed (non-fatal): {exc}")
+
+
+def _log_last_slate_results(hist):
+    """Log the most recent completed slate's picks with W/L/P/DNP beside each one.
+
+    Display only: reads the in-memory history and never writes or changes anything.
+    "Most recent completed slate" is the latest game_date before today, so an off
+    day still shows the last slate that was played. Ungraded picks show "?".
+    Any failure is logged as a warning and never affects grading or later steps.
+    """
+    try:
+        import pandas as pd
+
+        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+        dates = hist["game_date"].fillna("").astype(str)
+        past_dates = sorted(d for d in dates.unique() if d and d < today_str)
+        if not past_dates:
+            logger.info("  No completed slate in picks_history.csv yet - nothing to show")
+            return
+        last_date = past_dates[-1]
+        day = hist[dates == last_date].copy()
+        if "prop" in day.columns:
+            day = day.sort_values(["prop", "player"] if "player" in day.columns else ["prop"])
+
+        marks = {"WIN": "W", "LOSS": "L", "PUSH": "P", "DNP": "DNP"}
+        results = day["result"].fillna("").astype(str).str.strip().str.upper()
+        n_w, n_l = int((results == "WIN").sum()), int((results == "LOSS").sum())
+        n_p, n_dnp = int((results == "PUSH").sum()), int((results == "DNP").sum())
+        n_open = int((~results.isin(list(marks))).sum())
+        decided = n_w + n_l
+        pct = f"{n_w / decided * 100:.1f}%" if decided else "n/a"
+
+        logger.info("")
+        logger.info(f"  ── Last slate's picks: {last_date} ({len(day)} picks) ─────────────")
+        logger.info(f"  {'W/L':<4} {'PLAYER':<24} {'PROP':<5} {'DIR':<6} {'LINE':>6} {'ACTUAL':>7}")
+        for (_, row), res in zip(day.iterrows(), results):
+            mark = marks.get(res, "?")
+            player = str(row.get("player", ""))[:24]
+            line = str(row.get("line", "") if pd.notna(row.get("line", "")) else "")
+            actual = row.get("actual", "")
+            actual = "" if pd.isna(actual) else str(actual)
+            logger.info(
+                f"  {mark:<4} {player:<24} {str(row.get('prop', '')):<5} "
+                f"{str(row.get('direction', '')):<6} {line:>6} {actual:>7}"
+            )
+        summary = f"  Record {last_date}: {n_w}W / {n_l}L / {n_p}P ({pct})"
+        if n_dnp:
+            summary += f", {n_dnp} DNP"
+        if n_open:
+            summary += f", {n_open} not graded yet (?)"
+        logger.info(summary)
+        logger.info("  ─────────────────────────────────────────────────────")
+    except Exception as exc:
+        logger.warning(f"  Could not print last slate's picks (display only, grading unaffected): {exc}")
 
 
 # ── Step 1.6: Auto-grade betslips ─────────────────────────────────────────────
@@ -1206,6 +1264,15 @@ def step1_8_grade_candidates(errors):
         if waiting:
             logger.info(f"  {waiting} past candidate(s) still waiting on box scores")
         _ok(f"Candidate grading complete ({len(graded_idx)} newly graded, {len(hist)} tracked)")
+        from scripts.evaluate_gate_experiment import evaluate as evaluate_gate_experiment
+        gate_summary = evaluate_gate_experiment()
+        from scripts.reconcile_grade_evidence import reconcile as reconcile_grade_evidence
+        reconciliation = reconcile_grade_evidence()
+        logger.info("  Grade reconciliation: %s local source conflicts, %s outcome conflicts",
+                    reconciliation["current_conflicts"], reconciliation["outcome_conflicts"])
+        logger.info("  Future gate review: %s dates, %s binary contracts, review eligible=%s",
+                    gate_summary.get("completed_dates", 0), gate_summary.get("binary_contracts", 0),
+                    gate_summary.get("review_eligible", False))
     except Exception as exc:
         # Tracking only: never block the run or count as a pipeline error.
         _warn(f"Candidate grading failed ({type(exc).__name__}: {exc}); picks are unaffected")
@@ -1434,7 +1501,7 @@ def _recent_bookmaker_snapshot(
     ].copy()
     if subset.empty:
         return result
-    timestamps = pd.to_datetime(subset["snapshot_ts"], errors="coerce", utc=True)
+    timestamps = pd.to_datetime(subset["snapshot_ts"], errors="coerce", utc=True, format="mixed")
     latest = timestamps.max()
     if pd.isna(latest):
         return result

@@ -12,6 +12,10 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT))
+from artifact_retention import install_retention
+install_retention(ROOT)
 DEFAULT_OUTPUT = ROOT / "data" / "nba_team_game_logs.csv"
 DEFAULT_SUMMARY = ROOT / "output" / "nba_team_game_logs_summary.json"
 def current_season() -> str:

@@ -54,7 +54,7 @@ def load_active_candidate() -> tuple[dict, dict]:
     return registry, registry.get("active") or {}
 
 
-def _active_lines(slate_date: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _active_lines(slate_date: str, as_of=None) -> tuple[pd.DataFrame, pd.DataFrame]:
     import nba_props
 
     history = pd.read_csv(DATA / "historical_lines.csv", low_memory=False)
@@ -64,6 +64,7 @@ def _active_lines(slate_date: str) -> tuple[pd.DataFrame, pd.DataFrame]:
         allowed_sources=["fanduel"],
         standard_only=True,
         allow_future_slate=False,
+        as_of=as_of,
     )
     if active.empty or active_date != slate_date or source != "fanduel":
         raise RuntimeError(
@@ -112,6 +113,33 @@ def _long_predictions(frame: pd.DataFrame, prefix: str) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
+def _pregame_capture_mask(frame: pd.DataFrame, captured_at) -> pd.Series:
+    """Require known pre-tip times and a line observed by capture time."""
+    captured = pd.to_datetime(captured_at, errors="coerce", utc=True, format="mixed")
+    start = pd.to_datetime(frame["commence_time"], errors="coerce", utc=True, format="mixed")
+    snapshot = pd.to_datetime(frame["snapshot_ts"], errors="coerce", utc=True, format="mixed")
+    return snapshot.notna() & start.notna() & snapshot.le(captured) & start.gt(captured)
+
+
+def _evaluation_rows(stored: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Evaluate only first, provably pregame captures at exact contract grain.
+
+    Raw snapshots remain in the append-only store. Reruns must not give one
+    contract extra weight or replace the prediction originally made for it.
+    """
+    eligible = _pregame_capture_mask(stored, stored["captured_at"])
+    valid = stored.loc[eligible].copy()
+    valid["_capture_sort"] = pd.to_datetime(valid["captured_at"], utc=True, format="mixed")
+    key = ["candidate_id", "game_date", "player_norm", "prop", "line"]
+    first = valid.sort_values("_capture_sort", kind="stable").drop_duplicates(key, keep="first")
+    return first.drop(columns="_capture_sort"), {
+        "stored_rows": int(len(stored)),
+        "excluded_unverified_or_posttip_rows": int((~eligible).sum()),
+        "excluded_repeat_contract_snapshots": int(len(valid) - len(first)),
+        "evaluation_contracts": int(len(first)),
+    }
+
+
 def capture(slate_date: str | None = None) -> dict:
     registry, active_candidate = load_active_candidate()
     if not active_candidate:
@@ -125,7 +153,14 @@ def capture(slate_date: str | None = None) -> dict:
     if not candidate_dir.is_dir():
         raise FileNotFoundError(candidate_dir)
 
-    active_lines, vegas = _active_lines(slate_date)
+    started_at = pd.Timestamp.now(tz="UTC")
+    active_lines, _ = _active_lines(slate_date, as_of=started_at)
+    active_lines = active_lines.loc[_pregame_capture_mask(active_lines, started_at)].copy()
+    if active_lines.empty:
+        return {"status": "no_verified_pregame_lines", "rows": 0, "slate_date": slate_date}
+    market_cols = [c for c in ["projection_type", "is_promo"] if c in active_lines.columns]
+    vegas = active_lines[["player", "prop", "line", *market_cols]].copy()
+    vegas["num_books"] = active_lines["num_books"].values if "num_books" in active_lines else 1
     history = pd.read_csv(DATA / "nba_data.csv", parse_dates=["game_date"], low_memory=False)
     production = _score_model(MODELS, history, vegas, slate_date)
     candidate = _score_model(candidate_dir, history, vegas, slate_date)
@@ -146,7 +181,10 @@ def capture(slate_date: str | None = None) -> dict:
     )
     aligned["candidate_id"] = str(active_candidate["candidate_id"])
     aligned["game_date"] = slate_date
-    aligned["captured_at"] = pd.Timestamp.now(tz="America/Chicago").isoformat()
+    captured_at = pd.Timestamp.now(tz="UTC")
+    # Scoring can cross tip-off. Check again immediately before persistence.
+    aligned = aligned.loc[_pregame_capture_mask(aligned, captured_at)].copy()
+    aligned["captured_at"] = captured_at.isoformat()
     aligned["production_direction"] = np.where(
         aligned["production_prediction"] > aligned["line"], "OVER", "UNDER"
     )
@@ -155,16 +193,14 @@ def capture(slate_date: str | None = None) -> dict:
     )
     aligned["actual"] = np.nan
 
-    existing = pd.read_csv(STORE, low_memory=False) if STORE.exists() else pd.DataFrame()
-    combined = pd.concat([existing, aligned], ignore_index=True, sort=False)
     key = ["candidate_id", "game_date", "player_norm", "prop", "line", "snapshot_ts"]
-    combined = combined.drop_duplicates(key, keep="last")
-    atomic_csv(STORE, combined)
+    _, added, _ = nba_props._append_only_history(STORE, aligned, key)
     return {
         "status": "captured",
         "candidate_id": active_candidate["candidate_id"],
         "slate_date": slate_date,
         "rows": int(len(aligned)),
+        "new_rows": int(added),
     }
 
 
@@ -188,13 +224,15 @@ def _date_bootstrap(frame: pd.DataFrame, candidate_col: str, comparator_col: str
     dates = sorted(frame["game_date"].unique())
     if len(dates) < 2:
         return [float("nan"), float("nan")]
-    by_date = frame.groupby("game_date")[[candidate_col, comparator_col]].mean()
+    # Cluster by slate, but retain the row-weighted estimand reported above.
+    by_date = frame.groupby("game_date")[[candidate_col, comparator_col]].sum()
+    by_date["n"] = frame.groupby("game_date").size()
     rng = np.random.default_rng(42)
     delta = np.empty(draws)
     for index in range(draws):
         sample = rng.choice(dates, size=len(dates), replace=True)
         sampled = by_date.loc[sample]
-        delta[index] = float((sampled[candidate_col] - sampled[comparator_col]).mean())
+        delta[index] = float((sampled[candidate_col] - sampled[comparator_col]).sum() / sampled["n"].sum())
     return [float(np.quantile(delta, 0.025)), float(np.quantile(delta, 0.975))]
 
 
@@ -208,13 +246,14 @@ def grade() -> dict:
         actuals, on=["game_date", "player_norm", "prop"], how="left", validate="many_to_one"
     )
     atomic_csv(STORE, working)
-    graded = working[
-        working["candidate_id"].eq(active_candidate["candidate_id"])
-        & working["actual"].notna()
-        & working["actual"].ne(working["line"])
+    eligible, eligibility = _evaluation_rows(working[working["candidate_id"].eq(active_candidate["candidate_id"])])
+    graded = eligible[
+        eligible["actual"].notna()
+        & eligible["actual"].ne(eligible["line"])
     ].copy()
     if graded.empty:
-        summary = {"status": "pending_results", "candidate_id": active_candidate["candidate_id"], "rows": 0}
+        summary = {"status": "pending_results", "candidate_id": active_candidate["candidate_id"], "rows": 0,
+                   "eligibility": eligibility}
         atomic_json(SUMMARY, summary)
         return summary
     actual_over = graded["actual"] > graded["line"]
@@ -250,6 +289,7 @@ def grade() -> dict:
         "minimum_dates": active_candidate.get("minimum_dates", 15),
         "minimum_rows": active_candidate.get("minimum_rows", 100),
         "results": rows,
+        "eligibility": eligibility,
         "production_promotion_performed": False,
     }
     atomic_json(SUMMARY, summary)

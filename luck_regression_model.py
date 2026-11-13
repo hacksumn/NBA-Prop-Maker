@@ -68,6 +68,9 @@ from nba_api.stats.endpoints import (
 # Configuration
 # ---------------------------------------------------------------------------
 
+from artifact_retention import install_retention
+install_retention()
+
 BASE_DIR   = Path(__file__).parent
 DATA_DIR   = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"

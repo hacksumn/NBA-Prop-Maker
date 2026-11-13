@@ -1,0 +1,14 @@
+{
+  "source_file": "candidates_history.csv",
+  "game_date": "2026-11-09",
+  "player": "Victor Wembanyama",
+  "prop": "BLK",
+  "direction": "UNDER",
+  "line": 3.5,
+  "stored_actual": 9.0,
+  "observed_actual": 8.0,
+  "stored_result": "LOSS",
+  "observed_result": "LOSS",
+  "observed_at": "2026-11-12T15:28:55.180130+00:00",
+  "box_sha256": "aefaf5181137430678a9e9e71e119e611124c26bd6a8342e5b654edd0bb637d9"
+}

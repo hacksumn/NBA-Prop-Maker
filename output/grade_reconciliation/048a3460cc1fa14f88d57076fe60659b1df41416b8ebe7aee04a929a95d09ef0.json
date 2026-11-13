@@ -1,0 +1,14 @@
+{
+  "source_file": "picks_history.csv",
+  "game_date": "2026-03-25",
+  "player": "Donovan Clingan",
+  "prop": "PTS",
+  "direction": "OVER",
+  "line": 14.0,
+  "stored_actual": 14.0,
+  "observed_actual": 14.0,
+  "stored_result": "LOSS",
+  "observed_result": "PUSH",
+  "observed_at": "2026-11-12T15:28:55.034678+00:00",
+  "box_sha256": "aefaf5181137430678a9e9e71e119e611124c26bd6a8342e5b654edd0bb637d9"
+}

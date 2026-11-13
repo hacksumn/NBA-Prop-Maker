@@ -20,6 +20,10 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT))
+from artifact_retention import install_retention
+install_retention(ROOT)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 DEFAULT_INPUT = ROOT / "data" / "nba_data.csv"

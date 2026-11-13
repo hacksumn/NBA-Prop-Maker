@@ -19,6 +19,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 import warnings
+from artifact_retention import install_retention
+install_retention()
+
 warnings.filterwarnings('ignore')
 
 
@@ -350,7 +353,7 @@ def train_minutes_model(df: pd.DataFrame) -> Dict:
         os.system('pip install xgboost --break-system-packages -q')
         import xgboost as xgb
     
-    from sklearn.model_selection import TimeSeriesSplit
+    from chronological_validation import date_grouped_splits
     from sklearn.metrics import mean_absolute_error, mean_squared_error
     
     print("\nTraining minutes model...")
@@ -390,10 +393,9 @@ def train_minutes_model(df: pd.DataFrame) -> Dict:
     }
     
     # Time series cross-validation
-    tscv = TimeSeriesSplit(n_splits=5)
     cv_results = []
     
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+    for fold, (train_idx, val_idx) in enumerate(date_grouped_splits(df['game_date'], n_splits=5), 1):
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         

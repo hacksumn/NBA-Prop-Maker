@@ -50,3 +50,6 @@ nba_prop_tool.zip
 
 # Misc
 street-bit-font/
+
+# Compressed immutable local pipeline artifact versions
+.retained_versions/

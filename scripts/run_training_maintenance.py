@@ -23,6 +23,9 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from artifact_retention import install_retention
+install_retention(ROOT)
 DATA = ROOT / "data"
 OUTPUT = ROOT / "output"
 MODELS = ROOT / "models"
@@ -77,7 +80,7 @@ def production_hashes() -> dict[str, str]:
 
 def run_step(name: str, arguments: list[str]) -> dict[str, object]:
     started = datetime.now().astimezone()
-    command = [sys.executable, *arguments]
+    command = [sys.executable, str(ROOT / "artifact_retention.py"), "--run", *arguments]
     print(f"\n[{name}]\n{' '.join(command)}", flush=True)
     completed = subprocess.run(command, cwd=ROOT, check=False)
     ended = datetime.now().astimezone()
@@ -109,7 +112,12 @@ def _date_profile(path: Path) -> dict[str, object]:
 
 def rebuild_training_tables() -> tuple[list[dict[str, object]], dict[str, object]]:
     steps = [
-        run_step("Advanced feature table", ["feature_pipeline.py"]),
+        run_step("Advanced feature table", [
+            "feature_pipeline.py",
+            "--input", str(DATA / "nba_data.csv"),
+            "--output", str(DATA / "model_data_advanced.csv"),
+            "--features-json", str(ROOT / "feature_cols_advanced.json"),
+        ]),
         run_step(
             "Availability/minutes OOF model",
             ["scripts/train_availability_minutes_model.py"],

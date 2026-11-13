@@ -9,11 +9,11 @@
 
 ## Dataset and Grain
 
-- Source: `data/nba_data.csv`, SHA-256 `b6757e3efd50f11d6a72dae6be58b55be76c17c4cca611e61d1121029a3723db`.
-- Source coverage: `83,846` appearance rows from 2023-10-24 through 2026-11-05.
-- Candidate table: `100,232` unique player/team/game rows across `520` dates and `798` players.
+- Source: `data/nba_data.csv`, SHA-256 `aefaf5181137430678a9e9e71e119e611124c26bd6a8342e5b654edd0bb637d9`.
+- Source coverage: `84,908` appearance rows from 2023-10-24 through 2026-11-11.
+- Candidate table: `101,396` unique player/team/game rows across `526` dates and `802` players.
 - Holdout: `2025-26`, `35,444` candidates from 2025-10-24 through 2026-05-18.
-- OOF feature table: `76,980` rows; chronology violations `0`.
+- OOF feature table: `78,144` rows; chronology violations `0`.
 
 ## Validation Results
 

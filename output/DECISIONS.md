@@ -3958,3 +3958,121 @@ Reproduced in an isolated scratch test (outside the project, 5.1.26100): a nativ
 ### Rollback
 
 `git checkout -- scripts/project_operator.ps1` (or restore the three-line `& python @PythonArgs` / `$LASTEXITCODE` form).
+
+
+## DEC-073 — Loosen Final-Card Meta Floor and FanDuel Volatility Ceiling
+
+- **Date:** 2026-11-10
+- **Status:** Implemented (config values in `nba_props.CONFIG`); unit tests pass. Same-day rerun check passed (see Verification). PICK-AFFECTING: more AST (and potentially TRB/STL/BLK/TOV) candidates pass the final accuracy gates.
+- **Decision owner:** Jake (asked to loosen the "blocked by other gates" filters after seeing their record)
+
+### Context
+
+Step 1.8 (DEC-069) reported candidates blocked by other gates at 8-1 and price-blocked at 25-16. As of 2026-11-10 `output/candidates_history.csv` showed published 26-14 (+7.0u), blocked_price 39-18, blocked_other 11-2 (+7.35u). Every blocked_other row was an AST UNDER. Four causes: meta_prob below the AST floor of 46.0 (10 rows), volatility above the AST ceiling of 2.92 (4 rows, one also meta), volume_fill/emergency_fill excluded from the card (5 rows).
+
+### Evidence
+
+- Candidates (4 graded slates, 2026-11-06..11-09): meta 42-46 went 3-1 (plus 1 DNP), meta < 42 went 1-1, volatility 2.92-3.30 went 4-0 (one overlapping with meta), and fills went 4-0.
+- `picks_history.csv` (published picks, mostly Apr-May 2026): AST meta (0,35] 2/6, (35,40] 2/5, (46,50] 3/7, (50,55] 20/29, >60 46/63. All props meta (40,46] 4/5. AST hit rate does not fall as vol/ceiling rises to 1.0 (0.9-1.0: 16/23). Consistent with DEC-071 finding that volatility removals did not remove losers.
+- Fill picks published historically: volume_fill 1-2, emergency_fill 0-1.
+- Price-gate blocks: favorite cap (beyond -200) 17-10, -2.80u; EV floor 22-8, +5.43u, but nearly all of those had model EV between -0.15 and -0.01 at -130 to -198. Loosening that would mean betting negative model EV.
+- Caveats: n=13 graded blocked_other, 4 slates, single lane (AST UNDER), which also hit 22-11 when published. This is directional evidence, not proof.
+
+### Decision
+
+- `live_pick_meta_floor_min` 45.0 -> 42.0 and `live_pick_meta_floor_slack` 10.0 -> 14.0. Resulting floors are AST 42, TRB 45, TOV 45, STL/BLK 42, with PTS/PA/PR/PRA unchanged (meta gate off).
+- `live_fanduel_volatility_ceiling_mult` 1.25 -> 1.50. Resulting ceilings are AST 3.51, TRB 4.36, STL/BLK 1.50, TOV 1.88.
+- Unchanged: price gate (-200 cap, EV >= +0.01), fill-pick exclusion, hit-rate floor, sanity checks, models. `meta_floor` is not used in signal scoring. `volatility_ceiling` feeds only the postseason role score, so regular-season ranking is unchanged.
+- Replay against logged candidates: 7 of 13 graded blocked_other rows would have published (6-1, +4.83u). The rows still blocked went 5-1 (+2.53u: 4 fills, 2 meta < 42).
+- Verification: `python -m pytest -q tests`, 224 passed. No test pinned the old values.
+- Same-day rerun: isolated rerun check PASSED 2026-11-10: `nba_props.py predict` run twice in a scratch copy, both exit 0 with no errors; run 1 published 2 extra picks under the new limits (Desmond Bane AST U2.5 meta 44.4, Isaiah Hartenstein AST U3.5 meta 44.8; card 5 -> 7); run 2 added 0 rows and left picks/candidates/betslips/historical_lines byte-identical; every original row in all five history files unchanged (only the 2 candidate rows flipped published False->True, the DEC-070-allowed promotion); real project files' hashes unchanged.
+
+### Review / Rollback
+
+- Rollback: restore 45.0 / 10.0 / 1.25 in `nba_props.CONFIG`.
+- Review around 2026-11-30: compare published picks with meta 42-46 or volatility in (1.25x, 1.50x] of the reference against the other picks at recorded prices. Revisit fills only after 30+ graded fill candidates.
+
+
+## DEC-074 — Step 1.5 Prints the Last Slate's Picks With W/L on Every Run
+
+- **Date:** 2026-11-10
+- **Status:** Implemented (`run_daily.py`). Display only: no pick, grading, data, or schema change.
+- **Decision owner:** Jake (asked to see yesterday's picks with a W/L beside each in the Step 1.5 output)
+
+### Context
+
+Step 1.5 printed a W/L table only for picks graded in that run. A same-day rerun hit `All picks already graded` and returned early, so the previous slate's results were never shown again.
+
+### Decision
+
+- New helper `_log_last_slate_results(hist)` logs every pick for the latest `game_date` before today (so off days show the last played slate) with `W`/`L`/`P`/`DNP`, or `?` if ungraded, and that slate's record. It is called on the early-return path and at the end of Step 1.5.
+- It reads the in-memory frame only, writes nothing, and wraps itself in try/except. A failure logs one warning and never affects grading or later steps. Output goes through `logger`, so it reaches `logs/run_*.log`.
+
+### Verification
+
+- The function was extracted by AST and run against the real `output/picks_history.csv` with a console-only logger, without importing `run_daily` (which would append to the real log). Output: 2026-11-09, 7 picks, 3W/4L. File md5 unchanged (`9a7d1b2e...`). Empty input printed a message; malformed input logged a warning with no crash. `pytest -q tests`: 224 passed.
+- Ordering note: the DEC-073 same-day rerun check (two isolated `nba_props.py predict` runs) was done **before** this change and covered Step 9 only. This change was not exercised by a full `run_daily.py` run. The first real confirmation is the next scheduled run's log.
+
+### Rollback
+
+Remove the two `_log_last_slate_results(hist)` calls (or the helper) in `step1_5_grade_picks`.
+
+
+
+## DEC-075 ? Repair timestamp and validation integrity before further accuracy tuning
+
+- **Date:** 2026-11-10
+- **Owner/request:** Jake requested a comprehensive project review and improvements to pick-generation accuracy.
+- **Status:** Implemented and verified integrity repairs; isolated retraining/forward acceptance remains open.
+
+### Evidence and decision
+
+Mixed legacy/ISO timestamp columns exposed pandas format-inference failures: 584,364 of 742,967 historical line rows have valid timestamps rejected by the default parser. Explicit `format="mixed"` is now used in canonical live/training timestamp paths and the naive-baseline audit. Full-data selector comparison: 46,824 contracts before, 65,835 after; 17,159 matching contracts change line. This is a pick/data-selection-affecting correctness fix, not a measured accuracy improvement. Legacy unknown-time/timezone provenance remains unresolved, and rows are preserved.
+
+Sorted row-based TimeSeriesSplit still shared a date at all five boundaries on master box scores. New `chronological_validation.date_grouped_splits` separates whole dates in nine advanced CV paths and the minutes CV path, failing on missing/unsorted/insufficient dates. Frozen production models and their existing OOF artifacts were not changed. New candidates/calibrators require isolated reevaluation under this procedure.
+
+The frozen future holdout now requires known pregame prediction-capture times before and after scoring, uses append-only writes instead of replacing matching snapshots, evaluates only the first pregame capture per exact contract, and resamples date clusters with row-weighted ratios matching reported accuracy. Current 1,777 stored rows have zero invalid-time or duplicate-contract exclusions. Existing saved summaries are preserved until the next grading run.
+
+### Verification and constraints
+
+- `python -m pytest -q tests --disable-warnings`: 238 passed, 330 warnings, 1 subtest passed (14 regression tests added).
+- Read-only audit: 108 active Python files parsed, no syntax errors; box-score and physical line keys have zero duplicates. Evidence includes source SHA-256 hashes.
+- Five canonical CSV hashes match the first/final audit. No raw history rows were removed; existing uncommitted work was preserved.
+- No paid calls, model retrain/promotion, live card regeneration, threshold change, scheduler change, or bankroll change.
+- Full coverage, current-priced performance, limitations, and ranked follow-up: `output/PROJECT_AUDIT_2026-11-10.md`.
+
+### Next step / rollback
+
+Train and audit an isolated candidate with corrected inputs, date-grouped folds and its bound calibrator; compare on untouched common contracts versus production, always-UNDER, and paired-price market probabilities. Continue the frozen future holdout. Do not relabel old backtests as verified under the new procedure. Rollback is limited to these source edits; never revert data, artifacts, or earlier user changes to achieve rollback.
+
+
+## 2026-11-10 ? Isolated-refresh path correction (DEC-076)
+
+User execution exposed hard-coded CLI defaults in feature_pipeline.py that wrote original-project data/model_data_advanced.csv and feature_cols_advanced.json despite execution from the isolated copy. Earlier isolation assurances were incorrect. Corrected defaults to the script directory and made run_training_maintenance pass explicit input/output/features paths. Applied surgical source fixes to both the original and Fresh_Start_NBA_retrain_20261110_095208 copies. Two new regression tests pass; copied scripts parse. No refresh/retrain was launched by the agent, and original generated files were not reverted. Rerun refresh in the corrected isolated copy before training.
+
+
+## 2026-11-12 ? Unify live publication gates and reject invalid inputs
+
+User requested a deep gate correctness/analytics review using validate-data. Demonstrated P1 defects repaired under that review. `all` previously published through an independent branch omitting the exact-price/source policy. It now calls canonical `predict` after its existing update/train steps with fresh features. Pricing rejects infinite/out-of-range probabilities, infinite American odds and unknown/future snapshots. Cached prediction selection supplies the run timestamp. These changes enforce existing executable/pregame contracts; numerical thresholds and models were not retuned.
+
+Verification `python -m pytest -q tests --disable-warnings` passed 245 tests and 10 subtests, 330 warnings. New regressions in `tests/test_live_gate_entry_points.py`. `python scripts/audit_live_gates.py` independently checked 149 outcomes with zero outcome disagreements and identified two actual-value conflicts. Histories and model input hashes were verified unchanged during audit calculation. Report `output/LIVE_GATE_REVIEW_2026-11-12.md` documents incomplete upstream rejection evidence, publication/first-candidate provenance differences, grading revision risk and proposed future gate evaluation. Existing dirty workspace changes were preserved.
+
+
+## 2026-11-12 ? Preserve gate decisions and initialize prospective evaluation
+
+User authorized the next steps following the deep gate review. Added `gate_decisions.py` and optional rejection collectors to primary generation and active sanity filtering. Existing callers retain their return contracts. Each successful live publication gets a separate atomic JSON receipt with a unique run ID, effective policy/configuration hash excluding credentials, active model hashes, scoring-source hash, exact market offers, injury report, first primary/sanity failures, final candidates and actual publication rows. A receipt cannot overwrite an existing run ID. Logging errors are visible and nonfatal to the saved card.
+
+The experiment starts 2026-11-13 and uses the final post-sanity candidate population. Freeze metadata was finalized before its start with no captured run receipts. Incumbent, meta46 and volatility1.25 alternatives share pregame offers and retain exact prices. Comparators measure final candidate eligibility before one-player selection, while actual published picks are reported separately. Deduplicate first contracts across runs, exclude policy/model/scoring-source drift, and report date-bootstrap incremental units per offered contract. The chosen 30-date/300-contract review minimum supports a planned review and does not imply a power guarantee. Daily Step 1.8 refreshes evaluation.
+
+Added immutable local grade-source conflict observations and a daily summary. Five conflicts across 1,733 checked history rows include one integer-line tie stored as LOSS. Original grading records remain evidence pending source/convention reconciliation. Removed the positive-floor no-op in sigma edge logic, keeping the existing effective floor, and made fallback-source exclusion explicit in diagnostics. Broader threshold tuning awaits future evidence. Full suite passed 252 tests and 10 subtests, with 330 warnings. Existing unrelated workspace changes were preserved.
+
+Fingerprint scope follows the existing production release patterns plus live sigma/minutes/availability policy and legacy fallback models. A scheduled RefreshTrainingData run changed the auxiliary availability model during verification. Its policy disables live use, so its model bytes are included only when enabled_for_live is true. A regression verifies disabled refresh stability and enabled-model inclusion. Final frozen baseline matches current protected production files.
+
+
+## 2026-11-12 ? Preserve every version of pipeline artifacts
+
+User requires all picks and data retained across daily runs. Cumulative pick/slip/candidate/tracking stores already append logical keys, but derived datasets, daily paths, model refreshes and reports reuse filenames. Added `artifact_retention.py` using a project-scoped Python audit hook before file mutations. It retains old bytes before write/delete and retains staged replacement bytes plus the destination before rename. Compressed content is addressed by SHA-256, with per-path version records and checkpoint manifests. No expiry or deletion routine was added. Baseline retained 13,141 available files, approximately 1.3 GB compressed, and 12,569 unique objects passed decompression/hash verification.
+
+Normal CLI modules install the hook. Daily/training child processes and both operator PowerShell launchers run scripts through the protected Python entry point. Watcher logs are retained before external redirection. File-preservation errors abort the individual write. Cross-process history append locking protects cooperating appenders. Same-day snapshot precision was raised to microseconds, and conflicting legacy archive names use unique destinations. Existing histories remain the downstream logical stores, while retained versions preserve corrected rows and prior run contents for inspection/restoration.
+
+Verification `python -m pytest -q tests --disable-warnings` passed 256 tests and 10 subtests, 330 warnings. Added write/replace/append/delete/full-disk/concurrent-append regressions. Restored pick history matched its source bytes. Both edited PowerShell files parsed. Guide `output/DATA_RETENTION.md`. Protection applies to this workspace's instrumented processes and cannot reconstruct already-absent files. Sources/data external to protected paths require separate coverage. The archive is local and its disk use grows with changed versions. Prior experiment metadata was retained when updating its scoring-source baseline before the first eligible date.

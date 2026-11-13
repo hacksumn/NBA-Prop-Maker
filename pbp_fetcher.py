@@ -46,6 +46,9 @@ from nba_api.stats.endpoints import playbyplayv3, leaguegamefinder
 # Configuration
 # ---------------------------------------------------------------------------
 
+from artifact_retention import install_retention
+install_retention()
+
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 PBP_RAW_DIR = DATA_DIR / "pbp_raw"

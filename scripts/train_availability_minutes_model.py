@@ -43,6 +43,10 @@ from sklearn.preprocessing import StandardScaler
 
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT))
+from artifact_retention import install_retention
+install_retention(ROOT)
 DEFAULT_INPUT = ROOT / "data" / "nba_data.csv"
 DEFAULT_CANDIDATES = ROOT / "data" / "availability_minutes_candidates.csv"
 DEFAULT_MODEL = ROOT / "models" / "availability_minutes_model.pkl"

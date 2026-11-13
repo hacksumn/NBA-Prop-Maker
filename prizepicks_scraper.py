@@ -38,6 +38,8 @@ import pandas as pd
 from datetime import date
 from unicodedata import normalize as uniNorm
 from pathlib import Path
+from artifact_retention import install_retention
+install_retention()
 
 from player_pool_guard import sanitize_player_names
 

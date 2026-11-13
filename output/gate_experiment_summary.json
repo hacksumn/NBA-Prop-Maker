@@ -1,0 +1,10 @@
+{
+  "status": "collecting",
+  "start_date": "2026-11-13",
+  "runs_excluded_for_drift": 0,
+  "binary_contracts": 0,
+  "completed_dates": 0,
+  "comparisons": {},
+  "scope": "final candidate gates after sanity; alternatives measure candidate eligibility before one-player card selection",
+  "review_eligible": false
+}

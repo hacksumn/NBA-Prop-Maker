@@ -19,6 +19,10 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT))
+from artifact_retention import install_retention
+install_retention(ROOT)
 DEFAULT_PROP_INPUT = ROOT / "data" / "model_data_advanced.csv"
 DEFAULT_OOF_INPUT = ROOT / "data" / "availability_minutes_oof_predictions.csv"
 DEFAULT_OUTPUT = ROOT / "data" / "model_data_availability_advanced.csv"

@@ -11,7 +11,7 @@ import re
 import unicodedata
 from sklearn.ensemble import ExtraTreesRegressor, HistGradientBoostingRegressor
 from sklearn.linear_model import BayesianRidge, Ridge
-from sklearn.model_selection import TimeSeriesSplit
+from chronological_validation import date_grouped_splits
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_pinball_loss, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -38,6 +38,9 @@ from probability_utils import (
     quantile_tags,
     tail_threshold_tag,
 )
+from artifact_retention import install_retention
+install_retention()
+
 warnings.filterwarnings('ignore')
 
 
@@ -412,9 +415,9 @@ def _load_lines_lookup() -> dict:
         [3, 2, 1],
         default=0,
     )
-    df['_snapshot_sort'] = pd.to_datetime(df['snapshot_ts'], errors='coerce', utc=True)
+    df['_snapshot_sort'] = pd.to_datetime(df['snapshot_ts'], errors='coerce', utc=True, format="mixed")
     if 'commence_time' in df.columns:
-        commence = pd.to_datetime(df['commence_time'], errors='coerce', utc=True)
+        commence = pd.to_datetime(df['commence_time'], errors='coerce', utc=True, format="mixed")
         df = df[df['_snapshot_sort'].isna() | commence.isna() | df['_snapshot_sort'].le(commence)].copy()
     df = df.sort_values(
         ['game_date', 'player_norm', 'target', '_source_priority', '_snapshot_sort'],
@@ -1282,11 +1285,10 @@ class AdvancedPropModel:
                                   sample_weights: np.ndarray, reg_params: Dict,
                                   n_splits: int, fp_series: pd.Series) -> Dict[str, object]:
         """Train complementary base regressors, then blend them with a positive Ridge meta-model."""
-        tscv = TimeSeriesSplit(n_splits=n_splits)
         oof_rows = []
         base_cols = [f'pred_{name}' for name in BLEND_BASE_MODEL_ORDER]
 
-        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+        for fold, (train_idx, val_idx) in enumerate(date_grouped_splits(df['game_date'], n_splits), 1):
             X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
             w_tr = sample_weights[train_idx]
@@ -1315,8 +1317,7 @@ class AdvancedPropModel:
         blend_oof = np.full(len(oof_df), np.nan)
 
         if meta_cv_splits >= 3:
-            meta_cv = TimeSeriesSplit(n_splits=meta_cv_splits)
-            for meta_train_idx, meta_val_idx in meta_cv.split(oof_df):
+            for meta_train_idx, meta_val_idx in date_grouped_splits(oof_df['game_date'], meta_cv_splits):
                 blender = Ridge(alpha=1.0, positive=True)
                 blender.fit(
                     oof_df.iloc[meta_train_idx][base_cols],
@@ -1387,10 +1388,9 @@ class AdvancedPropModel:
                                             sample_weights: np.ndarray, reg_params: Dict,
                                             n_splits: int) -> Optional[Dict[str, object]]:
         oof_preds = {tag: np.full(len(X), np.nan, dtype=float) for tag in quantile_tags()}
-        tscv = TimeSeriesSplit(n_splits=n_splits)
         print(f"  Training probability sidecar for {target.upper()} ({len(QUANTILE_LEVELS)} quantiles x {n_splits} folds)...")
 
-        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+        for fold, (train_idx, val_idx) in enumerate(date_grouped_splits(df['game_date'], n_splits), 1):
             fold_start = time.perf_counter()
             X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_tr = y.iloc[train_idx]
@@ -1500,8 +1500,7 @@ class AdvancedPropModel:
             return None
 
         oof_preds = {tail_threshold_tag(threshold): np.full(len(X), np.nan, dtype=float) for threshold in thresholds}
-        tscv = TimeSeriesSplit(n_splits=n_splits)
-        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+        for fold, (train_idx, val_idx) in enumerate(date_grouped_splits(df['game_date'], n_splits), 1):
             X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
             w_tr = sample_weights[train_idx]
             for threshold in thresholds:
@@ -1595,8 +1594,7 @@ class AdvancedPropModel:
                                            sample_weights: np.ndarray, reg_params: Dict,
                                            n_splits: int) -> Optional[Dict[str, object]]:
         rate_oof = np.full(len(X), np.nan, dtype=float)
-        tscv = TimeSeriesSplit(n_splits=n_splits)
-        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+        for fold, (train_idx, val_idx) in enumerate(date_grouped_splits(df['game_date'], n_splits), 1):
             X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_tr = y.iloc[train_idx]
             w_tr = sample_weights[train_idx]
@@ -1763,8 +1761,7 @@ class AdvancedPropModel:
             cv_splits = max(3, min(5, len(merged) // 60))
             blend_preds = np.full(len(merged), np.nan)
             if cv_splits >= 3:
-                tscv = TimeSeriesSplit(n_splits=cv_splits)
-                for train_idx, val_idx in tscv.split(merged):
+                for train_idx, val_idx in date_grouped_splits(merged['game_date'], cv_splits):
                     ridge = Ridge(alpha=1.0)
                     ridge.fit(
                         merged.iloc[train_idx][['pred', fp_col]],
@@ -1862,7 +1859,6 @@ class AdvancedPropModel:
         }
 
         # ── Cross-validation ──────────────────────────────────────────────────
-        tscv = TimeSeriesSplit(n_splits=n_splits)
         cv_results = []
         feature_imp = []
         cal_records = []   # real-line records for calibration table
@@ -1870,7 +1866,7 @@ class AdvancedPropModel:
         oof_errors = []
         meta_oof_frames = []
 
-        for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
+        for fold, (train_idx, val_idx) in enumerate(date_grouped_splits(df['game_date'], n_splits), 1):
             X_tr, X_val   = X.iloc[train_idx],          X.iloc[val_idx]
             y_tr, y_val   = y.iloc[train_idx],           y.iloc[val_idx]
             w_tr           = sample_weights[train_idx]
@@ -2235,8 +2231,7 @@ class AdvancedPropModel:
             dedicated_meta_frames = []
             real_splits = max(3, min(5, len(real_df) // 250))
             if real_splits >= 3:
-                real_cv = TimeSeriesSplit(n_splits=real_splits)
-                for edge_train_idx, edge_val_idx in real_cv.split(real_market):
+                for edge_train_idx, edge_val_idx in date_grouped_splits(real_df['game_date'], real_splits):
                     if len(edge_train_idx) < 300 or len(edge_val_idx) < 50:
                         continue
                     edge_fold = xgb.XGBRegressor(**edge_params)
@@ -2324,11 +2319,10 @@ class AdvancedPropModel:
                 meta_probs = np.full(len(meta_df), np.nan)
                 meta_cv_splits = max(3, min(5, len(meta_df) // 300))
                 if meta_cv_splits >= 3:
-                    meta_cv = TimeSeriesSplit(n_splits=meta_cv_splits)
                     X_meta = meta_df[meta_feature_names]
                     y_meta = meta_df['meta_target'].astype(int)
                     w_meta = meta_df['sample_weight'].values
-                    for meta_train_idx, meta_val_idx in meta_cv.split(X_meta):
+                    for meta_train_idx, meta_val_idx in date_grouped_splits(meta_df['game_date'], meta_cv_splits):
                         meta_model_fold = xgb.XGBClassifier(**meta_params)
                         meta_model_fold.fit(
                             X_meta.iloc[meta_train_idx],

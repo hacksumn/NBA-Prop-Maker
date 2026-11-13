@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Optional, Dict, List
 import json
 import warnings
+from artifact_retention import install_retention
+install_retention()
 warnings.filterwarnings('ignore')
 
 
@@ -858,11 +860,12 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Run feature pipeline')
-    parser.add_argument('--input', type=str, default=r'C:\Users\jakep\Downloads\Fresh_Start_NBA\data\nba_data.csv',
+    project_root = Path(__file__).resolve().parent
+    parser.add_argument('--input', type=str, default=str(project_root / 'data' / 'nba_data.csv'),
                         help='Input CSV file')
-    parser.add_argument('--output', type=str, default=r'C:\Users\jakep\Downloads\Fresh_Start_NBA\data\model_data_advanced.csv',
+    parser.add_argument('--output', type=str, default=str(project_root / 'data' / 'model_data_advanced.csv'),
                         help='Output CSV file')
-    parser.add_argument('--features-json', type=str, default=r'C:\Users\jakep\Downloads\Fresh_Start_NBA\feature_cols_advanced.json',
+    parser.add_argument('--features-json', type=str, default=str(project_root / 'feature_cols_advanced.json'),
                         help='Feature columns JSON file')
     
     args = parser.parse_args()

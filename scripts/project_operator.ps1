@@ -55,6 +55,9 @@ function Invoke-PythonStep {
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        if ($PythonArgs[0] -match "\.py$") {
+            $PythonArgs = @(".\artifact_retention.py", "--run") + $PythonArgs
+        }
         & python @PythonArgs 2>&1 | ForEach-Object {
             if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
         }
@@ -213,6 +216,8 @@ switch ($Action) {
             '--watch',
             '--date', $SlateDate
         )
+        Invoke-PythonStep -Label 'Retain previous watcher logs' -PythonArgs @('.\artifact_retention.py', '--retain', $logPath, $errorLogPath)
+        $arguments = @('.\artifact_retention.py', '--run') + $arguments
         $process = Start-Process -FilePath 'python' -ArgumentList $arguments -WorkingDirectory $ProjectRoot -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $errorLogPath -PassThru
         Write-Host "PrizePicks-only watcher started (PID $($process.Id)). Logs: $logPath and $errorLogPath" -ForegroundColor Green
     }
@@ -238,6 +243,8 @@ switch ($Action) {
             '--max-daily-credits', $FanDuelDailyCreditCap.ToString(),
             '--min-remaining-credits', $FanDuelMinimumRemainingCredits.ToString()
         )
+        Invoke-PythonStep -Label 'Retain previous watcher logs' -PythonArgs @('.\artifact_retention.py', '--retain', $logPath, $errorLogPath)
+        $arguments = @('.\artifact_retention.py', '--run') + $arguments
         $process = Start-Process -FilePath 'python' -ArgumentList $arguments -WorkingDirectory $ProjectRoot -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $errorLogPath -PassThru
         Write-Host "FanDuel T-60/T-5 watcher started (PID $($process.Id)). Logs: $logPath and $errorLogPath" -ForegroundColor Green
     }

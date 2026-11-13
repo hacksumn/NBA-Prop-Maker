@@ -1,0 +1,205 @@
+{
+  "generated_at": "2026-11-10T09:46:32.785712-06:00",
+  "scope": "Full file inventory; AST check of root/scripts/tests Python; canonical CSV profiles. Not a semantic review of every cache, model, notebook or dashboard.",
+  "inventory": {
+    ".claude": {
+      "files": 6,
+      "bytes": 72573
+    },
+    "root": {
+      "files": 41,
+      "bytes": 2735716
+    },
+    ".streamlit": {
+      "files": 1,
+      "bytes": 239
+    },
+    ".vscode": {
+      "files": 1,
+      "bytes": 1506
+    },
+    "__pycache__": {
+      "files": 35,
+      "bytes": 3227839
+    },
+    "colab_notebooks": {
+      "files": 5,
+      "bytes": 75370
+    },
+    "data": {
+      "files": 11311,
+      "bytes": 2473616319
+    },
+    "logs": {
+      "files": 98,
+      "bytes": 13601419
+    },
+    "models": {
+      "files": 802,
+      "bytes": 2190248176
+    },
+    "notebooks": {
+      "files": 1,
+      "bytes": 58281
+    },
+    "output": {
+      "files": 833,
+      "bytes": 302416810
+    },
+    "scripts": {
+      "files": 71,
+      "bytes": 1225471
+    },
+    "tests": {
+      "files": 145,
+      "bytes": 932111
+    }
+  },
+  "python_files_parsed": 108,
+  "syntax_errors": [],
+  "duplicate_top_level_definitions": [
+    {
+      "path": "nba_props.py",
+      "name": "backtest",
+      "lines": [
+        8835,
+        9423
+      ]
+    },
+    {
+      "path": "nba_props.py",
+      "name": "sanity_check_picks",
+      "lines": [
+        10170,
+        10356
+      ]
+    },
+    {
+      "path": "vegas_gui.py",
+      "name": "configure_page",
+      "lines": [
+        68,
+        1167
+      ]
+    },
+    {
+      "path": "vegas_gui.py",
+      "name": "render_sidebar",
+      "lines": [
+        518,
+        1390
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "path": "data\\nba_data.csv",
+      "bytes": 24489452,
+      "sha256": "b213f348f2517041b275f7fe620d483be0644de416bcfcc57eac1a0a71ae2973"
+    },
+    {
+      "path": "data\\historical_lines.csv",
+      "bytes": 147015928,
+      "sha256": "d787e9c2331a10dd9cca970eef11f8bc65bc6af2d3cd4c610323eb17deb5d259"
+    },
+    {
+      "path": "output\\picks_history.csv",
+      "bytes": 450511,
+      "sha256": "11bcce7ddc57e0a25665a93bd0e73eea7bd2244b51cd4442967232b632484841"
+    },
+    {
+      "path": "output\\candidates_history.csv",
+      "bytes": 49534,
+      "sha256": "7155b243ed379fe5de355334397629b7f612289744ebeffdc119f301bb28673c"
+    },
+    {
+      "path": "data\\candidate_future_holdout_predictions.csv",
+      "bytes": 418580,
+      "sha256": "06eb70408ff4c87437720848a9d6909ea705b9f9556ce249751b0a3df96dc6be"
+    }
+  ],
+  "checks": {
+    "box_scores": {
+      "rows": 84544,
+      "players": 860,
+      "min_date": "2023-10-24",
+      "max_date": "2026-11-09",
+      "duplicate_player_game_rows": 0
+    },
+    "historical_lines": {
+      "rows": 742967,
+      "unparseable_snapshot_rows": 77679,
+      "valid_rows_rejected_by_default_parser": 584364,
+      "unknown_tip_rows": 158603,
+      "at_or_after_tip_rows": 373,
+      "duplicate_physical_keys": 0,
+      "source_counts": {
+        "odds_api_bovada": 230751,
+        "odds_api_fanduel": 73606,
+        "odds_api_draftkings": 70382,
+        "odds_api_betmgm": 69998,
+        "prediction_archive": 59380,
+        "odds_api_betrivers": 58816,
+        "prizepicks_scraper": 49744,
+        "odds_api_betonlineag": 45096,
+        "odds_api_williamhill_us": 27965,
+        "unknown": 26141,
+        "morning_snapshot": 17835,
+        "odds_api_fanatics": 3736,
+        "odds_api": 2556,
+        "odds_api_fanduel_t_minus_60": 2324,
+        "odds_api_fanduel_t_minus_5": 1690,
+        "live_fetch": 1682,
+        "fanduel": 801,
+        "line_archive": 464
+      }
+    },
+    "picks": {
+      "rows": 1674,
+      "result_counts": {
+        "WIN": 873,
+        "LOSS": 669,
+        "DNP": 98,
+        "PUSH": 27,
+        "PENDING": 7
+      },
+      "fanduel_performance_start": "2026-10-26",
+      "fanduel_by_prop": [
+        {
+          "prop": "AST",
+          "graded": 54,
+          "wins": 34,
+          "priced_graded": 48,
+          "priced_wins": 30,
+          "profit_units": 7.732235716607221,
+          "roi": 0.16108824409598377
+        },
+        {
+          "prop": "BLK",
+          "graded": 10,
+          "wins": 6,
+          "priced_graded": 7,
+          "priced_wins": 4,
+          "profit_units": -0.31519469859799276,
+          "roi": -0.04502781408542754
+        },
+        {
+          "prop": "STL",
+          "graded": 6,
+          "wins": 5,
+          "priced_graded": 1,
+          "priced_wins": 1,
+          "profit_units": 0.6849315068493151,
+          "roi": 0.6849315068493151
+        }
+      ]
+    },
+    "future_holdout": {
+      "stored_rows": 1777,
+      "excluded_unverified_or_posttip_rows": 0,
+      "excluded_repeat_contract_snapshots": 0,
+      "evaluation_contracts": 1777,
+      "dates": 4
+    }
+  }
+}

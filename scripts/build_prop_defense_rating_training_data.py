@@ -11,6 +11,10 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT))
+from artifact_retention import install_retention
+install_retention(ROOT)
 DEFAULT_PROP_INPUT = ROOT / "data" / "model_data_advanced.csv"
 DEFAULT_RATING_INPUT = ROOT / "data" / "pointintime_team_defense_ratings.csv"
 DEFAULT_OUTPUT = ROOT / "data" / "model_data_defenserating_advanced.csv"

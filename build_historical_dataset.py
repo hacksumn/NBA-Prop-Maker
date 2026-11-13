@@ -50,6 +50,9 @@ import pandas as pd
 import numpy as np
 
 # -- Paths --------------------------------------------------------------------
+from artifact_retention import install_retention
+install_retention()
+
 BASE_DIR    = Path(__file__).parent
 CACHE_DIR   = BASE_DIR / "data" / "hist_cache"
 OUTPUT_DIR  = BASE_DIR / "data"

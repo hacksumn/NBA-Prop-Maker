@@ -1,0 +1,338 @@
+{
+  "version": 1,
+  "artifact": {
+    "identity": "NBA live gate pipeline",
+    "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+    "view": "production CLI and historical gate evidence"
+  },
+  "categories": [
+    {
+      "id": "usefulness",
+      "label": "Usefulness/completeness",
+      "applicable": true,
+      "assessment": "Earlier generation and sanity outcomes are absent.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    },
+    {
+      "id": "clarity",
+      "label": "Analytical clarity",
+      "applicable": true,
+      "assessment": "Generic selection labels obscure explicit fill-source exclusions.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    },
+    {
+      "id": "visual",
+      "label": "Visual/interaction consistency",
+      "applicable": false,
+      "assessment": "No dashboard or chart changes.",
+      "reason": "No dashboard or chart changes."
+    },
+    {
+      "id": "source",
+      "label": "Source authority/confidence",
+      "applicable": true,
+      "assessment": "Two current box actuals disagree with stored graded actuals.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    },
+    {
+      "id": "value",
+      "label": "Value accuracy",
+      "applicable": true,
+      "assessment": "First-candidate odds do not always describe publication offers.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    },
+    {
+      "id": "chart",
+      "label": "Within-chart agreement",
+      "applicable": false,
+      "assessment": "No dashboard or chart changes.",
+      "reason": "No dashboard or chart changes."
+    },
+    {
+      "id": "details",
+      "label": "Complete source details",
+      "applicable": true,
+      "assessment": "Full gate/policy events are absent.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    },
+    {
+      "id": "cross",
+      "label": "Cross-artifact consistency",
+      "applicable": true,
+      "assessment": "Promoted candidates preserve older prices and reasons.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    },
+    {
+      "id": "quality",
+      "label": "Data-quality controls",
+      "applicable": true,
+      "assessment": "Already graded rows are not reconciled to later box changes.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    },
+    {
+      "id": "conclusions",
+      "label": "Conclusion support",
+      "applicable": true,
+      "assessment": "Few dates and prior outcome-driven tuning cannot establish optimal gates.",
+      "inventoryComplete": false,
+      "reason": "All input/state combinations and upstream rejection populations cannot be enumerated from retained evidence."
+    }
+  ],
+  "units": [
+    {
+      "id": "missing-upstream",
+      "label": "Earlier generation and sanity outcomes are absent.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "usefulness": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "missing-upstream",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "diagnostic-labels",
+      "label": "Generic selection labels obscure explicit fill-source exclusions.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "clarity": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "diagnostic-labels",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "actual-conflict",
+      "label": "Two current box actuals disagree with stored graded actuals.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "source": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "actual-conflict",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "published-prices",
+      "label": "First-candidate odds do not always describe publication offers.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "value": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "published-prices",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "decision-provenance",
+      "label": "Full gate/policy events are absent.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "details": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "decision-provenance",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "promotion",
+      "label": "Promoted candidates preserve older prices and reasons.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "cross": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "promotion",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "grade-reconciliation",
+      "label": "Already graded rows are not reconciled to later box changes.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "quality": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "grade-reconciliation",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "threshold-validation",
+      "label": "Few dates and prior outcome-driven tuning cannot establish optimal gates.",
+      "kind": "question",
+      "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115",
+      "categories": {
+        "conclusions": {
+          "checks": [
+            {
+              "id": "evidence-check",
+              "state": "failed",
+              "evidence": [
+                "output/LIVE_GATE_REVIEW_2026-11-12.md",
+                "output/live_gate_audit_2026-11-12.json",
+                "nba_props.py"
+              ],
+              "revision": "4e5a390e6f74fb1a3011f853dfb254f1ccef9b3b1b9aff531d5726adce54d115"
+            }
+          ],
+          "findings": [
+            {
+              "id": "threshold-validation",
+              "status": "open",
+              "checkIds": [
+                "evidence-check"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
