@@ -866,17 +866,14 @@ def step1_5_grade_picks(errors):
         for date, group in gradeable.groupby("game_date"):
             if date not in available_dates:
                 if date <= _stale_cutoff:
-                    # No box scores found even from live API and date is old — mark all as DNP
+                    # Missing box scores are not proof the games did not happen: a data
+                    # gap or API outage once turned all 2026-04-11 picks into permanent
+                    # DNPs. Leave them pending so a later run (or a backfill) grades them.
                     logger.warning(
-                        f"  No box scores found for {date} after live API check and date is >3 days old "
-                        f"— marking {len(group)} picks as DNP (no games that day)"
+                        f"  !!! No box scores for {date} (>3 days old) even after the live API check — "
+                        f"leaving {len(group)} pick(s) UNGRADED. Backfill box scores for {date} "
+                        f"in data/nba_data.csv; do not assume DNP."
                     )
-                    for idx in group.index:
-                        hist.at[idx, "result"]    = "DNP"
-                        hist.at[idx, "actual"]    = ""
-                        hist.at[idx, "graded_at"] = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-                        graded_count += 1
-                        newly_graded_rows.append(idx)
                 else:
                     logger.info(f"  No box score data for {date} yet — skipping")
                 continue
@@ -1102,18 +1099,19 @@ def _candidate_profit_units(result, side_decimal_odds, side_price):
 def _grade_candidate_rows(hist, box, available_dates, today_str, stale_cutoff, now_str, norm_fn):
     """Grade ungraded candidate rows in place against prepared box scores.
 
-    Same rules as Step 1.5: player absent from the box score = DNP; a date with no
-    box scores that is more than 3 days old = DNP. Returns the graded row indexes.
+    Same rules as Step 1.5: player absent from that date's box score = DNP; a date
+    with no box scores at all stays ungraded (a data gap is not proof of DNP).
+    Returns the graded row indexes.
     """
     graded = []
     ungraded = hist[_blank_text_mask(hist["result"]) & (hist["game_date"] < today_str)]
     for date, group in ungraded.groupby("game_date"):
         if date not in available_dates:
             if date <= stale_cutoff:
-                for idx in group.index:
-                    hist.at[idx, "result"] = "DNP"
-                    hist.at[idx, "graded_at"] = now_str
-                    graded.append(idx)
+                logger.warning(
+                    f"  !!! No box scores for {date} (>3 days old) — leaving {len(group)} "
+                    f"candidate row(s) ungraded; backfill data/nba_data.csv for {date}."
+                )
             continue
         day_box = box[box["game_date"] == date]
         for idx, row in group.iterrows():

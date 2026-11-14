@@ -119,8 +119,18 @@ class RetentionStore:
                 self.preserve(original)
             if target is not None:
                 self.preserve(target)
-                self.preserve(Path(source), logical_path=target)
+                # os.fsdecode: byte paths are valid for os.replace but not for Path().
+                self.preserve(Path(os.fsdecode(source)), logical_path=target)
                 self.pending.add(target)
+        elif event == "os.truncate":
+            # Path-based os.truncate empties a file without an "open" event. A
+            # descriptor-based truncate needs an earlier writable open, which the
+            # "open" branch already preserved.
+            value = args[0]
+            path = self.protected(value) if isinstance(value, (str, bytes, os.PathLike)) else None
+            if path is not None:
+                self.preserve(path)
+                self.pending.add(path)
         elif event == "os.remove":
             path = self.protected(args[0])
             if path is not None:

@@ -71,6 +71,23 @@ for index in range(15):
         ''')
         self.assertEqual(result, ["first", "second", "third", "third-appended"])
 
+    def test_path_truncate_and_byte_path_replace_are_preserved(self):
+        result = self.run_isolated('''
+            import sys,json,gzip,os
+            from pathlib import Path
+            from artifact_retention import install_retention
+            root=Path(sys.argv[1]); (root/'data').mkdir()
+            path=root/'data/history.csv'; path.write_bytes(b'rows')
+            store=install_retention(root)
+            os.truncate(str(path), 0)
+            staged=root/'data/new.tmp'; staged.write_bytes(b'replacement')
+            os.replace(os.fsencode(str(staged)), os.fsencode(str(path)))
+            values={gzip.decompress(p.read_bytes()).decode() for p in (root/'.retained_versions/objects').glob('*.gz')}
+            print(json.dumps(sorted(values)))
+        ''')
+        self.assertIn("rows", result)
+        self.assertIn("replacement", result)
+
     def test_retention_failure_blocks_overwrite(self):
         result = self.run_isolated('''
             import sys,json

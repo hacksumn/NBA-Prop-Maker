@@ -151,7 +151,10 @@ def attach_clv(rows: pd.DataFrame, lines: pd.DataFrame, run_times: Dict[str, tup
             "close_quality": "no_bet_snapshot",
         })
         grp = grouped.get((row["game_date"], row["_pn"], row["odds_prop"]))
-        run_time = run_times.get(row["game_date"], (None,))[0]
+        # A pick's own publication time wins over the slate's latest run time, so a
+        # later same-day rerun cannot reprice a morning pick at an evening snapshot.
+        published = row.get("_published_utc")
+        run_time = published if published is not None and pd.notna(published) else run_times.get(row["game_date"], (None,))[0]
         if grp is None or run_time is None:
             records.append(rec)
             continue
@@ -175,7 +178,21 @@ def attach_clv(rows: pd.DataFrame, lines: pd.DataFrame, run_times: Dict[str, tup
         last_snap = later["_snap"].max()
         at_close = later[later["_snap"] == last_snap]
         exact = at_close[at_close["line"] == row["line"]]
-        close = exact.iloc[0] if not exact.empty else at_close.iloc[0]
+        if not exact.empty:
+            close = exact.iloc[0]
+        else:
+            # No exact line at close: compare against the primary market, taken as the
+            # most price-balanced line (same rule as the live FanDuel read view), not
+            # whichever alternate happens to come first. Ties go to the nearest line.
+            balance = [
+                abs(side_prices(o, u, "OVER")["no_vig"] - 0.5)
+                for o, u in zip(at_close["over_price"], at_close["under_price"])
+            ]
+            ranked = at_close.assign(
+                _balance=pd.Series(balance, index=at_close.index).fillna(np.inf),
+                _distance=(at_close["line"] - float(row["line"])).abs(),
+            ).sort_values(["_balance", "_distance", "line"], kind="mergesort")
+            close = ranked.iloc[0]
         rec.update({
             "close_snapshot_ts": str(close["snapshot_ts"]), "close_source": close["source"],
             "close_line": close["line"],
@@ -216,7 +233,10 @@ def attach_outcomes(rows: pd.DataFrame) -> pd.DataFrame:
         key = (row["game_date"], row["_pn"])
         if key not in box.index:
             continue
-        actual = float(sum(pd.to_numeric(box.loc[key, c], errors="coerce") for c in STAT_FORMULAS[row["stat"]]))
+        components = [pd.to_numeric(box.loc[key, c], errors="coerce") for c in STAT_FORMULAS[row["stat"]]]
+        if not all(np.isfinite(float(v)) for v in components):
+            continue  # incomplete box score: leave ungraded rather than default to OVER win / UNDER loss
+        actual = float(sum(components))
         line = float(row["line"])
         if actual == line:
             result, profit = "PUSH", 0.0
@@ -238,7 +258,13 @@ def build_pick_rows(start_date: str) -> pd.DataFrame:
     hist = hist[(hist["game_date"] >= start_date) & (hist.get("line_source", "") == "fanduel")].copy()
     hist["stat"] = hist["prop"].str.lower()
     hist = hist[hist["stat"].isin(STAT_TO_ODDS)]
+    # published_at is naive local wall time ("YYYY-MM-DD HH:MM:SS"); rows without it fall
+    # back to the slate's latest run time inside attach_clv (legacy behaviour).
+    raw_published = hist["published_at"] if "published_at" in hist.columns else pd.Series(None, index=hist.index, dtype=object)
+    published = pd.to_datetime(raw_published, errors="coerce", format="%Y-%m-%d %H:%M:%S")
+    published_utc = published.dt.tz_localize(LOCAL_TZ, ambiguous="NaT", nonexistent="NaT").dt.tz_convert("UTC")
     return pd.DataFrame({
+        "_published_utc": published_utc,
         "game_date": hist["game_date"], "player": hist["player"], "_pn": hist["player"].apply(normalize_name),
         "stat": hist["stat"], "odds_prop": hist["stat"].map(STAT_TO_ODDS),
         "line": pd.to_numeric(hist["line"], errors="coerce").round(2),
@@ -339,7 +365,7 @@ def main(argv: Optional[list] = None) -> int:
         "model_leans": summarize(leans, ["stat", "direction"]) if len(leans) else None,
     }
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    drop = [c for c in ["_pn"] if c in picks.columns]
+    drop = [c for c in ["_pn", "_published_utc"] if c in picks.columns]
     picks.drop(columns=drop).to_csv(OUTPUT_DIR / "clv_picks.csv", index=False)
     leans.drop(columns=[c for c in ["_pn"] if c in leans.columns]).to_csv(OUTPUT_DIR / "clv_model_leans.csv", index=False)
     (OUTPUT_DIR / "clv_summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")

@@ -124,6 +124,12 @@ def main():
             valid = np.isfinite(probability) & probability.between(0, 1)
             p = probability[valid].clip(1e-9, 1 - 1e-9)
             truth = y[valid]
+            if len(p) == 0:
+                # No settled rows with this probability: metrics are undefined, and NaN
+                # would make json.dumps(allow_nan=False) abort the whole receipt.
+                scores[column] = {"n": 0, "mean_probability": None, "observed_win_rate": None,
+                                  "brier": None, "log_loss": None}
+                continue
             scores[column] = {"n": len(p), "mean_probability": float(p.mean()),
                               "observed_win_rate": float(truth.mean()),
                               "brier": float(((p-truth)**2).mean()),

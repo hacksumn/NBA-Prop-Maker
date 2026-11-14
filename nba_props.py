@@ -1305,9 +1305,11 @@ def _attach_live_market_prices(picks_df: pd.DataFrame,
         market['_pn'] = (
             market['player'] if 'player' in market.columns else market['player_norm']
         ).astype(str).apply(_normalize_name)
-        market['_prop'] = market['prop'].astype(str).str.lower().map(
-            lambda p: _ODDS_PROP_TO_STAT.get(p, p)
-        ).str.upper()
+        # Strip "_alternate" first, as _select_best_contract_lines does, so a pick
+        # moved to an alternate line can still find its paired prices.
+        market['_prop'] = market['prop'].astype(str).str.lower().str.replace(
+            '_alternate', '', regex=False
+        ).map(lambda p: _ODDS_PROP_TO_STAT.get(p, p)).str.upper()
         market['_line'] = pd.to_numeric(market['line'], errors='coerce').round(2)
         market = market.drop_duplicates(subset=['_pn', '_prop', '_line'], keep='last')
 
@@ -2760,7 +2762,12 @@ def _resolve_active_slate_date(lines_df: pd.DataFrame,
         return None
 
     unique_dates = sorted(dates.dt.normalize().unique())
-    as_of_ts = pd.Timestamp(as_of or datetime.now()).normalize()
+    as_of_ts = pd.Timestamp(as_of or datetime.now())
+    if as_of_ts.tzinfo is not None:
+        # Callers pass a UTC-aware "now" for snapshot chronology; slate dates are
+        # naive local dates, so compare on the local wall-clock date.
+        as_of_ts = pd.Timestamp(as_of_ts.to_pydatetime().astimezone().replace(tzinfo=None))
+    as_of_ts = as_of_ts.normalize()
     upcoming = [d for d in unique_dates if d >= as_of_ts]
     chosen = upcoming[0] if upcoming else unique_dates[-1]
     return pd.Timestamp(chosen).strftime('%Y-%m-%d')

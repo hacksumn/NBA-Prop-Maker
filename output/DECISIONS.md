@@ -4088,3 +4088,95 @@ Verification `python -m pytest -q tests --disable-warnings` passed 256 tests and
 **Evidence:** Read-only replay of `_apply_postseason_context` on 2026-10-21..11-13 picks with true season counts from `nba_data.csv`: max `postseason_pick_score` shift 0.017; sort order changed on 2/16 slates (2026-11-06, 2026-11-13), never in the top 6. `picks_history.csv` hash unchanged by the replay. Tests: `tests/test_season_games_propagation.py` (3 new); `python -m pytest -q tests --disable-warnings` gave 259 passed, 10 subtests passed.
 
 **Risk:** Betslip ordering can change slightly. In the playoffs the role score weighs more (0.24-0.26), so the fix matters more there. This change alters the scoring-source hash, which affects the gate experiment that started 2026-11-13. Historical rows stay blank; nothing was backfilled (DEC-070).
+
+## 2026-11-13 — DEC-078 — Rest/back-to-back and rematch audit: no change
+
+**Context:** In the 2026-11-12 slate review, WAS played a back-to-back (at IND 11/11, then DET 11/12), and DET/WAS replayed their 11/09 game. Jake asked to check whether the model accounts for rest days.
+
+**Findings:**
+- Already modeled: `create_features` builds `days_rest` (player's previous game, fillna 3, clip 0-7), `is_b2b`, `opp_days_rest`, `opp_is_b2b`, `rest_advantage`, the B2B interaction terms and `{stat}_on_b2b/_rested/_b2b_penalty` (shifted rolling). Production selection kept `ast_rested` (AST, PA, STL, TOV), `pts_rested` (PTS, PR) and `trb_rested` (TRB, STL). Raw `days_rest`/`is_b2b` did not survive selection for any prop.
+- Live correctness: the 2026-11-13 cached feature frame computes target-row rest from the latest completed game (e.g. IND played 11/11 → `days_rest`=2 on 11/13). No leakage.
+- League effect (`nba_data.csv`, rotation players mp_l10>=24, actual minus shifted L10): back-to-back AST −0.045 (n=6,054), MP −0.30, PTS −0.11; same-opponent-as-previous-game AST −0.106 (n=2,147). Both are tiny and lean toward the UNDER.
+- Our graded picks (team schedule join, 1,563 rows): back-to-back 60.1% (n=271) vs 55.9% (n=1,292); rematch 62.3% (n=204) vs 55.8% (n=1,359). AST UNDER on back-to-backs 17-3 (85%) vs 63.6%.
+
+**Decision:** No gate, feature or retrain. A rest penalty or rematch filter would cut a segment that has outperformed. The 11/12 Cade/Trae losses came from a double-overtime game (290 team-minutes), not rest; that risk is addressed by the separate same-game concentration idea, not by rest features.
+
+**Open note:** `is_b2b` comes from the player's previous game, so a player who sat the first night of a back-to-back reads as rested. Recorded as optional in TASKS.
+
+## 2026-11-13 — DEC-079 — Top-end calibration and teammate-out minutes audit: no change
+
+**Context:** The 2026-11-12 slate review flagged (a) picks with `model_side_prob` 0.70–0.75 hitting 53% (n=15) and a model-vs-market gap >0.20 going 0-2, and (b) Grayson Allen's projected minutes staying at 27.7 with Brandon Miller out (actual 34). Jake asked for both to be addressed.
+
+**Calibration findings (`candidates_history.csv`, 162 unique graded contracts, 2026-11-05..11-12, 8 dates):**
+- `model_side_prob` average 0.626 vs actual 0.673, so the model is underconfident on average. Buckets: 0.55–0.60 hit 63.9% (61), 0.60–0.65 70.2% (57), 0.65–0.70 73.3% (15), 0.70–0.75 65.2% (23), >0.75 50% (4).
+- Brier (lower is better): market no-vig 0.2363, model 0.2257; blends at model weight 0.25/0.5/0.75 scored 0.2321/0.2290/0.2269. Date-bootstrap 95% CI of model-minus-market Brier: [−0.0209, −0.0006]. A 0.70 cap scored 0.2242, a gain driven by 27 rows on 8 dates; not adopted.
+- Model-vs-market gap >0.20: 2-2 (n=4). Too few to act on.
+
+**Minutes findings:**
+- `minutes_deviation_model.pkl` (71 features) has no teammate-availability inputs. `mp_expected` = `mp_l10` + deviation. It feeds only `_apply_postseason_context` and the minutes sanity check (blocks an UNDER when the line implies <65% of projected minutes). It does not feed stat predictions, so a minutes bump alone would not have changed the Allen pick; a higher `mp_expected` would only make the UNDER sanity check stricter.
+- Teammate absences are handled in `apply_injury_adjustments` (PTS ×(1+boost), AST ×(1+0.9·boost), boost ≤0.12). Graded picks: injury-boosted UNDER 70.2% (n=57) vs 60.5% (n=953); boosted AST UNDER 67.9% (n=28), actual minus prediction −0.18 (not undersized).
+- Side checks: `mp_location_diff` is computed at training time (`minutes_deviation.py:284`) but is 0 at prediction time (`nba_props.py:4193`); its importance is 0.0. Setting `opp_pace_l10` to 100 for every live row changes minutes predictions by 0.0. Live rows default `pace_factor` to 1.0 because they have no same-day pace, but no production model selects it (only BLK uses `opp_pace_pt`, attached point-in-time).
+
+**Decision:** No recalibration, no minutes change, no injury-boost change. Each change would act on samples of 4–15 rows and cut segments that are outperforming. Revisit calibration at the ~2026-11-30 review with more dates. The `mp_location_diff` mismatch is recorded as an optional item for the next isolated minutes retrain.
+
+## 2026-11-13 — DEC-080 — Re-derive the direction policy for FanDuel: UNDER-only confirmed
+
+**Context:** Jake flagged that the card is 100% UNDER (no OVER pick since April; 194/194 candidates since 11/05 are UNDER), so one high-scoring or overtime night can sink the whole card. DEC-038 (decision item 2) said: never run the UNDER-only strategy against sportsbook lines without re-deriving the direction policy for that book first. DEC-060 (2026-10-26) made FanDuel the only live market without that step. This entry is that re-derivation. DEC-038 is kept as history; its "FanDuel favours OVER" finding came from 304 rows and the 30+ minute subset, and does not hold on the full priced sample below.
+
+**Method (read-only, exploratory):** `data/historical_lines.csv`, bookmaker `fanduel`, both prices present, snapshot at or before commence time (timestamps parsed with `format='mixed'`; plain parsing silently dropped this season's rows), last pregame snapshot per contract, most price-balanced line per player/prop/date, joined to `data/nba_data.csv` actuals (mp>0, pushes dropped). 34,065 contracts.
+
+**Baseline by stat (over hit vs mean no-vig over; ROI per unit at the offered price):**
+- 2026-02-23..05-18: OVER hit is below no-vig for all 8 stats. Blind OVER ROI −6.9% (PTS) to −13.2% (STL); blind UNDER −1.1% (AST) to −5.8% (PA).
+- 2026-10-26..11-12: OVER hit is below no-vig for all 8 stats. Blind OVER ROI −11.8% (AST) to −23.9% (BLK); blind UNDER −1.5% (TRB) to +9.3% (BLK).
+
+**Model-selected OVERs:** `models/probability_oof_advanced.csv` `p_over_raw` joined at the exact same line (23,983 contracts, 79 dates, spring only). Betting OVER when p_over_raw minus no-vig over exceeded 0/0.03/0.05/0.08/0.10/0.15 returned −9.4%/−10.1%/−10.6%/−11.2%/−10.4%/−9.9% (n 9,819 down to 1,100). A higher claimed edge did not improve results. By stat at edge >0.05, every stat lost except STL (n=24, noise). The same raw rule on the UNDER side returned −5.0% to −3.3%; the live card's further gates are what has turned that into +8.3u on 77 priced picks since 11/01.
+
+**Caveats:** The OOF predates DEC-075's date-grouped folds, and raw (uncalibrated) probabilities were used. Both caveats would tend to flatter the model, which still lost on OVERs.
+
+**Decision:** Keep the card UNDER-only on FanDuel. Enabling OVERs would add negative-EV bets. The concentration risk Jake raised is real, but the remedy is exposure control (per-game cap, daily stake cap), recorded as proposed pick-affecting work for Jake to approve. Also proposed: a startup warning if the live book changes from the one this policy was derived on.
+
+### DEC-080 addendum (2026-11-13) — per-game cap replay: not adopted
+
+Replay on the published FanDuel-era cards (`picks_history.csv`, 2026-10-26..11-12, graded and priced, 77 picks / 10 dates), keeping the top picks per game in live-card sort order (`signal_score`, `estimated_hit_rate`, ...):
+- Current card: 47-30 (61.0%), +8.31u.
+- Cap 2 per game: 40-26 (60.6%), +6.15u. The 11 removed picks went 7-4 (+2.16u). Date-bootstrap 90% CI of the units change: [−6.62, +2.14]. Worst single day got worse (−1.77u → −2.37u); daily SD 1.87 → 1.52.
+- Cap 1 per game: 31-16 (66.0%), +8.88u. The 30 removed picks went 16-14 (−0.57u).
+
+The earlier "75% alone vs 52% when 3 share a game" comparison mixed game composition with pick order; once the cap keeps the best-ranked picks, the removed ones were not losers. Neither cap is supported on 10 dates. No change; rerun at the ~2026-11-30 review. A daily stake cap is a bankroll decision for Jake, not a model change.
+
+## 2026-11-13 — DEC-081 — Fix CodeRabbit findings in the CLV report and gate audit scripts
+
+**Context:** Jake ran `coderabbit review --committed --dir scripts` and `--dir tests` (a whole-repo review exceeds CodeRabbit's 100 MiB request limit because of `models/weekly_candidates/.../probability_oof_advanced.csv`). It returned 5 findings. Each was checked against the code before any change.
+
+**Findings and actions:**
+1. `scripts/clv_report.py` bet snapshot (major, valid): `latest_run_times` keeps only the last archived run per slate, so a morning pick was priced at a later same-day rerun's snapshot. Fix: `build_pick_rows` carries `published_at` (naive America/Chicago time, parsed with an explicit format) as an internal `_published_utc` column, and `attach_clv` uses it ahead of the slate run time. Rows without `published_at` (51 of 131 FanDuel picks) keep the old fallback. `_published_utc` is dropped before `clv_picks.csv` is written, so the output schema is unchanged.
+2. `scripts/clv_report.py` close line (minor, valid): with no exact line at close, `at_close.iloc[0]` picked an arbitrary alternate, so `line_clv` depended on row order. Fix: use the most price-balanced line (the same main-line rule as the live FanDuel read view), with ties going to the nearest line, then the lower line. Stored data has no primary/alternate flag; that refinement is not done.
+3. `scripts/clv_report.py` grading (minor, valid): a missing box-score component made `actual` NaN, which graded OVER as WIN and UNDER as LOSS. Fix: skip (leave ungraded) unless every component is finite.
+4. `scripts/audit_live_gates.py` receipt (major, valid edge case): an empty probability bucket produced NaN, and `json.dumps(allow_nan=False)` aborted the receipt. Fix: write `n: 0` with null metrics.
+5. `tests/test_artifact_retention.py` subprocess cleanup: already fixed in commit 6224438 (CodeRabbit compared against an older `origin/master`). No change.
+
+**Verification:** 3 new tests in `tests/test_clv_report.py`, which fail on the HEAD version of `clv_report.py` and pass with the fix. `python -m pytest -q tests --disable-warnings`: 262 passed, 10 subtests passed. CodeRabbit re-review of uncommitted `scripts/` changes: 0 findings.
+
+**Impact:** Reporting and audit only; no pick, gate, model or history change. CLV/ROI in `output/clv_summary.json` may move on the next run. Not covered: `nba_props.py` (including the DEC-077 change) was not reviewed by CodeRabbit because of the payload limit.
+
+**DEC-081 follow-up (2026-11-13):** `coderabbit review --agent -t committed --base-commit 3f6a37d` reviewed commit 6224438 only (`nba_props.py`, `tests/test_season_games_propagation.py`, `tests/test_artifact_retention.py`, three output docs) and returned 0 findings. Scoping by base commit keeps unpushed `models/` artifacts out of the payload. This covers the changed lines of `nba_props.py`, not the whole file.
+
+## 2026-11-13 — DEC-082 — CodeRabbit review of unpushed root code: fix grading data-gap DNPs, slate timezone crash, retention gaps
+
+**Context:** Five local commits ahead of `origin/master` change 16 root Python files (about 2,000 lines, including `nba_props.py` and `run_daily.py`). A normal review exceeds CodeRabbit's 100 MiB limit because those commits also carry `models/` and `data/` artifacts. The review ran in a scratch git worktree: `origin/master` plus only those 16 files, reviewed as uncommitted. CodeRabbit returned 8 findings, each checked against the code.
+
+**Fixed (5):**
+1. **Grading, data integrity (`run_daily.py`, picks Step 1.5 and `_grade_candidate_rows`).** A date with no box scores that was more than 3 days old was graded DNP for every row, permanently (later runs only grade blank results). It ran even when the gap was a data or API failure. **Confirmed impact:** all 9 `picks_history.csv` rows for 2026-04-11 are DNP (graded 2026-04-15 and 2026-11-05), while `data/nba_data.csv` has no 2026-04-11 rows (it skips from 04-10 to 04-12) and `historical_lines.csv` has 2,205 lines for that date. Games were played; the outcomes were lost. Fix: leave those rows ungraded and log a `!!!` warning asking for a backfill. Players missing from a date that does have box scores are still graded DNP. `tests/test_candidate_history.py` encoded the old rule; it now asserts the rows stay ungraded. The 9 stored rows are **not** modified (DEC-070); TASKS has the backfill item for Jake.
+2. **Morning-run crash (`nba_props._resolve_active_slate_date`).** `predict` passes a UTC-aware `as_of`; with no exact-today FanDuel lines cached, comparing it with naive slate dates raised `TypeError: Cannot compare tz-naive and tz-aware timestamps` before the live refresh. Reproduced. Fix: convert an aware `as_of` to the local wall-clock date before comparing.
+3. **Alternate-market price match (`nba_props`, price gate).** `player_assists_alternate` was not mapped to AST, so an alternate pick could not find its prices. Fix: strip `_alternate` before mapping. Dormant (`live_fetch_alternate_markets` False; no `data/fanduel_alternate_lines.csv`).
+4. **Retention, path truncate (`artifact_retention.py`).** A path-based `os.truncate` emptied a protected file without an `open` event, so no version was kept. Fix: handle the `os.truncate` audit event. A descriptor-based truncate needs an earlier writable `open`, which was already preserved. Not used anywhere in project code today.
+5. **Retention, byte paths.** `Path(source)` raised `TypeError` for a bytes source in `os.replace`, blocking the write. Fix: `os.fsdecode`.
+
+**Recorded, not changed (3):**
+- Alternate-line selection keeps main-line edge, support flags and sanity result after moving the line. Valid but dormant; logged as a blocker before enabling alternates. Fixing it means re-running gate logic, which needs its own plan.
+- Promotion of an earlier-rejected candidate keeps that run's price, EV and failure text, so "Published (bet)" ROI in candidate reporting uses the rejected price. Valid, reporting only. A fix needs a schema decision (new columns) or a cross-file lookup; left for Jake.
+- `dir_fd`-relative removal and rename. Not possible on this platform (`os.unlink`/`os.rename` do not support `dir_fd` on Windows), and unused in the project.
+
+**Verification:** New `tests/test_slate_and_alternate_fixes.py` (2) and `test_path_truncate_and_byte_path_replace_are_preserved` fail on the HEAD versions and pass with the fixes. `python -m pytest -q tests --disable-warnings`: 265 passed, 10 subtests passed. CodeRabbit `review -t uncommitted` over all working-tree changes (including `tests/test_clv_report.py` from DEC-081): 0 findings. The scratch worktree was removed.
+
+**Pick impact:** No change to selection, gates or models. Grading now leaves missing-data dates pending instead of DNP. The timezone fix only changes behavior where the old code crashed.

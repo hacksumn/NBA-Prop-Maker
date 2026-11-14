@@ -170,14 +170,15 @@ class GradeCandidateTests(unittest.TestCase):
         self.assertEqual(summary["blocked_other"]["p"], 1)
         self.assertEqual(summary["blocked_other"]["dnp"], 1)
 
-    def test_stale_date_without_box_scores_is_dnp_recent_waits(self):
+    def test_date_without_box_scores_stays_ungraded_even_when_stale(self):
+        # A missing box-score date is a data gap, not proof of DNP (2026-04-11 incident).
         hist = self._hist([
             {"game_date": "2026-10-20", "player": "A", "prop": "AST", "direction": "UNDER", "line": "4.5", "gate_bucket": "published"},
             {"game_date": "2026-11-03", "player": "A", "prop": "AST", "direction": "UNDER", "line": "4.5", "gate_bucket": "published"},
         ])
         empty_box = pd.DataFrame(columns=["game_date", "player_norm", "ast"])
         run_daily._grade_candidate_rows(hist, empty_box, set(), "2026-11-04", "2026-11-01", "now", self._norm)
-        self.assertEqual(hist["result"].tolist(), ["DNP", ""])
+        self.assertEqual(hist["result"].tolist(), ["", ""])
 
     def test_profit_falls_back_to_american_price_and_unpriced_is_none(self):
         self.assertEqual(run_daily._candidate_profit_units("WIN", "", "+150"), 1.5)

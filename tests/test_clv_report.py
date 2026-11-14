@@ -3,7 +3,12 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from scripts.clv_report import attach_clv, side_prices, summarize
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+import scripts.clv_report as clv
+from scripts.clv_report import attach_clv, attach_outcomes, side_prices, summarize
 
 
 def _snap(ts, line, over, under, commence="2026-10-31T23:10:00Z", source="odds_api_fanduel"):
@@ -84,6 +89,47 @@ class ClvReportTests(unittest.TestCase):
         summary = summarize(out, ["stat"])
         self.assertIsNone(summary["overall"])
         self.assertEqual(summary["close_quality_counts"], {"no_later_snapshot": 1})
+
+
+    def test_publication_time_beats_later_same_day_rerun(self):
+        lines = pd.DataFrame([
+            _snap("2026-10-31T13:00:00Z", 4.5, -110, -110),   # morning price the pick saw
+            _snap("2026-10-31T21:00:00Z", 4.5, +120, -150),   # evening price
+            _snap("2026-10-31T23:05:00Z", 4.5, +130, -160),   # close
+        ])
+        evening_run = {"2026-10-31": (pd.Timestamp("2026-10-31T21:30:00Z"), None)}
+        row = _row().assign(_published_utc=pd.Timestamp("2026-10-31T14:00:00Z"))
+        out = attach_clv(row, lines, evening_run).iloc[0]
+        self.assertEqual(out["bet_price"], -110)
+        legacy = attach_clv(_row(), lines, evening_run).iloc[0]   # no published time: legacy fallback
+        self.assertEqual(legacy["bet_price"], -150)
+
+    def test_missing_exact_close_uses_primary_line_not_row_order(self):
+        for order in (1, -1):
+            close_rows = [
+                _snap("2026-10-31T23:05:00Z", 10.5, -900, +550),  # alternate
+                _snap("2026-10-31T23:05:00Z", 30.5, +600, -1000), # alternate
+                _snap("2026-10-31T23:05:00Z", 21.5, -112, -108),  # primary (balanced)
+            ][::order]
+            lines = pd.DataFrame([_snap("2026-10-31T13:00:00Z", 20.5, -110, -110), *close_rows])
+            out = attach_clv(_row(line=20.5), lines, RUN).iloc[0]
+            self.assertEqual(out["close_quality"], "line_moved")
+            self.assertEqual(out["close_line"], 21.5)
+            self.assertAlmostEqual(out["line_clv"], -1.0)
+
+    def test_incomplete_box_score_is_left_ungraded(self):
+        box = pd.DataFrame([{"player": "Test Guard", "game_date": "2026-10-31",
+                             "pts": 20, "trb": None, "ast": 5, "stl": 1, "blk": 0, "tov": 2}])
+        rows = pd.DataFrame([
+            {"game_date": "2026-10-31", "_pn": "test guard", "stat": "pr", "line": 25.5,
+             "direction": d, "bet_decimal": 1.9} for d in ("OVER", "UNDER")
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            box.to_csv(Path(tmp) / "nba_data.csv", index=False)
+            with patch.object(clv, "DATA_DIR", Path(tmp)):
+                out = attach_outcomes(rows)
+        self.assertTrue(out["result"].isna().all())
+        self.assertTrue(out["profit_units"].isna().all())
 
 
 if __name__ == "__main__":
