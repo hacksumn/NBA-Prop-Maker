@@ -4,6 +4,9 @@
 
 ## NOW
 
+- [x] **[DEC-077] Carry `season_games_played` into pred/pick rows; warn loudly on fallback.** 3 new tests in `tests/test_season_games_propagation.py`; full suite 259 passed.
+- [ ] **[VERIFY — DEC-077] After the next scheduled run, confirm today's `picks_history.csv` rows have `season_games_played` populated and the log has no `season_games_played missing` warning.**
+- [ ] **[DEC-077 follow-up] Decide how the 2026-11-13 gate experiment treats the scoring-source hash change from this fix.**
 - [x] **[DEC-074] Step 1.5 prints the last slate's picks with W/L on every run** (`_log_last_slate_results`, display only; verified on real history, 224 tests passed).
 - [ ] **[VERIFY — DEC-074] Confirm the `Last slate's picks` block appears in the next scheduled `logs/run_*.log` and that Step 1.5 still reports its grading line.** (The DEC-073 rerun check predates this change.)
 - [x] **[DEC-073] Loosen final-card accuracy gates: meta floor (AST 46 -> 42, TRB/TOV 49 -> 45, STL/BLK 45 -> 42) and FanDuel volatility ceiling mult 1.25 -> 1.50.** Pick-affecting; full suite 224 passed.

@@ -21,12 +21,22 @@ from nba_props import _append_only_history
 for index in range(15):
     _append_only_history(sys.argv[1], pd.DataFrame([{"id": sys.argv[2]+str(index)}]), ["id"])
 '''
-            processes = [subprocess.Popen([sys.executable, "-c", code, target, prefix], cwd=ROOT,
-                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                         for prefix in ["A", "B"]]
-            for process in processes:
-                _, error = process.communicate(timeout=60)
-                self.assertEqual(process.returncode, 0, error)
+            processes = []
+            try:
+                for prefix in ["A", "B"]:
+                    processes.append(subprocess.Popen(
+                        [sys.executable, "-c", code, target, prefix], cwd=ROOT,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    ))
+                for process in processes:
+                    _, error = process.communicate(timeout=60)
+                    self.assertEqual(process.returncode, 0, error)
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                for process in processes:
+                    process.communicate()
             import pandas as pd
             frame = pd.read_csv(target)
             self.assertEqual(len(frame), 30)

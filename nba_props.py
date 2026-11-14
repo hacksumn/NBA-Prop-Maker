@@ -297,10 +297,18 @@ def _apply_postseason_context(picks_df: pd.DataFrame,
         working.get('games_played', pd.Series(np.nan, index=working.index)),
         errors='coerce',
     ).fillna(60.0)
-    season_games_vals = pd.to_numeric(
+    season_games_raw = pd.to_numeric(
         working.get('season_games_played', pd.Series(np.nan, index=working.index)),
         errors='coerce',
-    ).fillna(games_vals.clip(lower=20.0, upper=82.0))
+    )
+    n_missing_season_games = int(season_games_raw.isna().sum())
+    if n_missing_season_games > 0:
+        print(
+            f"  !!! WARNING: season_games_played missing for {n_missing_season_games}/{len(working)} "
+            "picks; falling back to career games (capped 20-82) for role scoring. "
+            "This skews postseason_pick_score, which betslip ordering uses."
+        )
+    season_games_vals = season_games_raw.fillna(games_vals.clip(lower=20.0, upper=82.0))
     mp_expected = pd.to_numeric(
         working.get(
             'mp_predicted',
@@ -6665,8 +6673,12 @@ def generate_predictions(
             'team': team,
             'opp': '' if opp is None or pd.isna(opp) else str(opp),
             'games_played': row['games_played'],
+            # Current-season games before this slate (shifted cumcount from
+            # create_features). Without it, downstream role scoring silently
+            # fell back to career games capped at 82.
+            'season_games_played': row.get('season_games_played', np.nan),
         }
-        
+
         # Get minutes deviation prediction if model available
         mp_deviation_pred = 0
         mp_l10 = row.get('mp_l10', 0)
