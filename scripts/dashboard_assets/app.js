@@ -74,6 +74,43 @@
   };
   const svgi = (n) => `<svg viewBox="0 0 24 24">${ICON[n] || ''}</svg>`;
 
+  /* ---------- 3D side-menu icons ----------
+     Pure CSS + SVG (no library). Each icon is a stack of identical solid shapes at different depths: a dark
+     extrusion (8 slices), a gradient face and a gloss highlight, inside a perspective box. Because the slices are
+     real layers in 3D space, tilting the icon shows true side depth. %M% is the main paint and %A% the accent
+     (white detail on the face, dark on the slices, hidden on the gloss). c = [light, base] gradient, d = extrusion. */
+  const ICON3D = {
+    overview: { c: ['#ffc58a', '#ff6a2b'], d: '#7a2f0c', s: '<rect x="3" y="3" width="8.2" height="10.4" rx="2.4" fill="%M%"/><rect x="12.8" y="3" width="8.2" height="6.2" rx="2.4" fill="%M%"/><rect x="12.8" y="10.8" width="8.2" height="10.2" rx="2.4" fill="%M%"/><rect x="3" y="15" width="8.2" height="6" rx="2.4" fill="%M%"/>' },
+    today: { c: ['#ff9d86', '#ff3d4f'], d: '#7a1226', s: '<circle cx="12" cy="12" r="9.6" fill="%M%"/><circle cx="12" cy="12" r="6.6" fill="%A%"/><circle cx="12" cy="12" r="3.9" fill="%M%"/><circle cx="12" cy="12" r="1.5" fill="%A%"/>' },
+    perf: { c: ['#c4f77a', '#34c759'], d: '#17622c', s: '<rect x="3" y="13.2" width="4.4" height="7.8" rx="1.5" fill="%M%"/><rect x="9.8" y="8.6" width="4.4" height="12.4" rx="1.5" fill="%M%"/><rect x="16.6" y="3" width="4.4" height="18" rx="1.5" fill="%M%"/>' },
+    explorer: { c: ['#9be9ff', '#2a9dff'], d: '#0f4a82', s: '<circle cx="10.4" cy="10.4" r="6.6" fill="none" stroke="%M%" stroke-width="3.2"/><path d="M15.4 15.4l5 5" fill="none" stroke="%M%" stroke-width="3.6" stroke-linecap="round"/><path d="M7.4 9.4a3.4 3.4 0 0 1 2.6-2.1" fill="none" stroke="%A%" stroke-width="1.5" stroke-linecap="round"/>' },
+    gates: { c: ['#ffa8ef', '#d63fe8'], d: '#68157a', s: '<path d="M3.2 4.2h17.6L14.2 12v6.6l-4.4 2.2V12z" fill="%M%" stroke="%M%" stroke-width="1.6" stroke-linejoin="round"/>' },
+    clv: { c: ['#9fc0ff', '#3f6bff'], d: '#1a2c88', s: '<path d="M2.6 12.8h4.2l2.6-7.4 4.6 13.2 2.6-5.8h4.8" fill="none" stroke="%M%" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' },
+    models: { c: ['#8bf5ea', '#10bccb'], d: '#0a5560', s: '<path d="M9.4 3h5.2v5.4l4.7 8.3a3.1 3.1 0 0 1-2.7 4.6H7.4a3.1 3.1 0 0 1-2.7-4.6l4.7-8.3z" fill="%M%" stroke="%M%" stroke-width="1" stroke-linejoin="round"/><rect x="8" y="2" width="8" height="2.6" rx="1.3" fill="%M%"/><path d="M7.2 15.4h9.6" fill="none" stroke="%A%" stroke-width="2" stroke-linecap="round"/><circle cx="10.6" cy="18.2" r="1" fill="%A%"/><circle cx="14" cy="17.6" r=".8" fill="%A%"/>' },
+    slips: { c: ['#ffe493', '#ffab1a'], d: '#85560a', s: '<path d="M6.6 2.6h10.8A1.6 1.6 0 0 1 19 4.2v17.2l-2.5-1.7-2.2 1.7-2.3-1.7-2.3 1.7-2.2-1.7L5 21.4V4.2a1.6 1.6 0 0 1 1.6-1.6z" fill="%M%" stroke="%M%" stroke-width=".8" stroke-linejoin="round"/><path d="M8.6 8h6.8M8.6 11.6h6.8M8.6 15.2h4" fill="none" stroke="%A%" stroke-width="1.8" stroke-linecap="round"/>' },
+    health: { c: ['#86f2cf', '#12b886'], d: '#0b5e47', s: '<path d="M12 2.4l8 3v6.4c0 4.9-3.3 8.4-8 9.8-4.7-1.4-8-4.9-8-9.8V5.4z" fill="%M%" stroke="%M%" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 12.2l2.9 2.9 5.2-5.7" fill="none" stroke="%A%" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' },
+    decisions: { c: ['#c5b6ff', '#7058ff'], d: '#2f1f94', s: '<path d="M6 2.8h11.6A1.4 1.4 0 0 1 19 4.2v14.6a1.4 1.4 0 0 1-1.4 1.4H7a3 3 0 0 1-3-3V4.8a2 2 0 0 1 2-2z" fill="%M%" stroke="%M%" stroke-width=".8" stroke-linejoin="round"/><path d="M8 2.8v17.4" fill="none" stroke="%A%" stroke-width="1.6"/><path d="M11 8h5M11 11.4h3.6" fill="none" stroke="%A%" stroke-width="1.8" stroke-linecap="round"/>' },
+  };
+  const darker = (hex, k) => '#' + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * k).toString(16).padStart(2, '0')).join('');
+  const layer3d = (shapes, main, accent, cls, style) => `<span class="sl ${cls}" style="${style}"><svg viewBox="0 0 24 24" focusable="false">${shapes.replace(/%M%/g, main).replace(/%A%/g, accent)}</svg></span>`;
+  function defs3d() {   // one hidden SVG holds every gradient (shared by all icons)
+    const grads = Object.keys(ICON3D).map((k) => `<linearGradient id="g3-${k}" gradientUnits="userSpaceOnUse" x1="4" y1="3" x2="20" y2="21"><stop offset="0" stop-color="${ICON3D[k].c[0]}"/><stop offset="1" stop-color="${ICON3D[k].c[1]}"/></linearGradient>`).join('');
+    return `<svg class="defs3d" width="0" height="0" aria-hidden="true" focusable="false"><defs>${grads}<linearGradient id="g3-gloss" gradientUnits="userSpaceOnUse" x1="4" y1="2" x2="13" y2="16"><stop offset="0" stop-color="#fff" stop-opacity=".85"/><stop offset=".55" stop-color="#fff" stop-opacity=".12"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs></svg>`;
+  }
+  function icon3d(name, index) {
+    const d = ICON3D[name];
+    if (!d) return `<span class="ico" aria-hidden="true">${svgi(name)}</span>`;   // unknown icon: flat fallback, never blank
+    const SLICES = 8;
+    let slices = '';
+    for (let k = SLICES; k >= 1; k--) {   // deepest first, so painting order matches depth
+      const dark = k <= 3 ? d.d : darker(d.d, 0.72);
+      slices += layer3d(d.s, dark, dark, 'ex', `--z:${(-k * 1.35).toFixed(2)}px`);
+    }
+    const face = layer3d(d.s, `url(#g3-${name})`, '#ffffff', 'face', '--z:2px');
+    const gloss = layer3d(d.s, 'url(#g3-gloss)', 'none', 'gloss', '--z:2.6px');
+    return `<span class="ico" aria-hidden="true" style="--i:${index};--glow:${d.c[1]}"><span class="i3d"><span class="spin"><span class="tilt">${slices}${face}${gloss}</span></span></span><i class="ground"></i></span>`;
+  }
+
   /* ---------- tiny templating helpers ---------- */
   const kpi = (o) => `<div class="kpi ${o.tone || 'info'}"><div class="lab">${esc(o.label)}</div><div class="val ${o.vcls || ''}">${
     o.valHtml != null ? o.valHtml : (o.count != null && isFinite(o.count) ? `<span data-count="${o.count}" data-fmt="${o.fmt}" data-dec="${o.dec || 0}">${esc(o.val)}</span>` : esc(o.val))
@@ -705,7 +742,21 @@
   function logoSvg() { return '<svg viewBox="0 0 32 32" fill="none" stroke="url(#lg)" stroke-width="2" stroke-linecap="round"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#9d8cff"/></linearGradient></defs><circle cx="16" cy="16" r="11"/><path d="M5 16h22M16 5v22M8 8c5 4 5 12 0 16M24 8c-5 4-5 12 0 16"/></svg>'; }
   function renderShell() {
     const flagBad = (HEALTH.flags || []).length || ((HEALTH.pipeline || {}).last_run || {}).err;
-    $('#rail').innerHTML = `<div class="logo" title="Fresh Start NBA">${logoSvg()}</div><nav class="nav">${VIEWS.map((v) => `<button data-view="${v.id}" title="${v.label}">${svgi(v.icon)}<span>${v.label}</span>${v.id === 'health' && flagBad ? '<i class="badge-dot"></i>' : ''}</button>`).join('')}</nav><div class="spacer"></div>`;
+    $('#rail').innerHTML = `${defs3d()}<div class="logo" title="Fresh Start NBA">${logoSvg()}</div><nav class="nav">${VIEWS.map((v, i) => `<button data-view="${v.id}" title="${v.label}">${icon3d(v.icon, i)}<span class="flat" aria-hidden="true">${svgi(v.icon)}</span><span>${v.label}</span>${v.id === 'health' && flagBad ? '<i class="badge-dot"></i>' : ''}</button>`).join('')}</nav><div class="spacer"></div>`;
+    // the icon tilts toward the pointer (skipped when the OS asks for reduced motion)
+    if (!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+      $$('.nav button', $('#rail')).forEach((b) => {
+        const tilt = $('.tilt', b);
+        if (!tilt) return;
+        b.addEventListener('pointermove', (e) => {
+          const r = b.getBoundingClientRect();
+          const x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+          tilt.style.setProperty('--ty', (x * 80).toFixed(1) + 'deg');
+          tilt.style.setProperty('--tx', (-y * 70).toFixed(1) + 'deg');
+        });
+        b.addEventListener('pointerleave', () => { tilt.style.removeProperty('--ty'); tilt.style.removeProperty('--tx'); });
+      });
+    }
     $('#rail').addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) go(b.dataset.view); });
     const meta = D.meta || {}, sd = D.scopes[state.scope].summary;
     // how old is this snapshot? (a static page cannot refresh itself, so say so when a daily rebuild was missed)

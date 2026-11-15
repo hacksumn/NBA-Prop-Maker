@@ -468,6 +468,58 @@ class AssetContractTests(unittest.TestCase):
         self.assertIn('return `<span class="tlogo', app)                  # the logo helper emits only the logo class
         self.assertEqual(app.count('class="tl"'), 1)                       # ...and the timeline is the only user of .tl
 
+    def _css_block(self, header):
+        """Text of the CSS at-rule that starts with `header`, up to its balanced closing brace."""
+        css = self._source()["style.css"]
+        start = css.index(header)
+        depth, i = 0, css.index("{", start)
+        for j in range(i, len(css)):
+            depth += (css[j] == "{") - (css[j] == "}")
+            if depth == 0:
+                return css[start:j + 1]
+        raise AssertionError("unbalanced CSS")
+
+    def test_every_menu_section_has_a_complete_3d_icon(self):
+        import re
+        app = self._source()["app.js"]
+        views = re.findall(r"\{ id: '([a-z]+)', label: '[A-Za-z]+', icon: '([a-z]+)'", app)
+        self.assertEqual(len(views), 10)
+        icon3d = app.split("const ICON3D = {", 1)[1].split("const darker", 1)[0]
+        defined = re.findall(r"^    ([a-z]+): \{ c: \['(#[0-9a-f]{6})', '(#[0-9a-f]{6})'\], d: '(#[0-9a-f]{6})', s: '([^']+)' \},?$", icon3d, re.M)
+        names = [d[0] for d in defined]
+        for _view, icon in views:
+            self.assertIn(icon, names, f"menu icon '{icon}' has no 3D version")         # never a blank or flat desktop icon
+        for name, _c1, _c2, _dark, shapes in defined:
+            self.assertIn("%M%", shapes, name)                                          # every icon paints its main shapes
+        self.assertIn("unknown icon: flat fallback", app)
+        self.assertIn("rotateX(var(--tx", self._source()["style.css"])                  # the pointer tilt hook
+
+    def test_3d_menu_icons_have_depth_and_motion_and_respect_reduced_motion(self):
+        css = self._source()["style.css"]
+        for needle in ("perspective: 240px", "transform-style: preserve-3d", "translateZ(var(--z", "@keyframes i3dfloat", "@keyframes i3dspin"):
+            self.assertIn(needle, css, needle)
+        reduced = self._css_block("@media (prefers-reduced-motion: reduce)")
+        self.assertIn(".nav .i3d { animation: none;", reduced)                           # still, tilted icon instead of motion
+        self.assertIn(".nav .spin, .nav .ground { animation: none; }", reduced)
+        self.assertIn("prefers-reduced-motion: reduce", self._source()["app.js"])        # and no pointer tilt either
+
+    def test_phone_layout_keeps_the_original_flat_icons_and_gets_no_3d(self):
+        phone = self._css_block("@media (max-width: 860px)")
+        self.assertIn(".nav .ico { display: none; } .nav .flat { display: contents; }", phone)
+        # the pre-existing phone rules are untouched
+        self.assertIn(".nav button { padding: 7px 10px; min-width: 62px; }", phone)
+        self.assertIn('.nav button[aria-current="page"]::before { display: none; }', phone)
+        css = self._source()["style.css"]
+        self.assertIn(".nav button svg { width: 21px; height: 21px; stroke: currentColor;", css)   # the original flat-icon rule
+        # the active-item highlight is desktop-only; outside that block aria-current="true" only drives 3D parts (.face/.spin)
+        desktop = self._css_block("@media (min-width: 861px)")
+        self.assertIn('.nav button[aria-current="true"]::before {', desktop)
+        self.assertIn('.nav button[aria-current="true"] { color: var(--text);', desktop)
+        outside = css.replace(desktop, "")
+        for line in outside.splitlines():
+            if 'aria-current="true"' in line and not line.lstrip().startswith("/*"):
+                self.assertTrue(".face" in line or ".spin" in line, line)
+
     def test_page_says_how_old_it_is_and_flags_a_missed_daily_rebuild(self):
         # a static page cannot refresh itself: it must show its age and shout once it is older than a day
         app = self._source()["app.js"]
