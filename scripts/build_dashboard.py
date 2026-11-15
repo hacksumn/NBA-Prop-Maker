@@ -1099,12 +1099,29 @@ def build_insights(d: dict) -> list[dict]:
                                 f"(FanDuel no-vig): {better}. Lower is better."})
     clv = d.get("clv")
     if clv and (clv.get("picks") or {}).get("overall"):
-        o = clv["picks"]["overall"]
-        ins.append({"tone": "warn", "title": "Closing-line value is not confirming results yet",
-                    "text": f"Beat the close on {pct(o.get('beat_close_rate'), 0)} of {o.get('rows_with_exact_close')} exact-close picks, "
-                            f"while the no-vig price moved toward our side {pct(o.get('moved_toward_side_rate'), 0)} of the time "
-                            f"(avg {((o.get('mean_no_vig_move') or 0) * 100):+.1f} pts). Realised ROI is {pct(o.get('roi_units_per_bet'))}/bet. "
-                            "EV-vs-close always starts near -vig (about -4.5% at -110), so read it against that baseline."})
+        picks = clv["picks"]
+        o = picks["overall"]
+        mean_ev = o.get("mean_ev_vs_close")
+        exact_n = o.get("rows_with_exact_close") or 0
+        measured = bool(exact_n and mean_ev is not None and math.isfinite(mean_ev))
+        title = "Closing-price EV is unavailable"
+        if measured:
+            title = "Average closing-price EV is " + ("negative" if mean_ev < 0 else "positive" if mean_ev > 0 else "zero")
+        move = o.get("mean_no_vig_move")
+        move_text = "n/a" if move is None else f"{move * 100:+.1f} pts"
+        text = (f"Average EV at the closing no-vig probability is {pct(mean_ev) if measured else 'n/a'} "
+                f"across {exact_n} exact-line picks. "
+                f"Beat the close on {pct(o.get('beat_close_rate'), 0)} of those picks. "
+                f"No-vig price moved toward our side {pct(o.get('moved_toward_side_rate'), 0)} of the time "
+                f"(avg {move_text}). "
+                f"Realised ROI is {pct(o.get('roi_units_per_bet'))} across {o.get('graded') or 0} settled picks "
+                "with any usable close, including changed lines. ")
+        quality = picks.get("close_quality_counts") or {}
+        text += (f"Coverage is {exact_n} exact-line picks out of {picks.get('all_rows', 0)} total, "
+                 f"with {quality.get('no_later_snapshot', 0)} missing a later snapshot "
+                 f"and {quality.get('line_moved', 0)} at a changed closing line. "
+                 "Positive price movement can still leave EV below zero after the offered price's margin.")
+        ins.append({"tone": "warn" if measured and mean_ev < 0 else "info", "title": title, "text": text})
     h = d.get("health") or {}
     for f in h.get("flags", []):
         ins.append({"tone": "bad", "title": "Data integrity flag", "text": f["text"]})

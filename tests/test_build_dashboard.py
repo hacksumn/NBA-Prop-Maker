@@ -300,6 +300,49 @@ class PayloadTests(unittest.TestCase):
         self.assertIn("Latest pipeline run was a late rerun", titles)
 
 
+class ClvInsightTests(unittest.TestCase):
+    def insight(self, mean_ev=-0.051, exact_n=63):
+        return bd.build_insights({"clv": {"picks": {
+            "all_rows": 132,
+            "close_quality_counts": {"exact_line": 63, "no_later_snapshot": 59, "line_moved": 10},
+            "overall": {"rows_with_exact_close": exact_n, "mean_ev_vs_close": mean_ev,
+                        "beat_close_rate": 0.1905, "moved_toward_side_rate": 0.5238,
+                        "mean_no_vig_move": 0.0063, "roi_units_per_bet": 0.0729, "graded": 71},
+        }}})[0]
+
+    def test_negative_ev_warns_even_with_positive_movement_and_roi(self):
+        insight = self.insight()
+        self.assertEqual(insight["tone"], "warn")
+        self.assertIn("negative", insight["title"])
+        self.assertIn("-5.1%", insight["text"])
+        self.assertIn("63 exact-line picks", insight["text"])
+        self.assertIn("7.3% across 71 settled picks", insight["text"])
+        self.assertIn("including changed lines", insight["text"])
+        self.assertIn("+0.6 pts", insight["text"])
+        self.assertIn("59 missing a later snapshot", insight["text"])
+        self.assertIn("10 at a changed closing line", insight["text"])
+
+    def test_positive_and_zero_ev_have_informational_status(self):
+        for mean_ev, label in [(0.02, "positive"), (0.0, "zero")]:
+            with self.subTest(mean_ev=mean_ev):
+                insight = self.insight(mean_ev)
+                self.assertEqual(insight["tone"], "info")
+                self.assertIn(label, insight["title"])
+
+    def test_missing_or_nonfinite_ev_does_not_claim_negative_ev(self):
+        for mean_ev in [None, float("nan"), float("inf")]:
+            with self.subTest(mean_ev=mean_ev):
+                insight = self.insight(mean_ev)
+                self.assertEqual(insight["tone"], "info")
+                self.assertIn("unavailable", insight["title"])
+                self.assertIn("n/a", insight["text"])
+
+    def test_changed_line_only_sample_has_no_exact_price_ev(self):
+        insight = self.insight(0.02, exact_n=0)
+        self.assertIn("unavailable", insight["title"])
+        self.assertIn("across 0 exact-line picks", insight["text"])
+
+
 class ProvisionalTests(unittest.TestCase):
     def test_provisional_results_never_enter_records(self):
         with tempfile.TemporaryDirectory() as td:

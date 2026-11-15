@@ -46,6 +46,13 @@ ROOT = Path(__file__).resolve().parents[1]
 import sys
 sys.path.insert(0, str(ROOT))
 from artifact_retention import install_retention
+from atomic_io import (
+    atomic_write_bytes,
+    atomic_write_csv,
+    atomic_write_text,
+    sha256_bytes,
+    write_training_receipt,
+)
 install_retention(ROOT)
 DEFAULT_INPUT = ROOT / "data" / "nba_data.csv"
 DEFAULT_CANDIDATES = ROOT / "data" / "availability_minutes_candidates.csv"
@@ -1005,15 +1012,39 @@ def train_and_validate(
         holdout_path, oof_path,
     ]:
         path.parent.mkdir(parents=True, exist_ok=True)
-    candidates.to_csv(candidates_path, index=False)
-    fold_results.to_csv(folds_path, index=False)
-    holdout_predictions.to_csv(holdout_path, index=False)
-    oof_predictions.to_csv(oof_path, index=False)
-    with model_path.open("wb") as handle:
-        pickle.dump(model_package, handle)
-    policy_path.write_text(json.dumps(json_ready(policy), indent=2) + "\n", encoding="utf-8")
-    summary_path.write_text(json.dumps(json_ready(summary), indent=2) + "\n", encoding="utf-8")
+    # Every output is swapped in atomically so a concurrent reader (live predict,
+    # the prop-training join) never sees a partial file.
+    atomic_write_csv(candidates, candidates_path)
+    atomic_write_csv(fold_results, folds_path)
+    atomic_write_csv(holdout_predictions, holdout_path)
+    atomic_write_csv(oof_predictions, oof_path)
+    install_model_artifacts(
+        model_path, pickle.dumps(model_package),
+        policy_path, (json.dumps(json_ready(policy), indent=2) + "\n").encode("utf-8"),
+    )
+    atomic_write_text(summary_path, json.dumps(json_ready(summary), indent=2) + "\n")
     return summary
+
+
+def install_model_artifacts(
+    model_path: Path, model_bytes: bytes, policy_path: Path, policy_bytes: bytes,
+) -> Path | None:
+    """Atomically install the deployment pickle and policy.
+
+    When both live directly in one directory, a training receipt naming their
+    exact hashes is written first (see atomic_io), so run_daily's production
+    guard can recognize this as an expected TrainingRefresh update.
+    """
+    receipt = None
+    if model_path.parent.resolve() == policy_path.parent.resolve():
+        receipt = write_training_receipt(
+            model_path.parent,
+            {model_path.name: sha256_bytes(model_bytes), policy_path.name: sha256_bytes(policy_bytes)},
+            writer="scripts/train_availability_minutes_model.py",
+        )
+    atomic_write_bytes(model_path, model_bytes)
+    atomic_write_bytes(policy_path, policy_bytes)
+    return receipt
 
 
 def main() -> int:

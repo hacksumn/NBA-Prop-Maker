@@ -43,7 +43,7 @@ import subprocess
 import sys
 import time
 import unicodedata
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from injury_feed import fetch_injury_data
@@ -471,12 +471,16 @@ def _run_python_step(step_no, title: str, script_args, errors, error_label: str,
     return False
 
 
-def _production_model_hashes(model_dir: Path = MODEL_DIR) -> dict[str, str]:
+def _production_model_hashes(model_dir: Optional[Path] = None) -> dict[str, str]:
     """Hash the top-level production bundle so maintenance cannot mutate it silently."""
+    model_dir = MODEL_DIR if model_dir is None else model_dir
     hashes: dict[str, str] = {}
     if not model_dir.exists():
         return hashes
     for path in sorted(item for item in model_dir.iterdir() if item.is_file()):
+        if path.suffix == ".tmp":
+            # In-flight atomic-write temp files (atomic_io) are not artifacts.
+            continue
         digest = hashlib.sha256()
         with path.open("rb") as handle:
             for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -485,8 +489,53 @@ def _production_model_hashes(model_dir: Path = MODEL_DIR) -> dict[str, str]:
     return hashes
 
 
-def _record_production_immutability_failure(before: dict[str, str], errors: list[str]) -> bool:
-    """Fail loudly if an isolated weekly candidate changed production artifacts."""
+# Top-level model files that the separate TrainingRefresh job legitimately
+# rewrites. A change to one of these is excused only by a matching receipt.
+TRAINING_REFRESH_OWNED = frozenset({
+    "availability_minutes_model.pkl",
+    "availability_minutes_policy.json",
+})
+# A receipt is written just before its swap, so allow one written shortly
+# before the guard's "before" snapshot whose swap landed after it.
+_RECEIPT_SLACK = timedelta(minutes=15)
+
+
+def _receipt_excused_changes(
+    changed: list[str], after: dict[str, str], started_utc, context: str,
+) -> dict[str, str]:
+    """Map each changed file excused by a TrainingRefresh receipt to that receipt's name.
+
+    A file is excused only if it is TrainingRefresh-owned, still exists, and its
+    current hash equals a hash named in a receipt written during this window by
+    a process outside this run's own maintenance context.
+    """
+    from atomic_io import load_training_receipts
+
+    if started_utc is None:
+        return {}
+    receipts = load_training_receipts(
+        MODEL_DIR, since_utc=started_utc - _RECEIPT_SLACK, exclude_context=context,
+    )
+    excused: dict[str, str] = {}
+    for name in changed:
+        current = after.get(name)
+        if name not in TRAINING_REFRESH_OWNED or current is None:
+            continue
+        for receipt in receipts:
+            if receipt["artifacts"].get(name) == current:
+                excused[name] = receipt["_receipt"]
+                break
+    return excused
+
+
+def _record_production_immutability_failure(
+    before: dict[str, str], errors: list[str], started_utc=None, context: str = "",
+) -> bool:
+    """Fail loudly if an isolated weekly candidate changed production artifacts.
+
+    Changes to TrainingRefresh-owned files that match a receipt from that job are
+    logged as expected and do not fail the run (DEC-092). Anything else fails.
+    """
     after = _production_model_hashes()
     if after == before:
         return True
@@ -494,9 +543,18 @@ def _record_production_immutability_failure(before: dict[str, str], errors: list
         name for name in set(before) | set(after)
         if before.get(name) != after.get(name)
     )
+    excused = _receipt_excused_changes(changed, after, started_utc, context)
+    unexplained = [name for name in changed if name not in excused]
+    for name, receipt in sorted(excused.items()):
+        _warn(
+            f"{name} was updated by the TrainingRefresh job during weekly maintenance "
+            f"(hash matches receipt models/training_receipts/{receipt}); expected, not an error"
+        )
+    if not unexplained:
+        return True
     message = (
         "Weekly maintenance mutated the production model bundle: "
-        + ", ".join(changed[:12])
+        + ", ".join(unexplained[:12])
     )
     _fail(message)
     errors.append(message)
@@ -2468,16 +2526,35 @@ def step8_5_weekly_maintenance(args, errors):
         logger.info("Skipping weekly maintenance (runs automatically on Sunday only)")
         return
 
+    from atomic_io import PIPELINE_CONTEXT_ENV
+
     _section("WEEKLY ISOLATED MODEL MAINTENANCE")
-    production_before = _production_model_hashes()
     run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Child steps inherit this context, so a receipt written by one of OUR steps
+    # can never excuse a production change; only an outside TrainingRefresh can.
+    context = f"run_daily_weekly_{run_stamp}_{os.getpid()}"
+    previous_context = os.environ.get(PIPELINE_CONTEXT_ENV)
+    os.environ[PIPELINE_CONTEXT_ENV] = context
+    try:
+        _weekly_maintenance_steps(args, errors, run_stamp, context)
+    finally:
+        if previous_context is None:
+            os.environ.pop(PIPELINE_CONTEXT_ENV, None)
+        else:
+            os.environ[PIPELINE_CONTEXT_ENV] = previous_context
+
+
+def _weekly_maintenance_steps(args, errors, run_stamp: str, context: str):
+    """Run steps 8.5a-f and verify the production bundle afterwards."""
+    started_utc = datetime.now().astimezone(timezone.utc)
+    production_before = _production_model_hashes()
     candidate_dir = MODEL_DIR / "weekly_candidates" / run_stamp
     comparison_detail = OUTPUT_DIR / f"weekly_candidate_{run_stamp}_same_row_oof.csv"
     comparison_summary = OUTPUT_DIR / f"weekly_candidate_{run_stamp}_same_row_oof_summary.json"
 
     def _stop(message: str) -> None:
         _warn(message)
-        _record_production_immutability_failure(production_before, errors)
+        _record_production_immutability_failure(production_before, errors, started_utc, context)
 
     team_logs_ok = _run_python_step(
         "8.5a",
@@ -2565,7 +2642,7 @@ def step8_5_weekly_maintenance(args, errors):
         _stop("Weekly candidate audit failed; production remains unchanged")
         return
 
-    if not _record_production_immutability_failure(production_before, errors):
+    if not _record_production_immutability_failure(production_before, errors, started_utc, context):
         return
     logger.info(f"  Candidate retained for review: {candidate_dir}")
     logger.info(f"  Comparison retained for review: {comparison_summary}")

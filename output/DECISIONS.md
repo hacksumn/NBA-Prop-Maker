@@ -4320,3 +4320,52 @@ The earlier "75% alone vs 52% when 3 share a game" comparison mixed game composi
 **Verification:** `tests/test_build_dashboard.py` is 63 tests (3 new): every menu section has a complete 3D icon (a missing one would otherwise render blank), depth/motion/reduced-motion contracts, and the phone guarantees (3D hidden, flat icon rule and the original phone padding/active rules unchanged, the active highlight only inside the desktop media block). Five deliberate breakages (phone shows 3D, a section loses its icon, reduced-motion rule removed, highlight leaks onto the phone, original phone padding altered) each fail a test; sources restored byte-identical. In the in-app browser: all 10 icons inspected magnified; hover tilt sets and clears its tilt; the active icon highlights and spins and follows navigation; at 375 px the top bar is the original 21 px flat icons with no animations running and no overflow. Full suite `python -m pytest -q`: 338 passed.
 
 **Impact:** Reporting only. No pick, gate, model, schema, history, scheduler or `run_daily.py` change; `output/dashboard_pro.html` was rebuilt (1.8 MB, 0 warnings).
+
+
+## 2026-11-15 - DEC-091 - Diagnose the CLV alert and expose its measured value and cohorts
+
+Jake requested that the five screenshot findings be addressed one at a time. Work started with the first, closing-line value. The overview alert was hard-coded as a warning regardless of results. It now warns when measured average closing-price EV is negative and reports informational status for positive, zero, or unavailable measurements. Positive averages are described without asserting proven edge.
+
+The alert displays average EV, exact-line sample size, price movement, settled ROI sample size, and coverage. ROI includes changed-line closes, so its cohort is labelled explicitly. The generic -110 vig baseline was removed from this alert because the actual offered prices vary. The existing report and market view remain the source of the underlying metrics.
+
+Independent recomputation from output/clv_picks.csv agrees with output/clv_summary.json. There are 132 picks, 73 usable closes, 63 exact-line picks across 13 dates, and 71 settled picks with usable closes. Exact-line average EV is -0.0510142, beat-close rate 0.1904762, mean probability movement +0.0062899. Settled ROI is +0.0729410. There are 59 picks without a later snapshot and 10 changed closing lines. Usable snapshots range from 8 to 808.2 minutes before tip (median 24.7).
+
+The negative EV and incomplete/early closing captures remain open evidence issues in TASKS.md. This reporting correction establishes neither improved prediction performance nor positive betting edge.
+
+Verification ran python -m pytest tests/test_build_dashboard.py tests/test_clv_report.py -q, with 76 passed and 56 subtests passed. Four new regression tests cover negative EV despite positive movement/ROI, positive/zero EV, missing/nonfinite measurements, and changed-line-only samples. The dashboard was regenerated from existing inputs.
+
+## 2026-11-15 — DEC-092 — Atomic availability-model writes and a training-aware production-bundle guard
+
+**Problem:** A manual full `run_daily.py` (started 09:15) logged `[FAIL] Weekly maintenance mutated the production model bundle: availability_minutes_model.pkl`. The separate `FreshStartNBA-TrainingRefresh` job (09:30) retrained that file at 09:33:23 while Step 8.5 was running. Nothing in `run_daily` wrote it, and the previous version was retained. Two real defects were behind it: (1) `scripts/train_availability_minutes_model.py` wrote the pickle in place (`open("wb")`), so a concurrent `predict` could load a partial file; (2) the guard could not tell an expected TrainingRefresh update from an unexplained mutation.
+
+**Decision (per Jake: production must be safe when jobs overlap unexpectedly):**
+- New `atomic_io.py`. Every write goes to a unique same-directory temp file (`.<name>.<random>.tmp`), is flushed and fsynced, then swapped in with `os.replace`. On Windows the swap is retried for up to 60 s while a reader holds the file open, then fails loudly with the previous version intact. The temp file is removed on every failure path.
+- The trainer now writes all seven outputs atomically (model pickle, policy, summary and four CSVs). Before swapping in the model and policy, it writes an append-only receipt to `models/training_receipts/` naming their exact SHA-256 hashes. Because the receipt comes first, a guard can never see a new file without its receipt. Pickle protocol and CSV bytes are unchanged.
+- `run_daily` guard: `TRAINING_REFRESH_OWNED` = {`availability_minutes_model.pkl`, `availability_minutes_policy.json`}. A change to one of these is logged as an expected `[WARN]`, not an error, only if all of the following hold:
+  - the file still exists;
+  - its current hash equals a hash in a receipt written since maintenance started (15 min slack);
+  - that receipt was not written by this run's own child steps. Step 8.5 sets `NBA_PIPELINE_CONTEXT=run_daily_weekly_<stamp>_<pid>`; children inherit it, and receipts carrying it are excluded.
+- Anything else still fails exactly as before, including an owned file changed without a receipt, a receipt with a mismatched hash, a deleted file, or any other production file. Calls that do not pass the window keep the old strict behavior. The hash set ignores `*.tmp` files, so an in-flight temp file cannot cause a false failure.
+- `_production_model_hashes` now resolves `MODEL_DIR` at call time (previously a default argument bound at import).
+
+**Not changed:** pick logic, gates, features, model training, model contents, schemas, the scheduler, and `run_training_maintenance.py`, whose own guard globs only top-level patterns, so the receipt folder is outside it.
+
+**Verification:**
+- `tests/test_atomic_writes_and_training_guard.py`: 20 new tests. They cover a real open-handle swap on Windows, and a two-process test in which 40 alternating 2 MB atomic writes were read concurrently with no partial or mixed read. Guard cases: accept, own-context, hash mismatch, non-owned file, deletion, stale receipt, mixed change, legacy call, temp file, corrupt receipt, and context propagation.
+- Seven deliberate breakages were all caught: non-atomic write, no retry, no owned check, no context exclusion, no hash match, temp files hashed, context not set.
+- Real end-to-end trainer run with all outputs redirected to the scratchpad (rc 0): the receipt hashes matched the written files; the CSVs were byte-identical in size to production's; the model's predictions on 5,000 rows differed from the production model by 0.0 (same training cutoff 2026-11-14).
+- Full suite: 362 passed.
+
+**Interim rule:** avoid starting manual full runs between 09:15 and 09:40 until a real overlap has been observed passing (`[WARN] ... updated by the TrainingRefresh job ... expected` with no `[FAIL]`), or until the first daily TrainingRefresh after this change has written a receipt and the next Sunday full run passes the guard.
+
+## 2026-11-15 - DEC-093 - Remove misdated April 11 records with user authorization
+
+This corrects the factual diagnosis in DEC-082 and its backfill task. The official NBA schedule confirms zero games on April 11. The 2,205 historical line rows establish a capture/publication date. They do not establish that games occurred on that date. No April 11 box scores need backfilling. Source https://www.nba.com/games?date=2026-04-11
+
+All nine players have April 12 final box scores. Their relevant statistics were independently checked against ESPN summary events 401811041, 401811044, 401811047 and 401811055 and agree with data/nba_data.csv. Assigning the archived lines to April 12 would produce 5 wins and 4 losses. That date assignment remains an inference because the old projection archives omitted event IDs and start times. Jake was given both choices and requested that the records be disposed of.
+
+Removed nine April 11 picks and the 17 April 11 slips whose legs map to those nine contracts. Picks history changed from 1,726 to 1,717 rows and slips history from 286 to 269. Every surviving cell matches its original value. No reconstructed outcomes were added. Complete pre-change history bytes are retained under .retained_versions/objects using the SHA-256 hashes in output/slate_date_audit_2026-04-11.json. That receipt records all removed rows, source checks, user instruction and applied disposition.
+
+Moved all 20 files from output/archive/2026-04-11 into .retained_versions/quarantine/2026-04-11 and verified each file hash. This removes their source from both Step 1.5 archive backfill and recover_lost_history_rows.py. Raw captured line observations are preserved. The box-score dataset hash matches its pre-change hash.
+
+Verification covers exact before/after cell comparisons, zero remaining April 11 history rows, identical original April 12 rows, retained history checksum verification, archive recovery discovery, existing dashboard/slate/parser tests, and dashboard rebuild. The resulting page has 1,717 picks, zero build warnings and no April 11 integrity flag. Current-season record remains 70-43 because this correction concerns spring records. STATUS.md and TASKS.md record completion and supersede the original backfill task.
