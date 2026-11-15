@@ -4180,3 +4180,74 @@ The earlier "75% alone vs 52% when 3 share a game" comparison mixed game composi
 **Verification:** New `tests/test_slate_and_alternate_fixes.py` (2) and `test_path_truncate_and_byte_path_replace_are_preserved` fail on the HEAD versions and pass with the fixes. `python -m pytest -q tests --disable-warnings`: 265 passed, 10 subtests passed. CodeRabbit `review -t uncommitted` over all working-tree changes (including `tests/test_clv_report.py` from DEC-081): 0 findings. The scratch worktree was removed.
 
 **Pick impact:** No change to selection, gates or models. Grading now leaves missing-data dates pending instead of DNP. The timezone fix only changes behavior where the old code crashed.
+
+
+## 2026-11-15 — DEC-083 — Read-only Command Center dashboard (`scripts/build_dashboard.py`)
+
+**Context:** Jake asked for a modern dashboard of all metrics, records and analytics. The existing outputs were `output/dashboard_latest.html` (pipeline-generated, pick-centric) and the Streamlit `vegas_gui.py`. Neither shows equity, gate effectiveness, CLV, model evidence, pipeline health and the decision log together, and neither flags data-integrity problems.
+
+**Decision:** Add a standalone generator, `scripts/build_dashboard.py` with assets in `scripts/dashboard_assets/` (`template.html`, `style.css`, `charts.js`, `app.js`), launched by `run_dashboard.bat`. It writes one self-contained HTML file, `output/dashboard_pro.html`, with no network dependency (custom SVG charts, no external libraries). It is a derived view: it can always be regenerated from the sources, so it overwrites only itself and keeps no timestamped copy.
+
+**Safety contract:**
+- Reads `output/`, `data/`, `models/`, `logs/` and git metadata; writes exactly one file, atomically. A test hashes a synthetic project tree before and after a build and asserts nothing else changes (DEC-070).
+- Not wired into `run_daily.py` or the scheduler, so the morning run cannot be affected. Hooking it in is an optional follow-up in TASKS.md.
+- Every section runs in an isolation wrapper. A missing or malformed input degrades that section, is listed in a warning banner and printed to stderr, and never produces a silent number. Missing `picks_history.csv` is fatal.
+- Reporting rules: flat 1-unit P&L at the logged FanDuel price only; a pick with no logged price (and no CLV-report bet price for the same pick) gets no units rather than a guessed price; DNP is void; PUSH is 0 units; the 2026-27 season, all-live and everything-incl-backfill scopes are separate, and the backfilled March era is labelled as not a forward record (DEC-036). Hit rates carry Wilson 95% intervals and small samples are tagged.
+- CLV-report outcomes appear on pending picks only as clearly labelled **provisional** results and never enter a record or unit total.
+
+**Integrity findings surfaced (reported, not changed):** (1) `betslips_history.csv` CSV line 33 is an orphan row with no date and no legs (`result=LOSS`, `actual_payout=0.0`). The dashboard excludes it from slip numbers and flags it; removal is Jake's call (DEC-070). (2) 104 of 286 slips repeat identical legs under a second slip label, so slips are reported unique (headline) and raw. (3) The 2026-04-11 all-DNP date (DEC-082) is flagged. (4) The CLV report grades 2026-11-14 picks from final box scores before `picks_history.csv` does (Step 1.5 runs the next morning); on every pick settled in both files the grades agree.
+
+**Verification:** `tests/test_build_dashboard.py` (29 tests): helpers, parsers, pinned record/unit/net-dollar numbers on a synthetic project, orphan and duplicate slips, all-DNP flag, provisional results, strict-JSON and `</script>` escaping, read-only guarantee, loud degradation, fatal inputs. Three deliberate mutations (orphan rows kept, run end not closed at a log gap, unpriced picks given guessed units) each fail a test; sources restored byte-identical. Independent recomputation outside the builder matched the dashboard exactly: season 63-41, +8.0004u over 104 priced bets, slips 181 unique (77-88-3, +$3,319.94). Full suite `python -m pytest -q tests`: 294 passed, 10 subtests passed. Visual check in the in-app browser at desktop and 375px width, dark and light themes, all 10 views with no horizontal overflow and no console errors.
+
+**Impact:** Reporting only. No pick, gate, model, schema, history, scheduler or `run_daily.py` change. Files added: `scripts/build_dashboard.py`, `scripts/dashboard_assets/*`, `run_dashboard.bat`, `tests/test_build_dashboard.py`, `output/dashboard_pro.html` (generated). README gained a short entry.
+
+**Known limits:** Price-less historical eras (backfill, PrizePicks) show hit rates but no units. Slip dollars in the PrizePicks era are dominated by fixed payout multipliers and the backfilled era is reconstructed, so they are not forward expectations. Closing-line value uses the nearest T-5/T-60 capture (63 exact-close picks), so it is directional only.
+
+
+## 2026-11-15 — DEC-084 — Dashboard gets circular dials, pie/donut charts and real NBA team logos
+
+**Context:** Jake asked the Command Center (DEC-083) for circular dials, pie graphs and real NBA team logos.
+
+**Decision:**
+- **Charts (no library, same SVG toolkit):** semicircle dials with zones, needle and a break-even tick (hit rate, ROI, edge vs break-even, green days, meta-classifier AUC for all nine props, beat-the-close, market direction, published-candidate ROI, slip ROI, Odds API credits, model-vs-market on the card); concentric progress rings (lane hit rates with break-even ticks, settlement, holdout progress, file freshness); pies and donuts with hover lift, centre labels and a legend (result mix, lane share, team share with logos, price/probability/EV bands, candidate flow and stop reasons, close quality, slip results and types, line sources, box-score seasons).
+- **Logos:** the browser loads each official logo from the NBA's public CDN (`https://cdn.nba.com/logos/nba/<teamId>/global/L/logo.svg`) when the page is opened. Nothing is downloaded into the project. Requests carry `referrerpolicy="no-referrer"`; the only data sent is the team ID. If a logo cannot load (offline, blocked, CDN change) that team shows a team-coloured abbreviation badge, so the page degrades rather than breaks. Logos appear on pick cards, tonight's slate, the team board (teams we picked and opponents we picked against), pick explorer, tables and the team pie legend.
+- **Team metadata:** `TEAMS` in `scripts/build_dashboard.py` maps all 30 abbreviations to official team IDs, names and fallback colours. The IDs were checked against `TEAM_ID`/`team` in `data/nba_data.csv` (30 of 30 match) and the 30 abbreviations used in `picks_history.csv` all resolve. An abbreviation outside the table is listed in the page's warning banner and gets a text badge.
+- **Supersedes the "no network" wording in DEC-083 and the README:** the page is still a single file with no server and no libraries and works offline, but logo images need internet.
+
+**Bugs found and fixed while verifying (all in the new view code):** (1) logos rendered 0–4 px wide inside a grid box (cyclic percentage width); the logo box is now absolutely positioned. (2) Charts mounted while their view was `display:none` stayed blank until a resize, which showed at phone width: views are now shown before they render, and resize redraws use a timer instead of `requestAnimationFrame` (paused in hidden/emulated tabs). (3) The older hit-rate ring caption rendered dark-on-dark.
+
+**Verification:** `tests/test_build_dashboard.py` is now 38 tests (9 new): team table completeness and official IDs, team and opponent breakdowns, tonight's slate, unknown-abbreviation reporting, provisional results in the slate, an asset contract (the only permitted external host is `cdn.nba.com`; logo requests send no referrer and have a text fallback) and the show-before-render regression. Four deliberate breakages (referrer leak, unknown teams ignored, opponent breakdown built from the wrong column, render-before-show) each fail a test; sources restored byte-identical. Full suite `python -m pytest -q tests`: 303 passed, 10 subtests passed. In the in-app browser at desktop and 375 px: all 10 views draw every chart with no blank charts, no overflow, no console errors, and forcing every logo to fail swaps in the abbreviation badges.
+
+**Impact:** Reporting only. No pick, gate, model, schema, history, scheduler or `run_daily.py` change. Open option (TASKS.md): embedding the 30 logos into the HTML for fully offline use would mean downloading about 30 SVGs (roughly 8 KB each) from the NBA CDN; not done without Jake's go-ahead.
+
+
+## 2026-11-15 — DEC-085 — Dashboard logo embedding built; the 30 logo files are not downloaded yet; DEC-084 CSS collision fixed
+
+**Context:** Jake approved embedding the team logos so the dashboard works fully offline (the open option in DEC-084). The download itself (30 SVGs from `https://cdn.nba.com/logos/nba/<teamId>/global/L/logo.svg`) was denied by the session's permission classifier, so it was **not** run and no other route to the same files was tried.
+
+**Decision:**
+- **Where logos live:** committed files `scripts/dashboard_assets/logos/<ABBR>.svg` (file name = the abbreviation in `TEAMS`, e.g. `CLE.svg`). `load_logos()` validates each file and inlines it into the page as a base64 `data:` URI; the builder never touches the network. `build_payload(..., logo_dir=...)` lets tests point it elsewhere.
+- **Validation (`validate_logo_svg`, fail loudly):** at most 64 KB, well-formed XML with an `<svg>` root, no DOCTYPE/ENTITY, no `script`/`foreignObject`/`iframe`/`object`/`embed`/`image`/`animate`/`set`, no `on*` attributes, no `href` other than a `#fragment`, no `url()` or `@import` to anything but a `#fragment`, no `javascript:`. The files are third-party and only ever drawn as CSS backgrounds (browsers run no script there), so this is defence in depth. A rejected file or an unknown file name is listed in the page's warning banner and that team keeps the fallback.
+- **Front end:** each embedded logo is stored once, in one generated `<style>` rule per team (`.tlogo.e-ABC i{background-image:url(data:…)}`), not repeated in every image tag. Only a plain base64 SVG data URI for a three-letter key is ever injected. A team with no embedded logo still gets the DEC-084 behaviour (NBA CDN image, then a team-coloured badge offline), so a partial set never breaks the page.
+- **Loud, not silent:** while any team has no embedded logo the builder warns `N of 30 team logos are not embedded and load from the NBA CDN when online (text badge offline): …`. Today that reads 30 of 30. The warning disappears once all 30 files are present.
+
+**Bug fixed (introduced in DEC-084):** the logo box class was `.tl`, the same name as the decision-log timeline (`.tl`, `#dc-list`). Every logo inherited the timeline's 18 px left padding, 8 px margin and 2 px left border, and the timeline inherited the logo's 26 px square, so the 84-entry decision log rendered inside a 26×26 px box. The logo class is now `.tlogo`; a regression test pins that each class is defined once and the helper emits only `.tlogo`. The DEC-084 view sweep missed this because it checked logo size and chart drawing but not the Decisions list.
+
+**Verification:** `tests/test_build_dashboard.py` is now 48 tests (10 new): the validator accepts clean SVG (including `url( #g )` spacing) and rejects 12 hostile variants plus malformed, wrong-root, empty and oversized input; `load_logos` embeds byte for byte and reports bad or unknown files; the payload names exactly the missing teams; a full set of 30 embeds with no warning and survives rendering; the asset contract for the generated stylesheet; the class-collision regression; and a check that every committed logo file passes validation. Eight deliberate breakages (allow script, `on*`, external href, external `url()`, DOCTYPE, no size cap, no missing-logo warning, skip validation) each fail a test; source restored byte-identical. Full suite `python -m pytest -q`: 313 passed, 26 subtests passed. In the in-app browser, with 30 SYNTHETIC placeholder logos (never committed), all 10 views had square logos at the requested size, zero CDN requests and no console errors, and the Decisions timeline measured 818×630 px with 84 entries; with 29 embedded, the 30th used the CDN image and the banner named it. The real logo look is therefore not yet seen.
+
+**Impact:** Reporting only. No pick, gate, model, schema, history, scheduler or `run_daily.py` change; `output/dashboard_pro.html` was regenerated. Remaining step (TASKS.md): get the 30 official SVGs into `scripts/dashboard_assets/logos/` and rebuild.
+
+
+## 2026-11-15 — DEC-086 — Team logos embedded; dashboard now works fully offline
+
+**Context:** DEC-085 built the embedding but the session's permission classifier denied the download twice (including after Jake said to retry), so no download was run from the session and no other route to the same files was tried. Jake then downloaded the 30 official SVGs himself into `scripts/dashboard_assets/logos/<ABBR>.svg`.
+
+**Decision:**
+- **Files accepted:** all 30 (3 KB–31 KB each, 325 KB total) pass `validate_logo_svg`; an inventory of every element and attribute found only plain vector shapes, `<style>` class fills, `<defs>` and one `<clipPath>`, with no script, link, image or external reference. Each logo is drawn as its own CSS background image, so the style classes inside different logos cannot collide. `output/dashboard_pro.html` was rebuilt: 1.3 MB, 0 warnings.
+- **Offline proof:** in the in-app browser the page made no request to `cdn.nba.com` (the network log shows only the page itself), all 10 views drew every logo square at its requested size, and nothing overflowed at 375 px.
+- **Legibility fix:** dark marks (Spurs, Nets, Jazz) were hard to read on the dark theme. Logos now carry a thin light halo in the dark theme; the light theme keeps the soft dark shadow. Checked in both themes.
+- **Provenance:** `scripts/dashboard_assets/logos/README.md` records the source URL pattern and download date. The CDN image path stays in the code only as a fallback for a missing or rejected file; the banner reports it.
+
+**Verification:** `tests/test_build_dashboard.py` is 48 tests; the former "committed logos are valid" test now requires all 30 files to be present and valid. Full suite `python -m pytest -q`: 313 passed, 56 subtests passed. `picks_history.csv`, `betslips_history.csv` and `nba_data.csv` modification times are unchanged.
+
+**Impact:** Reporting only. Supersedes the "logo images need internet" caveat in DEC-084. No pick, gate, model, schema, history, scheduler or `run_daily.py` change.

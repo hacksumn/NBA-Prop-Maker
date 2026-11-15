@@ -104,6 +104,12 @@ run_gui.bat  →  vegas_gui.py  (Streamlit)
 ```
 Launches the local "Vegas Intelligence Console" — a Streamlit dashboard that reads from `data/`, `models/`, and `output/` and exposes picks, performance metrics, model room, and command controls.
 
+**3. Command Center (read-only HTML dashboard)**
+```bat
+run_dashboard.bat  →  scripts/build_dashboard.py  →  output/dashboard_pro.html
+```
+Builds one self-contained HTML page (no server, no libraries) from the existing history, summary, model and log files, with circular dials, pie/donut charts and official NBA team logos (embedded from `scripts/dashboard_assets/logos/<ABBR>.svg`, so the page works offline; a team whose file is missing or invalid loads from the NBA's CDN when you are online and shows a team-coloured badge offline, and the page's warning banner says so): season record and equity curve, today's card with the gate board, results analytics, a searchable pick explorer, gate and CLV audits, the model lab, betslips, system health, and the decision log. It only reads project files and writes the single HTML file; it never touches `data/`, `models/` or any history file. Integrity problems it finds (orphan rows, all-DNP dates, duplicate slip labels) are flagged on the page, never silently fixed.
+
 ---
 
 ## 🚀 Quick Start
