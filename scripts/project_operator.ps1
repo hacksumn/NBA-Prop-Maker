@@ -157,6 +157,60 @@ function Show-Preflight {
     Write-Host 'Live cards use exact FanDuel lines from the Odds API; PrizePicks is not part of DailySafe.'
 }
 
+# Rebuild the read-only Command Center page (output\dashboard_pro.html) after the daily run (DEC-088).
+# Informational only, so by design it:
+#   - never throws and never changes the result of the action it runs after;
+#   - is NOT part of Preflight / Assert-RequiredFiles (a dashboard problem must never be able to block picks);
+#   - is NOT routed through Invoke-PythonStep, which wraps .py files in artifact_retention.py --run and would
+#     keep every replaced copy of this regenerable page forever;
+#   - is time-limited, and says plainly in the log when the page was NOT refreshed (the page also shows its own
+#     age and an "Out of date" banner after 26 hours).
+function Invoke-DashboardRebuild {
+    param([int]$TimeoutSeconds = 180)
+    $label = '[Dashboard rebuild]'
+    $stdoutPath = $null
+    $stderrPath = $null
+    try {
+        $builder = Join-Path $ProjectRoot 'scripts\build_dashboard.py'
+        if (-not (Test-Path -LiteralPath $builder -PathType Leaf)) {
+            Write-Host "$label SKIPPED: $builder not found; output\dashboard_pro.html was NOT refreshed." -ForegroundColor Yellow
+            return
+        }
+        $python = (Get-Command python -ErrorAction Stop).Source
+        $stdoutPath = [IO.Path]::GetTempFileName()
+        $stderrPath = [IO.Path]::GetTempFileName()
+        $process = Start-Process -FilePath $python -ArgumentList @("`"$builder`"") -WorkingDirectory $ProjectRoot `
+            -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $null = $process.Handle   # keep the handle so ExitCode is readable after WaitForExit
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch { }
+            Write-Host "$label FAILED: no result after $TimeoutSeconds s, so it was stopped; output\dashboard_pro.html was NOT refreshed." -ForegroundColor Yellow
+            return
+        }
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            foreach ($line in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
+                if ($line) { Write-Host "$label $line" }
+            }
+        }
+        if ($exitCode -eq 0) {
+            Write-Host "$label OK" -ForegroundColor Green
+        }
+        else {
+            Write-Host "$label FAILED with exit code $exitCode; output\dashboard_pro.html may be out of date." -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "$label FAILED: $($_.Exception.Message); output\dashboard_pro.html may be out of date." -ForegroundColor Yellow
+    }
+    finally {
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            if ($path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
 switch ($Action) {
     'Preflight' {
         Show-Preflight
@@ -274,10 +328,17 @@ switch ($Action) {
         if ($PairSportsbookT60) {
             $arguments += '--pair-sportsbook-t60'
         }
-        Invoke-ProtectedPythonStep -Label 'Safe daily pipeline' -PythonArgs $arguments
-        Invoke-ProtectedPythonStep -Label 'Grade and capture frozen candidate future holdout' -PythonArgs @(
-            '.\scripts\capture_candidate_future_holdout.py'
-        )
+        try {
+            Invoke-ProtectedPythonStep -Label 'Safe daily pipeline' -PythonArgs $arguments
+            Invoke-ProtectedPythonStep -Label 'Grade and capture frozen candidate future holdout' -PythonArgs @(
+                '.\scripts\capture_candidate_future_holdout.py'
+            )
+        }
+        finally {
+            # Runs even when a step above failed, so the page's Health view shows the failure. It cannot
+            # throw, so it can never mask the real error or turn a failed run into a passing one (DEC-088).
+            Invoke-DashboardRebuild
+        }
     }
     'PicksNow' {
         Show-Preflight

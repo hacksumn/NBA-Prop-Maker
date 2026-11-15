@@ -371,8 +371,11 @@ def day_series(df: pd.DataFrame) -> dict:
 
 
 def _with_team(rows: list[dict], df: pd.DataFrame) -> list[dict]:
-    """Attach each player's most recent team (for the logo next to the name)."""
-    last = df.dropna(subset=["team"]).groupby("player")["team"].last()
+    """Attach each player's most recent team by game date (for the logo next to the name).
+
+    picks_history.csv is not guaranteed to be in date order (late backfills and re-grades are appended),
+    so file order must not decide who a traded player belongs to."""
+    last = df.dropna(subset=["team"]).sort_values("game_date", kind="stable").groupby("player")["team"].last()
     for r in rows:
         r["team"] = last.get(r["player"])
     return rows
@@ -1266,7 +1269,18 @@ def write_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _make_console_safe() -> None:
+    """Never let a non-ASCII player name or team crash the run on a cp1252 / redirected console
+    (as under Task Scheduler) after the page has already been written."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass  # not a TextIOWrapper (e.g. replaced by a test harness): nothing to do
+
+
 def main(argv: list[str] | None = None) -> int:
+    _make_console_safe()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", default=str(SCRIPT_DIR.parent), help="project root (default: repo root)")
     ap.add_argument("--out", default=None, help="output HTML (default: <root>/output/dashboard_pro.html)")

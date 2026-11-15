@@ -76,6 +76,7 @@
   const chip = (t, k) => `<span class="chip ${k || ''}">${esc(t)}</span>`;
   const rec = (s) => `<span class="t-win">${s.w}</span><span class="sep">–</span><span class="t-loss">${s.l}</span>${s.p ? `<span class="sep">–</span><span class="t-amber">${s.p}</span>` : ''}`;
   const resChip = (r) => r === 'WIN' ? chip('WIN', 'win') : r === 'LOSS' ? chip('LOSS', 'loss') : r === 'PUSH' ? chip('PUSH', 'amber') : r === 'DNP' ? chip('DNP', '') : chip('PENDING', 'info pulse');
+  const STALE_HOURS = 26;   // the page is rebuilt once a day; older than this means a rebuild was missed
   const unavail = (name) => `<div class="empty">${esc(name)} is unavailable. Check the warnings banner and the builder output.</div>`;
   const hitBar = (s) => {
     if (s.hit == null) return '<span class="t-muted">–</span>';
@@ -696,7 +697,11 @@
     $('#rail').innerHTML = `<div class="logo" title="Fresh Start NBA">${logoSvg()}</div><nav class="nav">${VIEWS.map((v) => `<button data-view="${v.id}" title="${v.label}">${svgi(v.icon)}<span>${v.label}</span>${v.id === 'health' && flagBad ? '<i class="badge-dot"></i>' : ''}</button>`).join('')}</nav><div class="spacer"></div>`;
     $('#rail').addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) go(b.dataset.view); });
     const meta = D.meta || {}, sd = D.scopes[state.scope].summary;
-    $('#top').innerHTML = `<div><h1><span class="grad">Fresh Start NBA</span> · Command Center</h1><div class="sub">Built ${esc((meta.generated_at || '').replace('T', ' '))} · ${F.n(meta.total_picks)} picks logged ${esc(F.dateY(meta.first_pick))} → ${esc(F.dateY(meta.last_pick))}${meta.git && meta.git.commit ? ' · ' + esc(meta.git.branch) + '@' + esc(meta.git.commit) : ''}</div></div><div class="grow"></div>
+    // how old is this snapshot? (a static page cannot refresh itself, so say so when a daily rebuild was missed)
+    const builtAt = meta.generated_at ? new Date(meta.generated_at) : null;
+    const ageH = builtAt && !isNaN(builtAt.getTime()) ? Math.max(0, (Date.now() - builtAt.getTime()) / 36e5) : null;
+    const ageTxt = ageH == null ? '' : ageH < 1 ? 'under 1 hour ago' : ageH < 48 ? Math.round(ageH) + ' hours ago' : Math.floor(ageH / 24) + ' days ago';
+    $('#top').innerHTML = `<div><h1><span class="grad">Fresh Start NBA</span> · Command Center</h1><div class="sub">Built ${esc((meta.generated_at || '').replace('T', ' '))}${ageTxt ? ' (' + ageTxt + ')' : ''} ·${F.n(meta.total_picks)} picks logged ${esc(F.dateY(meta.first_pick))} → ${esc(F.dateY(meta.last_pick))}${meta.git && meta.git.commit ? ' · ' + esc(meta.git.branch) + '@' + esc(meta.git.commit) : ''}</div></div><div class="grow"></div>
       <div id="scopeseg">${seg('scope', [['season', '2026-27 season'], ['live', 'All live'], ['all', 'Everything']], state.scope)}</div>
       <span class="chip ${TODAY.pending ? 'info pulse' : 'win'}"><i class="pip"></i>${TODAY.pending ? TODAY.pending + ' picks live' : 'card settled'}</span>
       <button class="iconbtn" id="themebtn" title="Toggle theme" aria-label="Toggle theme"></button>`;
@@ -704,7 +709,9 @@
     $('#themebtn').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     setTheme(store.get('nba.theme', 'dark'), true);
     const w = (meta.warnings || []);
-    $('#warnings').innerHTML = w.length ? `<div class="banner warn"><b>${w.length} section${w.length > 1 ? 's' : ''} degraded</b><span>${w.map(esc).join(' · ')}</span></div>` : '';
+    const staleBanner = ageH != null && ageH >= STALE_HOURS
+      ? `<div class="banner bad"><b>Out of date</b><span>This page was built ${esc(ageTxt)}, so results, tonight's card and injury context may have changed since. Rebuild it with run_dashboard.bat; if the daily rebuild keeps failing, check the pipeline log.</span></div>` : '';
+    $('#warnings').innerHTML = staleBanner + (w.length ? `<div class="banner warn"><b>${w.length} section${w.length > 1 ? 's' : ''} degraded</b><span>${w.map(esc).join(' · ')}</span></div>` : '');
   }
   function setTheme(t, init) {
     document.documentElement.dataset.theme = t; store.set('nba.theme', t);

@@ -350,10 +350,37 @@ class TeamTests(unittest.TestCase):
             self.assertEqual(bd.TEAMS[abbr][0], tid)
 
     def test_with_team_attaches_most_recent_team(self):
-        df = pd.DataFrame({"player": ["A", "A", "B"], "team": ["BOS", "NYK", None]})
+        df = pd.DataFrame({"player": ["A", "A", "B"], "team": ["BOS", "NYK", None],
+                           "game_date": ["2026-11-01", "2026-11-09", "2026-11-02"]})
         out = bd._with_team([{"player": "A"}, {"player": "B"}], df)
         self.assertEqual(out[0]["team"], "NYK")
         self.assertIsNone(out[1]["team"])
+
+    def test_traded_player_gets_latest_team_even_when_file_order_is_not_chronological(self):
+        # regression: picks_history.csv is not in date order; Kelly Oubre Jr. (PHI -> IND) showed his old team
+        df = pd.DataFrame({"player": ["T", "T", "T"], "team": ["IND", "PHI", "PHI"],
+                           "game_date": ["2026-11-10", "2026-11-02", "2026-11-04"]})   # newest row is first in the file
+        self.assertEqual(bd._with_team([{"player": "T"}], df)[0]["team"], "IND")
+
+    def test_trade_does_not_rewrite_history(self):
+        # each pick keeps the team it was made for: a traded player's record is split by pick-time team
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_project(root)
+            rows = pd.read_csv(root / "output" / "picks_history.csv")
+            alpha_rows = rows[rows["player"] == "Alpha One"]
+            rows.loc[alpha_rows.index[-1], "team"] = "IND"       # Alpha One's 11-02 pick is for his new team
+            # an older pick appended at the END of the file (late backfill): file order != date order
+            rows = pd.concat([rows, pd.DataFrame([_pick("2026-10-30", "Alpha One", "AST", "WIN", price=-110, line=5.5)])],
+                             ignore_index=True)
+            rows.to_csv(root / "output" / "picks_history.csv", index=False)
+            season = bd.build_payload(root, now=NOW)["scopes"]["season"]
+        teams = {t["team"]: t for t in season["teams_all"]}
+        self.assertEqual((teams["IND"]["w"], teams["IND"]["l"]), (1, 0))   # the pick made for IND counts for IND
+        self.assertEqual((teams["CLE"]["w"], teams["CLE"]["l"]), (2, 0))   # the two earlier picks still count for CLE
+        alpha = next(p for p in season["players"] if p["player"] == "Alpha One")
+        self.assertEqual(alpha["team"], "IND")                             # the player row shows the latest team by date
+        self.assertEqual((alpha["w"], alpha["l"]), (3, 0))                 # and the player's full record stays together
 
     def test_payload_has_team_breakdowns_and_slate(self):
         with tempfile.TemporaryDirectory() as td:
@@ -441,6 +468,15 @@ class AssetContractTests(unittest.TestCase):
         self.assertIn('return `<span class="tlogo', app)                  # the logo helper emits only the logo class
         self.assertEqual(app.count('class="tl"'), 1)                       # ...and the timeline is the only user of .tl
 
+    def test_page_says_how_old_it_is_and_flags_a_missed_daily_rebuild(self):
+        # a static page cannot refresh itself: it must show its age and shout once it is older than a day
+        app = self._source()["app.js"]
+        self.assertIn("const STALE_HOURS = 26;", app)
+        self.assertIn("ageH >= STALE_HOURS", app)
+        self.assertIn('<div class="banner bad"><b>Out of date</b>', app)
+        self.assertIn("ageTxt", app.split("$('#top').innerHTML", 1)[1].split("</div></div>", 1)[0])   # the header shows the age too
+        self.assertIn(".banner.bad", self._source()["style.css"])
+
     def test_view_is_shown_before_it_renders(self):
         # regression: charts mounted inside a display:none view measured width 0 and stayed blank
         app = self._source()["app.js"]
@@ -468,6 +504,26 @@ class RenderTests(unittest.TestCase):
         # the embedded JSON round-trips
         parsed = json.loads(data_block.replace("<\\/", "</"))
         self.assertEqual(parsed["scopes"]["season"]["summary"]["w"], 3)
+
+    def test_main_survives_a_cp1252_console(self):
+        # under Task Scheduler stdout is redirected (cp1252): a non-ASCII name in a warning must not crash the
+        # run after the page was written
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_project(root)
+            rows = pd.read_csv(root / "output" / "picks_history.csv")
+            rows.loc[0, "team"] = "ĆĆĆ"            # not representable in cp1252
+            rows.to_csv(root / "output" / "picks_history.csv", index=False, encoding="utf-8")
+            sink = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+            with contextlib.redirect_stdout(sink):
+                code = bd.main(["--root", str(root)])
+            sink.flush()
+            printed = sink.buffer.getvalue().decode("cp1252")
+            self.assertEqual(code, 0)
+            self.assertTrue((root / "output" / "dashboard_pro.html").exists())
+        self.assertIn("\\u0106", printed)                          # spelled out, not a UnicodeEncodeError
 
     def test_main_writes_only_the_html(self):
         with tempfile.TemporaryDirectory() as td:
