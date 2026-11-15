@@ -4369,3 +4369,25 @@ Removed nine April 11 picks and the 17 April 11 slips whose legs map to those ni
 Moved all 20 files from output/archive/2026-04-11 into .retained_versions/quarantine/2026-04-11 and verified each file hash. This removes their source from both Step 1.5 archive backfill and recover_lost_history_rows.py. Raw captured line observations are preserved. The box-score dataset hash matches its pre-change hash.
 
 Verification covers exact before/after cell comparisons, zero remaining April 11 history rows, identical original April 12 rows, retained history checksum verification, archive recovery discovery, existing dashboard/slate/parser tests, and dashboard rebuild. The resulting page has 1,717 picks, zero build warnings and no April 11 integrity flag. Current-season record remains 70-43 because this correction concerns spring records. STATUS.md and TASKS.md record completion and supersede the original backfill task.
+
+
+## 2026-11-15 - DEC-094 - Investigate the orphan betslip
+
+Jake requested investigation of the orphan row flagged by the dashboard. CSV line 33 in output/betslips_history.csv has exactly two populated values, result LOSS and actual_payout 0.0. There is no date, slip type, wager or leg identity with which to reconstruct a bet.
+
+Read every committed version of that history file. The orphan appears in eb1e973 (April 3) and every subsequent committed version. The prior available version, 9a7aaa3 (March 25), has only three rows and no orphan. The exact creating operation cannot be established within that interval. A scan of all active output/archive betslip CSVs found no legless row to recover or reimport.
+
+Current log_betslips builds dated rows from selected subsets with at least two legs and initializes grades blank. Step 1.6 skips dates absent from the box-score date set and skips zero-leg rows. Those normal paths do not establish a current cause for this inherited malformed record. The Step 1.6 all-time graded-row count includes every nonblank result, so it can still count this inherited LOSS. The dashboard explicitly excludes it.
+
+Current raw history has 269 rows, 133 WIN, 129 LOSS and 5 PUSH. Excluding the orphan would give 268 rows, 133 WIN, 128 LOSS and 5 PUSH. The raw W/L win rate changes from 50.763% to 50.958%. This does not address duplicate slip labels, which remain a separate task.
+
+Investigation only. Saved history was not edited in this step. The correction remains removal of this one invalid row with its original retained, under the existing task. Verification ran python -m pytest tests/test_build_dashboard.py::PayloadTests -q, with 14 passed, including orphan exclusion from dashboard counts and its integrity flag. STATUS.md and TASKS.md record these findings.
+
+
+## 2026-11-15 - DEC-095 - Remove the orphan betslip after user authorization
+
+Following DEC-094, Jake instructed "ok then proceed". Removed exactly CSV line 33, whose only populated fields were result LOSS and actual_payout 0.0, from output/betslips_history.csv. No valid date, wager, leg or archived counterpart existed for reconstruction.
+
+The operation used artifact_lock and an atomic temporary-file replacement. Complete original bytes were retained under .retained_versions/objects and verified by decompression and SHA-256. Every surviving cell and column was compared to the original. The audit receipt is output/orphan_betslip_removal_2026-11-15.json and includes the removed row, original object path, before/after file hashes, counts and user authorization.
+
+Active history changed from 269 to 268 rows. It now contains 133 WIN, 128 LOSS, 5 PUSH and 2 pending records. Duplicate slip labels remain a separate investigation. The earlier archive scan found no source for this malformed row. The dashboard was rebuilt with zero warnings, and its orphan count is zero. Verification used exact data comparisons and the existing dashboard payload tests. STATUS.md and TASKS.md record completion.
