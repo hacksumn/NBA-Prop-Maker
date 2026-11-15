@@ -46,6 +46,16 @@
   // image errors do not bubble, so listen in the capture phase and flip the badge on
   document.addEventListener('error', (e) => { const t = e.target; if (t && t.tagName === 'IMG' && t.parentNode && t.parentNode.classList && t.parentNode.classList.contains('tlogo')) t.parentNode.classList.add('nologo'); }, true);
 
+  /* ---------- optional wallpaper (embedded by the builder as a data: URI; see style.css) ---------- */
+  const WALL = (typeof D.wallpaper === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(D.wallpaper)) ? D.wallpaper : null;
+  if (WALL) document.documentElement.style.setProperty('--wall', `url("${WALL}")`);
+  let wallOn = store.get('nba.wall', 'on') !== 'off';
+  function applyWall() {
+    document.documentElement.dataset.wall = WALL && wallOn ? 'on' : 'off';
+    const b = document.getElementById('wallbtn');
+    if (b) b.setAttribute('aria-pressed', String(wallOn));
+  }
+
   /* ---------- icons ---------- */
   const ICON = {
     overview: '<rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/>',
@@ -60,6 +70,7 @@
     decisions: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M8 4v13"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16.5l-5-5-9.5 8.5"/>',
   };
   const svgi = (n) => `<svg viewBox="0 0 24 24">${ICON[n] || ''}</svg>`;
 
@@ -704,9 +715,12 @@
     $('#top').innerHTML = `<div><h1><span class="grad">Fresh Start NBA</span> · Command Center</h1><div class="sub">Built ${esc((meta.generated_at || '').replace('T', ' '))}${ageTxt ? ' (' + ageTxt + ')' : ''} ·${F.n(meta.total_picks)} picks logged ${esc(F.dateY(meta.first_pick))} → ${esc(F.dateY(meta.last_pick))}${meta.git && meta.git.commit ? ' · ' + esc(meta.git.branch) + '@' + esc(meta.git.commit) : ''}</div></div><div class="grow"></div>
       <div id="scopeseg">${seg('scope', [['season', '2026-27 season'], ['live', 'All live'], ['all', 'Everything']], state.scope)}</div>
       <span class="chip ${TODAY.pending ? 'info pulse' : 'win'}"><i class="pip"></i>${TODAY.pending ? TODAY.pending + ' picks live' : 'card settled'}</span>
+      ${WALL ? `<button class="iconbtn" id="wallbtn" title="Show or hide the wallpaper" aria-label="Show or hide the wallpaper" aria-pressed="${wallOn}">${svgi('image')}</button>` : ''}
       <button class="iconbtn" id="themebtn" title="Toggle theme" aria-label="Toggle theme"></button>`;
     onSeg($('#top'), 'scope', (v) => { state.scope = v; store.set('nba.scope', v); VIEWS.forEach((x) => { if (x.scoped) dirty.add(x.id); }); show(state.view, true); });
     $('#themebtn').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+    if (WALL) $('#wallbtn').onclick = () => { wallOn = !wallOn; store.set('nba.wall', wallOn ? 'on' : 'off'); applyWall(); };
+    applyWall();
     setTheme(store.get('nba.theme', 'dark'), true);
     const w = (meta.warnings || []);
     const staleBanner = ageH != null && ageH >= STALE_HOURS

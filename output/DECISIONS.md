@@ -4289,3 +4289,18 @@ The earlier "75% alone vs 52% when 3 share a game" comparison mixed game composi
 **Not yet verified:** the first scheduled run. Tomorrow's 07:30 log should end with `[Dashboard rebuild] OK`, and the page header should read `Built … (under 1 hour ago)`.
 
 **Impact:** No pick, gate, model, schema, history or `run_daily.py` change. The only live-path change is the `try/finally` and one non-throwing function in `scripts/project_operator.ps1`.
+
+
+## 2026-11-15 — DEC-089 — Dashboard gets an optional, toggleable wallpaper
+
+**Context:** Jake supplied an image (AI-generated artwork of NBA players beside sports cars at a mansion at sunset, 1792×1008 JPEG, 353 KB) and asked for it as a transparent wallpaper for the dashboard, still clearly visible.
+
+**Decision:**
+- **Where it lives:** `scripts/dashboard_assets/wallpaper.jpg`, copied byte-identical from the supplied file. It is optional: the builder also accepts `wallpaper.jpeg|png|webp`, and with no file the dashboard is exactly as before. To change it, replace the file and rebuild.
+- **Embedding (`load_wallpaper`):** inlined byte for byte as a `data:` URI (one offline file; no new host, no image library, no download). The MIME type comes from the file's magic bytes, not its extension. An empty, over-1.5 MB or non-image file is not embedded and is named in the warning banner. The page grows from about 1.33 MB to 1.8 MB.
+- **Look:** a fixed layer under the existing glow and grid, so it stays put while you scroll. Dark theme 64% and light theme 46% opacity. While it is on, panels become slightly more transparent (dark `.54`, light `.68`) and stay blurred so the image shows through but numbers and charts stay readable; the header and warning banners get their own frosted backing because they sit directly on the page background. Tuned by eye on Overview, Today and the pick explorer at 1440 px, in both themes and at 375 px.
+- **Control:** a wallpaper button beside the theme button turns it on or off; the choice is remembered in the browser (`nba.wall`). Every override lives behind `[data-wall="on"]`, so off restores the original look exactly. The front end only ever injects a plain base64 JPEG/PNG/WebP data URI.
+
+**Verification:** `tests/test_build_dashboard.py` is 60 tests (8 new): no file is silent; JPEG/PNG/WebP embed byte for byte with the right MIME; HTML or empty or oversized files are rejected whatever their extension; the payload warns loudly about a bad file and not about an absent one; the wallpaper survives rendering and adds no external host or `<img>`; the committed file validates; the CSS/JS contract (strict data-URI pattern, panel overrides only behind `data-wall="on"`). Four deliberate breakages (no magic-byte check, no size cap, unscoped panel override, loose front-end pattern) each fail a test; sources restored byte-identical. One existing test that searched the data block for the text `NaN` was changed to look for a bare `NaN` value, because base64 text can contain those letters by chance. Full suite `python -m pytest -q`: 335 passed. In the in-app browser: toggle off/on, persistence across reload, light and dark themes, and 375 px with no overflow.
+
+**Impact:** Reporting only. No pick, gate, model, schema, history, scheduler or `run_daily.py` change; `output/dashboard_pro.html` was rebuilt (1.8 MB, 0 warnings).

@@ -37,6 +37,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = SCRIPT_DIR / "dashboard_assets"
 LOGO_DIR = ASSET_DIR / "logos"       # committed <ABBR>.svg files, inlined into the page so it works offline
 MAX_LOGO_BYTES = 64 * 1024
+WALLPAPER_NAMES = ("wallpaper.jpg", "wallpaper.jpeg", "wallpaper.png", "wallpaper.webp")   # optional page background
+MAX_WALLPAPER_BYTES = 1_500_000
 
 # ---------------------------------------------------------------------------
 # Era definitions. Boundaries come from DEC-036 (March rows were backfilled after the
@@ -1189,10 +1191,48 @@ def load_logos(logo_dir: Path | None = None) -> tuple[dict[str, str], list[str]]
     return logos, problems
 
 
+def _image_mime(raw: bytes) -> str | None:
+    """MIME type from the file's own magic bytes (never from its extension)."""
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def load_wallpaper(asset_dir: Path | None = None) -> tuple[str | None, str | None]:
+    """Return (data: URI, problem) for the optional page wallpaper.
+
+    The wallpaper is an optional ``wallpaper.jpg|jpeg|png|webp`` next to the other dashboard assets and is
+    embedded byte for byte, so the page stays one offline file. No file at all is fine: (None, None).
+    A file that is empty, too large or not really a JPEG/PNG/WebP is NOT embedded and is explained in ``problem``.
+    """
+    asset_dir = ASSET_DIR if asset_dir is None else Path(asset_dir)
+    for name in WALLPAPER_NAMES:
+        f = asset_dir / name
+        if not f.is_file():
+            continue
+        try:
+            raw = f.read_bytes()
+        except OSError as exc:
+            return None, f"wallpaper {name} could not be read ({exc}); the page has no wallpaper"
+        if not raw or len(raw) > MAX_WALLPAPER_BYTES:
+            return None, (f"wallpaper {name} is {len(raw):,} bytes, outside 1..{MAX_WALLPAPER_BYTES:,}; "
+                          "it was not embedded and the page has no wallpaper")
+        mime = _image_mime(raw)
+        if mime is None:
+            return None, f"wallpaper {name} is not a JPEG, PNG or WebP image; it was not embedded and the page has no wallpaper"
+        return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii"), None
+    return None, None
+
+
 # ---------------------------------------------------------------------------
 # Assemble + render
 # ---------------------------------------------------------------------------
-def build_payload(root: Path, now: datetime | None = None, logo_dir: Path | None = None) -> dict:
+def build_payload(root: Path, now: datetime | None = None, logo_dir: Path | None = None,
+                  wallpaper_dir: Path | None = None) -> dict:
     paths = Paths(root)
     col = Collector()
     now = now or datetime.now()
@@ -1213,6 +1253,9 @@ def build_payload(root: Path, now: datetime | None = None, logo_dir: Path | None
     if not_embedded:  # loud: the page still works, but those logos need internet (else a text badge)
         col.warnings.append(f"{len(not_embedded)} of {len(TEAMS)} team logos are not embedded and load from the NBA CDN "
                             f"when online (text badge offline): {', '.join(not_embedded)}")
+    payload["wallpaper"], wallpaper_problem = load_wallpaper(wallpaper_dir)
+    if wallpaper_problem:
+        col.warnings.append(wallpaper_problem)
     payload["eras"] = []
     for e in ERAS:
         g = picks[picks["era"] == e["key"]]

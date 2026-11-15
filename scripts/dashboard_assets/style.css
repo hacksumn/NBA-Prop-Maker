@@ -85,6 +85,30 @@ a { color: var(--accent-2); }
   -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 72%);
 }
 
+/* ---------- optional wallpaper ----------
+   The builder embeds scripts/dashboard_assets/wallpaper.* as a data: URI; app.js sets --wall and the
+   data-wall attribute (toggle in the top bar, remembered per browser). The image is a fixed layer under the
+   glow/grid; panels turn a little more transparent while it is on so it shows through, and stay blurred so
+   text and charts remain readable. */
+:root { --wall-o: .64; }
+:root[data-theme="light"] { --wall-o: .46; }
+.bgfx .wall {
+  position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity .45s ease;
+  background: var(--wall, none) 58% 28% / cover no-repeat;
+}
+:root[data-wall="on"] .wall { opacity: var(--wall-o); }
+:root[data-theme="dark"][data-wall="on"] { --panel: rgba(13, 19, 36, .54); --panel-hi: rgba(26, 36, 64, .78); }
+:root[data-theme="light"][data-wall="on"] { --panel: rgba(255, 255, 255, .68); }
+.iconbtn[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+/* things that normally sit directly on the page background get their own frosted backing while the image is on */
+:root[data-wall="on"] .top {
+  padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--bg) 60%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+:root[data-wall="on"] .banner { backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+:root[data-wall="on"] .banner.warn { background: linear-gradient(var(--amber-bg), var(--amber-bg)), color-mix(in srgb, var(--bg) 72%, transparent); }
+:root[data-wall="on"] .banner.bad { background: linear-gradient(var(--loss-bg), var(--loss-bg)), color-mix(in srgb, var(--bg) 72%, transparent); }
+
 /* ---------- layout ---------- */
 .app { display: grid; grid-template-columns: 84px minmax(0, 1fr); min-height: 100vh; }
 .rail {

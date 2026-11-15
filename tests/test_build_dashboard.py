@@ -500,7 +500,9 @@ class RenderTests(unittest.TestCase):
         data_block = html.split("window.__DASH__ = ", 1)[1].split(";</script>", 1)[0]
         self.assertNotIn("</", data_block)
         self.assertIn("<\\/script>", data_block)
-        self.assertNotIn("NaN", data_block)
+        import re
+        # no bare NaN value (a plain substring test would trip on base64 text such as an embedded wallpaper)
+        self.assertIsNone(re.search(r"[:,\[]NaN[,\]}]", data_block))
         # the embedded JSON round-trips
         parsed = json.loads(data_block.replace("<\\/", "</"))
         self.assertEqual(parsed["scopes"]["season"]["summary"]["w"], 3)
@@ -640,6 +642,100 @@ class LogoEmbedTests(unittest.TestCase):
         for abbr, uri in logos.items():
             with self.subTest(abbr):
                 self.assertTrue(uri.startswith("data:image/svg+xml;base64,"))
+
+
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+WEBP_BYTES = b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 16
+
+
+class WallpaperTests(unittest.TestCase):
+    """The optional page wallpaper is embedded byte for byte, and only if it is really an image."""
+
+    def _load(self, name, data):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / name).write_bytes(data)
+            return bd.load_wallpaper(d)
+
+    def test_no_wallpaper_file_is_fine_and_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(bd.load_wallpaper(Path(td)), (None, None))
+
+    def test_valid_images_are_embedded_byte_for_byte_with_the_mime_from_their_magic_bytes(self):
+        import base64
+        for name, data, mime in (("wallpaper.jpg", JPEG_BYTES, "image/jpeg"), ("wallpaper.png", PNG_BYTES, "image/png"),
+                                 ("wallpaper.webp", WEBP_BYTES, "image/webp")):
+            with self.subTest(name):
+                uri, problem = self._load(name, data)
+                self.assertIsNone(problem)
+                prefix = f"data:{mime};base64,"
+                self.assertTrue(uri.startswith(prefix))
+                self.assertEqual(base64.b64decode(uri[len(prefix):]), data)
+
+    def test_a_file_that_is_not_an_image_is_rejected_whatever_its_extension(self):
+        uri, problem = self._load("wallpaper.jpg", b"<html><script>alert(1)</script></html>")
+        self.assertIsNone(uri)
+        self.assertIn("not a JPEG, PNG or WebP", problem)
+        self.assertIn("no wallpaper", problem)
+
+    def test_empty_and_oversized_files_are_rejected(self):
+        for label, data in {"empty": b"", "oversized": JPEG_BYTES + b"\x00" * bd.MAX_WALLPAPER_BYTES}.items():
+            with self.subTest(label):
+                uri, problem = self._load("wallpaper.jpg", data)
+                self.assertIsNone(uri)
+                self.assertIn("outside 1..", problem)
+
+    def test_payload_carries_the_wallpaper_and_a_bad_one_becomes_a_warning(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, assets = Path(td) / "proj", Path(td) / "assets"
+            assets.mkdir()
+            make_project(root)
+            (assets / "wallpaper.jpg").write_bytes(JPEG_BYTES)
+            good = bd.build_payload(root, now=NOW, wallpaper_dir=assets)
+            (assets / "wallpaper.jpg").write_bytes(b"not an image")
+            bad = bd.build_payload(root, now=NOW, wallpaper_dir=assets)
+            none = bd.build_payload(root, now=NOW, wallpaper_dir=Path(td) / "empty")
+        self.assertTrue(good["wallpaper"].startswith("data:image/jpeg;base64,"))
+        self.assertFalse(any("wallpaper" in w for w in good["meta"]["warnings"]))
+        self.assertIsNone(bad["wallpaper"])
+        self.assertTrue(any("wallpaper" in w and "not a JPEG" in w for w in bad["meta"]["warnings"]))   # loud, not silent
+        self.assertIsNone(none["wallpaper"])
+        self.assertFalse(any("wallpaper" in w for w in none["meta"]["warnings"]))                       # optional: absence is fine
+
+    def test_embedded_wallpaper_survives_rendering_and_adds_no_external_host(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, assets = Path(td) / "proj", Path(td) / "assets"
+            assets.mkdir()
+            make_project(root)
+            (assets / "wallpaper.png").write_bytes(PNG_BYTES)
+            payload = bd.build_payload(root, now=NOW, wallpaper_dir=assets)
+            html = bd.render_html(payload)
+        data_block = html.split("window.__DASH__ = ", 1)[1].split(";</script>", 1)[0]
+        self.assertEqual(json.loads(data_block.replace("<\\/", "</"))["wallpaper"], payload["wallpaper"])
+        body = html.split("<body>", 1)[1].split("<script>", 1)[0]
+        self.assertNotIn("<img", body)                                      # the page markup loads nothing: a CSS layer + data URI
+        self.assertNotIn("http", body)
+
+    def test_the_committed_wallpaper_is_valid(self):
+        uri, problem = bd.load_wallpaper()                                  # the real assets folder (the file is optional)
+        self.assertIsNone(problem)
+        if uri is not None:
+            self.assertRegex(uri, r"^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$")
+
+    def test_front_end_only_injects_a_plain_image_data_uri_and_leaves_the_page_unchanged_when_off(self):
+        import re
+        src = {p.name: p.read_text(encoding="utf-8") for p in Path(bd.ASSET_DIR).iterdir() if p.suffix in (".js", ".css", ".html")}
+        app, css = src["app.js"], src["style.css"]
+        self.assertIn(r"/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/", app)   # nothing else is ever injected
+        self.assertIn('class="bgfx" aria-hidden="true"><div class="wall"></div>', src["template.html"])
+        self.assertIn('aria-pressed="${wallOn}"', app)
+        # every panel override lives behind [data-wall="on"], so switching it off restores the original look exactly
+        block = css.split("optional wallpaper", 1)[1].split("/* ---------- layout", 1)[0]
+        for line in block.splitlines():
+            if "--panel:" in line or "--panel-hi:" in line:
+                self.assertIn('[data-wall="on"]', line, line)
+        self.assertEqual(len(re.findall(r"^\.bgfx \.wall \{", css, re.M)), 1)
 
 
 class FailureTests(unittest.TestCase):
