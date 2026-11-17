@@ -59,3 +59,6 @@ street-bit-font/
 scripts/dashboard_publish.local.json
 # wrangler's local cache (holds the Cloudflare account id and project name)
 .wrangler/
+
+# Pre-change copies of the line store are 140+ MB and GitHub rejects any file over 100 MB: keep them on disk only.
+output/backups/*/historical_lines.csv
