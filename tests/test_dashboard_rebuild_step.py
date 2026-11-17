@@ -24,8 +24,7 @@ def _script_text() -> str:
 
 def _function_text() -> str:
     """Invoke-DashboardRebuild exactly as it appears in the script."""
-    body = _script_text().split("function Invoke-DashboardRebuild", 1)[1].split("\nswitch ($Action)", 1)[0]
-    return "function Invoke-DashboardRebuild" + body
+    return _block("Invoke-DashboardRebuild")      # just this function: Invoke-DashboardPublish follows it (DEC-100)
 
 
 def _block(name: str) -> str:

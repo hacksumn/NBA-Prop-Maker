@@ -44,21 +44,21 @@
     "minutes_label": "box-score mp if available, otherwise 0"
   },
   "data_quality": {
-    "source_rows": 85497,
+    "source_rows": 85683,
     "source_player_game_duplicates": 0,
     "source_date_min": "2023-10-24",
-    "source_date_max": "2026-11-15",
+    "source_date_max": "2026-11-16",
     "source_seasons": [
       "2023-24",
       "2024-25",
       "2025-26",
       "2026-27"
     ],
-    "candidate_rows": 102088,
-    "candidate_unique_dates": 530,
-    "candidate_unique_players": 805,
+    "candidate_rows": 102302,
+    "candidate_unique_dates": 531,
+    "candidate_unique_players": 807,
     "candidate_duplicate_keys": 0,
-    "candidate_availability_rate": 0.7321428571428571,
+    "candidate_availability_rate": 0.7322535238802761,
     "candidate_feature_null_cells": 0,
     "development_rows": 62773,
     "holdout_rows": 35444,
@@ -90,18 +90,18 @@
       },
       {
         "season": "2026-27",
-        "rows": 3871,
-        "unique_dates": 22,
+        "rows": 4085,
+        "unique_dates": 23,
         "start_date": "2026-10-24",
-        "end_date": "2026-11-15"
+        "end_date": "2026-11-16"
       }
     ],
-    "forward_rows": 3871,
+    "forward_rows": 4085,
     "forward_start": "2026-10-24",
-    "forward_end": "2026-11-15",
-    "oof_rows": 78836,
+    "forward_end": "2026-11-16",
+    "oof_rows": 79050,
     "oof_start": "2024-03-08",
-    "oof_end": "2026-11-15",
+    "oof_end": "2026-11-16",
     "oof_same_or_future_train_dates": 0
   },
   "validation_gate": {
@@ -160,33 +160,33 @@
     "expected_mae_improvement": 0.9834490699683274
   },
   "forward_current_season": {
-    "availability_brier": 0.09003440924363222,
-    "availability_log_loss": 0.30671444409992416,
-    "availability_auc": 0.8533323312153956,
-    "availability_accuracy": 0.8824593128390597,
-    "unavailable_average_precision": 0.6415952981384594,
-    "unavailable_precision_at_050": 0.7025862068965517,
-    "unavailable_recall_at_050": 0.5069984447900466,
-    "conditional_minutes_mae": 4.682299949923739,
-    "conditional_minutes_rmse": 6.124850878957973,
-    "conditional_baseline_mae": 4.865856051218505,
-    "expected_minutes_mae": 6.169219318470081,
-    "expected_minutes_rmse": 8.585389600135557,
-    "expected_baseline_mae": 6.791010534171475,
-    "expected_baseline_rmse": 9.292644791061978,
-    "expected_last_status_baseline_mae": 6.2298760010333245,
-    "expected_last_status_baseline_rmse": 9.48846339880314,
-    "strongest_expected_baseline_mae": 6.2298760010333245,
-    "strongest_expected_baseline_rmse": 9.292644791061978,
-    "hard_gated_minutes_mae": 5.976175145255953,
-    "hard_gated_minutes_rmse": 9.167817791782014,
-    "hard_gated_mae_improvement": 0.2537008557773719,
-    "soft_expected_rmse_improvement": 0.7072551909264213,
-    "conditional_within_3": 0.41263940520446096,
-    "conditional_within_5": 0.6285625774473358
+    "availability_brier": 0.09021090794990975,
+    "availability_log_loss": 0.30685771297337444,
+    "availability_auc": 0.8565917214993819,
+    "availability_accuracy": 0.8817625458996328,
+    "unavailable_average_precision": 0.6501184960611331,
+    "unavailable_precision_at_050": 0.7068273092369478,
+    "unavailable_recall_at_050": 0.5108853410740203,
+    "conditional_minutes_mae": 4.656592190082374,
+    "conditional_minutes_rmse": 6.09701191312519,
+    "conditional_baseline_mae": 4.848081075775422,
+    "expected_minutes_mae": 6.136861170216793,
+    "expected_minutes_rmse": 8.534410127659505,
+    "expected_baseline_mae": 6.783322208622331,
+    "expected_baseline_rmse": 9.273429920058012,
+    "expected_last_status_baseline_mae": 6.217413300693594,
+    "expected_last_status_baseline_rmse": 9.499791353904245,
+    "strongest_expected_baseline_mae": 6.217413300693594,
+    "strongest_expected_baseline_rmse": 9.273429920058012,
+    "hard_gated_minutes_mae": 5.9365337411859604,
+    "hard_gated_minutes_rmse": 9.123614384297905,
+    "hard_gated_mae_improvement": 0.28087955950763366,
+    "soft_expected_rmse_improvement": 0.7390197923985067,
+    "conditional_within_3": 0.41489988221436985,
+    "conditional_within_5": 0.6301531213191991
   },
   "source": {
     "path": "data/nba_data.csv",
-    "sha256": "92699010dd0b69bf8d65053d809034c1721a945a74ec2a35cbc7efb7745740a6"
+    "sha256": "04fa2a586b8f1c0926a890b8ac3a87a7479755b763ac3343ad7a95f49883db0e"
   }
 }

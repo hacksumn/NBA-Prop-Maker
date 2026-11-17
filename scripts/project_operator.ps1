@@ -211,6 +211,113 @@ function Invoke-DashboardRebuild {
     }
 }
 
+# Upload the page rebuilt above to Cloudflare Pages so the shared link stays current (DEC-100).
+# Opt-in (scripts\dashboard_publish.local.json, "enabled": true) and informational only, so by design it:
+#   - never throws and never changes the result of the action it runs after;
+#   - is NOT part of Preflight / Assert-RequiredFiles and is NOT routed through Invoke-PythonStep;
+#   - uploads only a throwaway copy of output\dashboard_pro.html (plus noindex headers), never the project folder;
+#   - refuses to upload a page that was not rebuilt in this run, so a failed rebuild cannot re-publish old data
+#     as if it were new (the hosted page also shows its own age and an "Out of date" banner after 26 hours);
+#   - is time-limited and says plainly in the log when the hosted page was NOT updated.
+# Credentials are Cloudflare's own: the `wrangler login` session, or CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+# at user scope. They are never read into the log.
+function Invoke-DashboardPublish {
+    param([int]$TimeoutSeconds = 180, [int]$MaxPageAgeMinutes = 30)
+    $label = '[Dashboard publish]'
+    $stdoutPath = $null
+    $stderrPath = $null
+    $stageDir = $null
+    $savedEnv = @{}
+    try {
+        $configPath = Join-Path $ProjectRoot 'scripts\dashboard_publish.local.json'
+        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+            Write-Host "$label SKIPPED: $configPath not found; the hosted dashboard was NOT updated." -ForegroundColor Yellow
+            return
+        }
+        $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
+        # Strict: PowerShell's -ne would treat the strings "true"/"yes" and the number 1 as enabled.
+        if (($config.enabled -isnot [bool]) -or ($config.enabled -ne $true)) {
+            Write-Host "$label SKIPPED: not enabled in scripts\dashboard_publish.local.json; the hosted dashboard was NOT updated." -ForegroundColor Yellow
+            return
+        }
+        $project = [string]$config.project
+        $branch = [string]$config.branch
+        if ($project -notmatch '^[a-z0-9][a-z0-9-]{1,56}[a-z0-9]$' -or $branch -notmatch '^[A-Za-z0-9._-]{1,64}$') {
+            Write-Host "$label FAILED: scripts\dashboard_publish.local.json has an invalid project or branch name; the hosted dashboard was NOT updated." -ForegroundColor Yellow
+            return
+        }
+        $page = Join-Path $ProjectRoot 'output\dashboard_pro.html'
+        if (-not (Test-Path -LiteralPath $page -PathType Leaf)) {
+            Write-Host "$label SKIPPED: $page not found; the hosted dashboard was NOT updated." -ForegroundColor Yellow
+            return
+        }
+        $ageMinutes = ((Get-Date) - (Get-Item -LiteralPath $page).LastWriteTime).TotalMinutes
+        if ($ageMinutes -gt $MaxPageAgeMinutes) {
+            Write-Host ("$label SKIPPED: output\dashboard_pro.html is {0:N0} minutes old, so it was not rebuilt in this run; the hosted dashboard was NOT updated." -f $ageMinutes) -ForegroundColor Yellow
+            return
+        }
+        $npx = (Get-Command npx.cmd -ErrorAction Stop).Source
+        # Same pattern as ODDS_API_KEY: a scheduled task may not carry the persisted user-level values.
+        foreach ($name in @('CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID')) {
+            $persisted = [Environment]::GetEnvironmentVariable($name, 'User')
+            if (-not [string]::IsNullOrWhiteSpace($persisted) -and -not (Test-Path -LiteralPath "Env:$name")) {
+                $savedEnv[$name] = $null
+                Set-Item -LiteralPath "Env:$name" -Value $persisted
+            }
+        }
+        foreach ($pair in @(@('CI', 'true'), @('WRANGLER_SEND_METRICS', 'false'))) {
+            $savedEnv[$pair[0]] = [Environment]::GetEnvironmentVariable($pair[0], 'Process')
+            Set-Item -LiteralPath ("Env:" + $pair[0]) -Value $pair[1]
+        }
+        $stageDir = Join-Path ([IO.Path]::GetTempPath()) ('dash_site_' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $stageDir -ErrorAction Stop
+        Copy-Item -LiteralPath $page -Destination (Join-Path $stageDir 'index.html') -ErrorAction Stop
+        Set-Content -LiteralPath (Join-Path $stageDir '_headers') -Encoding ASCII -Value @(
+            '/*', '  X-Robots-Tag: noindex, nofollow, noarchive', '  Referrer-Policy: no-referrer', '  X-Content-Type-Options: nosniff')
+        Set-Content -LiteralPath (Join-Path $stageDir 'robots.txt') -Encoding ASCII -Value @('User-agent: *', 'Disallow: /')
+        $stdoutPath = [IO.Path]::GetTempFileName()
+        $stderrPath = [IO.Path]::GetTempFileName()
+        $message = 'dashboard refresh ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')
+        # Run from the throwaway folder so wrangler never reads this project's git history or config.
+        $process = Start-Process -FilePath $npx -WorkingDirectory $stageDir -NoNewWindow -PassThru `
+            -ArgumentList @('--yes', 'wrangler@4.164.0', 'pages', 'deploy', '.', '--project-name', $project, '--branch', $branch,
+                            '--commit-message', "`"$message`"", '--commit-dirty=true') `
+            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $null = $process.Handle   # keep the handle so ExitCode is readable after WaitForExit
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { & taskkill.exe /PID $process.Id /T /F *> $null } catch { }
+            Write-Host "$label FAILED: no result after $TimeoutSeconds s, so it was stopped; the hosted dashboard was NOT updated." -ForegroundColor Yellow
+            return
+        }
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            foreach ($line in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
+                if ($line -and $line.Trim()) { Write-Host "$label $line" }
+            }
+        }
+        if ($exitCode -eq 0) {
+            Write-Host "$label OK: hosted dashboard updated ($project, branch $branch)." -ForegroundColor Green
+        }
+        else {
+            Write-Host "$label FAILED with exit code $exitCode; the hosted dashboard was NOT updated and will show its age." -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "$label FAILED: $($_.Exception.Message); the hosted dashboard was NOT updated." -ForegroundColor Yellow
+    }
+    finally {
+        foreach ($name in $savedEnv.Keys) {
+            if ($null -eq $savedEnv[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+            else { Set-Item -LiteralPath "Env:$name" -Value $savedEnv[$name] }
+        }
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            if ($path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+        }
+        if ($stageDir) { Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 switch ($Action) {
     'Preflight' {
         Show-Preflight
@@ -338,6 +445,8 @@ switch ($Action) {
             # Runs even when a step above failed, so the page's Health view shows the failure. It cannot
             # throw, so it can never mask the real error or turn a failed run into a passing one (DEC-088).
             Invoke-DashboardRebuild
+            # Opt-in upload of the page just rebuilt; same guarantees: it cannot throw (DEC-100).
+            Invoke-DashboardPublish
         }
     }
     'PicksNow' {

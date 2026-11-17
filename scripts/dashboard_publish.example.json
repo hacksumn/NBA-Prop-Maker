@@ -1,0 +1,5 @@
+{
+  "enabled": false,
+  "project": "your-cloudflare-project-name",
+  "branch": "main"
+}

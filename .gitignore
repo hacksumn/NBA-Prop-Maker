@@ -53,3 +53,9 @@ street-bit-font/
 
 # Compressed immutable local pipeline artifact versions
 .retained_versions/
+
+# Hosted-dashboard upload settings. Holds the unguessable public project name of a PUBLIC link, so it must
+# never be committed or pushed (a template is tracked as dashboard_publish.example.json) (DEC-100).
+scripts/dashboard_publish.local.json
+# wrangler's local cache (holds the Cloudflare account id and project name)
+.wrangler/
