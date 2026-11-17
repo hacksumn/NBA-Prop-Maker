@@ -742,7 +742,7 @@
   function logoSvg() { return '<svg viewBox="0 0 32 32" fill="none" stroke="url(#lg)" stroke-width="2" stroke-linecap="round"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#9d8cff"/></linearGradient></defs><circle cx="16" cy="16" r="11"/><path d="M5 16h22M16 5v22M8 8c5 4 5 12 0 16M24 8c-5 4-5 12 0 16"/></svg>'; }
   function renderShell() {
     const flagBad = (HEALTH.flags || []).length || ((HEALTH.pipeline || {}).last_run || {}).err;
-    $('#rail').innerHTML = `${defs3d()}<div class="logo" title="Fresh Start NBA">${logoSvg()}</div><nav class="nav">${VIEWS.map((v, i) => `<button data-view="${v.id}" title="${v.label}">${icon3d(v.icon, i)}<span class="flat" aria-hidden="true">${svgi(v.icon)}</span><span>${v.label}</span>${v.id === 'health' && flagBad ? '<i class="badge-dot"></i>' : ''}</button>`).join('')}</nav><div class="spacer"></div>`;
+    $('#rail').innerHTML = `${defs3d()}<div class="logo" title="Jake's NBA Dashboard">${logoSvg()}</div><nav class="nav">${VIEWS.map((v, i) => `<button data-view="${v.id}" title="${v.label}">${icon3d(v.icon, i)}<span class="flat" aria-hidden="true">${svgi(v.icon)}</span><span>${v.label}</span>${v.id === 'health' && flagBad ? '<i class="badge-dot"></i>' : ''}</button>`).join('')}</nav><div class="spacer"></div>`;
     // the icon tilts toward the pointer (skipped when the OS asks for reduced motion)
     if (!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
       $$('.nav button', $('#rail')).forEach((b) => {
@@ -763,7 +763,7 @@
     const builtAt = meta.generated_at ? new Date(meta.generated_at) : null;
     const ageH = builtAt && !isNaN(builtAt.getTime()) ? Math.max(0, (Date.now() - builtAt.getTime()) / 36e5) : null;
     const ageTxt = ageH == null ? '' : ageH < 1 ? 'under 1 hour ago' : ageH < 48 ? Math.round(ageH) + ' hours ago' : Math.floor(ageH / 24) + ' days ago';
-    $('#top').innerHTML = `<div><h1><span class="grad">Fresh Start NBA</span> · Command Center</h1><div class="sub">Built ${esc((meta.generated_at || '').replace('T', ' '))}${ageTxt ? ' (' + ageTxt + ')' : ''} ·${F.n(meta.total_picks)} picks logged ${esc(F.dateY(meta.first_pick))} → ${esc(F.dateY(meta.last_pick))}${meta.git && meta.git.commit ? ' · ' + esc(meta.git.branch) + '@' + esc(meta.git.commit) : ''}</div></div><div class="grow"></div>
+    $('#top').innerHTML = `<div><h1><span class="grad">Jake's NBA</span> Dashboard</h1><div class="sub">Built ${esc((meta.generated_at || '').replace('T', ' '))}${ageTxt ? ' (' + ageTxt + ')' : ''} ·${F.n(meta.total_picks)} picks logged ${esc(F.dateY(meta.first_pick))} → ${esc(F.dateY(meta.last_pick))}${meta.git && meta.git.commit ? ' · ' + esc(meta.git.branch) + '@' + esc(meta.git.commit) : ''}</div></div><div class="grow"></div>
       <div id="scopeseg">${seg('scope', [['season', '2026-27 season'], ['live', 'All live'], ['all', 'Everything']], state.scope)}</div>
       <span class="chip ${TODAY.pending ? 'info pulse' : 'win'}"><i class="pip"></i>${TODAY.pending ? TODAY.pending + ' picks live' : 'card settled'}</span>
       ${WALL ? `<button class="iconbtn" id="wallbtn" title="Show or hide the wallpaper" aria-label="Show or hide the wallpaper" aria-pressed="${wallOn}">${svgi('image')}</button>` : ''}

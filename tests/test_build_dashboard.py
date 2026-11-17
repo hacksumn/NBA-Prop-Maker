@@ -522,6 +522,20 @@ class AssetContractTests(unittest.TestCase):
                 return css[start:j + 1]
         raise AssertionError("unbalanced CSS")
 
+    def test_the_tool_is_titled_jakes_nba_dashboard_everywhere_it_shows(self):
+        src = self._source()
+        self.assertIn("<title>Jake's NBA Dashboard</title>", src["template.html"])             # browser tab
+        app = src["app.js"]
+        self.assertIn('<h1><span class="grad">Jake\'s NBA</span> Dashboard</h1>', app)         # page header
+        self.assertIn('<div class="logo" title="Jake\'s NBA Dashboard">', app)                  # menu logo tooltip
+        for name in ("template.html", "app.js"):
+            self.assertNotIn("Fresh Start NBA", src[name], name)                                # old name gone from what users see
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_project(root)
+            html = bd.render_html(bd.build_payload(root, now=NOW))
+        self.assertIn("<title>Jake's NBA Dashboard</title>", html)
+
     def test_every_menu_section_has_a_complete_3d_icon(self):
         import re
         app = self._source()["app.js"]

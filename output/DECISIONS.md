@@ -4391,3 +4391,46 @@ Following DEC-094, Jake instructed "ok then proceed". Removed exactly CSV line 3
 The operation used artifact_lock and an atomic temporary-file replacement. Complete original bytes were retained under .retained_versions/objects and verified by decompression and SHA-256. Every surviving cell and column was compared to the original. The audit receipt is output/orphan_betslip_removal_2026-11-15.json and includes the removed row, original object path, before/after file hashes, counts and user authorization.
 
 Active history changed from 269 to 268 rows. It now contains 133 WIN, 128 LOSS, 5 PUSH and 2 pending records. Duplicate slip labels remain a separate investigation. The earlier archive scan found no source for this malformed row. The dashboard was rebuilt with zero warnings, and its orphan count is zero. Verification used exact data comparisons and the existing dashboard payload tests. STATUS.md and TASKS.md record completion.
+
+
+## 2026-11-15 - DEC-096 - Apply verified corrections to the five grade conflicts
+
+Jake requested execution of the grade reconciliation correction. Verified three final games using ESPN summaries 401810916, 401909944 and 401909958. The March 25 Clingan 14 points and November 7 Wembanyama 2 blocks were additionally corroborated by the NBA official scorer reports. NBA live JSON endpoints returned 403, and the November 9 NBA PDF was unavailable, so the November 9 final count was verified from the ESPN box score. All three external counts agree with the current local box-score dataset.
+
+Applied exactly five cell changes across five rows. Donovan Clingan, March 25, PTS OVER 14.0, actual 14.0, changes LOSS to PUSH in picks_history.csv. Victor Wembanyama, November 7, BLK UNDER 3.5, changes actual 1 to 2 in picks_history.csv and candidates_history.csv. November 9 BLK UNDER 3.5 changes actual 9 to 8 in both files. Those four stat corrections keep their existing outcomes and candidate profit values. The earlier dashboard wording about a W/L flip referred to the Clingan LOSS-to-PUSH correction.
+
+History files were locked, complete original bytes retained and verified by decompression and SHA-256, and replacements staged and verified before atomic publication. The audit receipt output/grade_corrections_2026-11-15.json stores before/after cell values, source evidence and hashes, correction timestamp and source file hashes. Row counts, column order and every other cell were verified against the originals. The initial grading timestamps remain evidence of when the original grades were written; the audit records the correction time.
+
+Refreshed scripts/reconcile_grade_evidence.py. It checked 1,814 settled history rows and reports zero current conflicts and zero outcome conflicts. Immutable earlier conflict observations remain retained in output/grade_reconciliation. Current grading already explicitly handles exact-line ties as PUSH. Wembanyama's old values were preserved initial observations that needed reconciliation after final-stat changes, and the corrective operation is audited explicitly.
+
+Verification includes exact five-cell comparison, external-final-stat checks, retained original verification, existing reconciliation/dashboard tests, zero-conflict recomputation, and dashboard rebuild. STATUS.md and TASKS.md record completion.
+
+
+## 2026-11-15 - DEC-097 - Verify the screenshot's last pipeline error
+
+Jake requested proceeding with the last screenshot issue. The run starting 09:15:20 failed its Step 8.5 production-bundle guard at 09:33:24 because the separate 09:30 TrainingRefresh changed availability_minutes_model.pkl. DEC-092 already implements the correction in the active code, using atomic model publication and matching training receipts for the two legitimately owned files. Unexplained changes, missing receipts, stale receipts, own-context writes and non-owned artifacts continue to fail the guard.
+
+Repeated python -m pytest tests/test_atomic_writes_and_training_guard.py -q, with 20 passed. Ran scripts/project_operator.ps1 -Action Preflight, exit 0, with syntax and dependency checks passing and 56 protected production artifacts hashed.
+
+The five WARNING entries in the historical run are two luck-layer messages, one no-betslips message and two pipeline failure-summary entries. Luck MIN_GP is 15 and current 2026-27 data has at most 14 appearances per player, so neutralizing that layer follows its existing contract. The no-slip message follows the eligible card. These warnings provide operating status.
+
+No new pipeline code change was necessary in this step. The failed historical log remains intact and the dashboard continues to report that run as failed. No subsequent production TrainingRefresh receipt is available yet. The existing DEC-092 task retains explicit verification of a real receipt and a real overlapping full run. Test success is recorded separately from that pending production confirmation. STATUS.md and TASKS.md now record the screenshot investigation.
+
+
+## 2026-11-16 — DEC-098 — Dashboard renamed "Jake's NBA Dashboard"; first scheduled rebuild verified; push blocked by a 138 MB file
+
+**Context:** Jake asked to retitle the tool "Jake's NBA Dashboard". Earlier in the same session Jake asked to push the commits.
+
+**Decision (rename):** the name now shows in the browser tab (`<title>`), the page header (gradient on "Jake's NBA", plain "Dashboard") and the menu logo tooltip, plus the README heading. The old name no longer appears anywhere in the visible text. Code comments and docstrings, and every earlier entry in this file, still say "Command Center": those are history and internal labels, left as they are.
+
+**Verified (closes the open DEC-088 check):** the 2026-11-16 07:30 `FreshStartNBA-DailySafe` run logged `[Dashboard rebuild] [dashboard] wrote …\output\dashboard_pro.html (1816 KB)` and `[Dashboard rebuild] OK`, then `COMPLETE DailySafe` at 07:52:03; the page was stamped 07:51:58. Note: `logs/scheduled_dailysafe.log` mixes two encodings (the wrapper's START/COMPLETE lines are ASCII; the teed pipeline output is UTF-16), so an ordinary text search misses the teed lines; read them as UTF-16.
+
+**Push check (nothing was pushed):**
+- `origin` (https://github.com/hacksumn/NBA-Prop-Maker) is **public** and has only `master` (26c9d3b); `fix/dec-078-082-review-fixes` has no upstream, so a push creates a new remote branch with 14 commits (about 179 MB compressed). Two of those commits (DEC-091..095) were made by another session and would be published too.
+- **Blocker:** `output/backups/before_append_only_20261105_041553/historical_lines.csv` is 138.2 MB (added in commit 1b4012c "Update 11/5/26"). GitHub rejects any file over 100 MB, so the whole push would fail. Five candidate CSVs of 64–92 MB (`models/weekly_candidates/*/probability_oof_advanced.csv`) would only draw warnings.
+- A scan of the added lines found no API-key, token or password patterns; no secret-like file names are tracked.
+- Fixing the blocker means rewriting history (Git LFS migration, or removing the file from history) or keeping the branch local. That is Jake's decision (DEC-070); see TASKS.md.
+
+**Verification:** `tests/test_build_dashboard.py` gained a test pinning the title in the template, the header, the logo tooltip and the rendered page (it fails when the old header text is restored). Full suite `python -m pytest -q`: 363 passed. In the in-app browser the tab title, header, tooltip and visible text were checked on the rebuilt page.
+
+**Impact:** Reporting only. No pick, gate, model, schema, history, scheduler or `run_daily.py` change; `output/dashboard_pro.html` was rebuilt.

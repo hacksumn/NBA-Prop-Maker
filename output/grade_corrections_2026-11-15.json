@@ -1,0 +1,140 @@
+{
+  "status": "complete",
+  "corrected_at": "2026-11-15T19:27:49.082342+00:00",
+  "authorization": "Verify and correct the grade reconciliation discrepancies, per user instruction.",
+  "source_evidence": [
+    {
+      "date": "2026-03-25",
+      "player": "Donovan Clingan",
+      "stat": "PTS",
+      "actual": 14.0,
+      "source_url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401810916",
+      "event_final": true,
+      "response_sha256": "2210d0d92a41df1585b9a6eb2132a3de028ccd857935b60c5e402090e4362972"
+    },
+    {
+      "date": "2026-11-07",
+      "player": "Victor Wembanyama",
+      "stat": "BLK",
+      "actual": 2.0,
+      "source_url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909944",
+      "event_final": true,
+      "response_sha256": "e36b6a5b89cb3b101d4ed66886fbec6144238addbd9879a4bb7516696bbe2570"
+    },
+    {
+      "date": "2026-11-09",
+      "player": "Victor Wembanyama",
+      "stat": "BLK",
+      "actual": 8.0,
+      "source_url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909958",
+      "event_final": true,
+      "response_sha256": "859479a8fb0c1efdb27e0754d06958f7aaabf95244a92a95f142631f348a5082"
+    }
+  ],
+  "changes": [
+    {
+      "file": "picks_history.csv",
+      "csv_line": 995,
+      "key": {
+        "game_date": "2026-03-25",
+        "player": "Donovan Clingan",
+        "prop": "PTS",
+        "direction": "OVER",
+        "line": 14.0
+      },
+      "before": {
+        "actual": "14.0",
+        "result": "LOSS"
+      },
+      "after": {
+        "actual": "14.0",
+        "result": "PUSH"
+      }
+    },
+    {
+      "file": "picks_history.csv",
+      "csv_line": 1631,
+      "key": {
+        "game_date": "2026-11-07",
+        "player": "Victor Wembanyama",
+        "prop": "BLK",
+        "direction": "UNDER",
+        "line": 3.5
+      },
+      "before": {
+        "actual": "1.0",
+        "result": "WIN"
+      },
+      "after": {
+        "actual": "2.0",
+        "result": "WIN"
+      }
+    },
+    {
+      "file": "picks_history.csv",
+      "csv_line": 1654,
+      "key": {
+        "game_date": "2026-11-09",
+        "player": "Victor Wembanyama",
+        "prop": "BLK",
+        "direction": "UNDER",
+        "line": 3.5
+      },
+      "before": {
+        "actual": "9.0",
+        "result": "LOSS"
+      },
+      "after": {
+        "actual": "8.0",
+        "result": "LOSS"
+      }
+    },
+    {
+      "file": "candidates_history.csv",
+      "csv_line": 40,
+      "key": {
+        "game_date": "2026-11-07",
+        "player": "Victor Wembanyama",
+        "prop": "BLK",
+        "direction": "UNDER",
+        "line": 3.5
+      },
+      "before": {
+        "actual": "1",
+        "result": "WIN"
+      },
+      "after": {
+        "actual": "2.0",
+        "result": "WIN"
+      }
+    },
+    {
+      "file": "candidates_history.csv",
+      "csv_line": 89,
+      "key": {
+        "game_date": "2026-11-09",
+        "player": "Victor Wembanyama",
+        "prop": "BLK",
+        "direction": "UNDER",
+        "line": 3.5
+      },
+      "before": {
+        "actual": "9",
+        "result": "LOSS"
+      },
+      "after": {
+        "actual": "8.0",
+        "result": "LOSS"
+      }
+    }
+  ],
+  "before_sha256": {
+    "picks_history.csv": "e904f23f688e94ab31001afca2efeca26a68618788a459f6c6594da78a19d371",
+    "candidates_history.csv": "abcb115ea24c0c5c73958e64178ace65f597ec5fd1daa1adcb55c76c72603b66"
+  },
+  "retention_directory": ".retained_versions/objects",
+  "after_sha256": {
+    "picks_history.csv": "0a9402a7946be6ff1162d0ec91b377683e77b6358de3c686762fa32679e94d51",
+    "candidates_history.csv": "7a6fbcdf769b0ed8b5e4e1dd0d9b492473656d35e7b39d06faef491856b7bc4b"
+  }
+}

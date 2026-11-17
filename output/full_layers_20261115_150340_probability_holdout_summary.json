@@ -1,0 +1,164 @@
+{
+  "method": "chronological_calibration_fit_then_latest_date_holdout",
+  "oof_path": "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\models\\weekly_candidates\\full_layers_20261115_150340\\probability_oof_advanced.csv",
+  "oof_sha256": "924c8023abd60e54d8c3a6fb645fc9312307928bb6e5faeef883340a2ca422ee",
+  "development": {
+    "date_min": "2026-02-19",
+    "date_max": "2026-05-15",
+    "dates": 82
+  },
+  "holdout": {
+    "date_min": "2026-05-17",
+    "date_max": "2026-11-14",
+    "dates": 20
+  },
+  "declared_floors": {
+    "ast": 0.6,
+    "blk": 0.7,
+    "stl": 0.7,
+    "trb": 0.55,
+    "tov": 0.55
+  },
+  "production_lanes": [
+    "ast",
+    "blk",
+    "stl"
+  ],
+  "scope_caveat": "These are frozen real-line OOF rows, not a new unseen NBA season and not a PrizePicks-standard-only closing-line panel. The test supports ranking and abstention policy; it is not a guaranteed future win-rate claim.",
+  "results": {
+    "development": {
+      "production_lanes_combined": {
+        "n": 234,
+        "dates": 82,
+        "hit_rate": 0.811965811965812,
+        "matched_random_under_rate": 0.6445311661246201,
+        "lift": 0.16743464584119178,
+        "lift_ci95_low": 0.11991332112599529,
+        "lift_ci95_high": 0.21495597055638827
+      },
+      "all_declared_lanes_combined": {
+        "n": 367,
+        "dates": 82,
+        "hit_rate": 0.7683923705722071,
+        "matched_random_under_rate": 0.6032178073482317,
+        "lift": 0.1651745632239754,
+        "lift_ci95_low": 0.1237028971419741,
+        "lift_ci95_high": 0.20664622930597668
+      },
+      "per_target": {
+        "ast": {
+          "n": 82,
+          "dates": 82,
+          "hit_rate": 0.6829268292682927,
+          "matched_random_under_rate": 0.5769595349212481,
+          "lift": 0.10596729434704467,
+          "lift_ci95_low": 0.008655572922730517,
+          "lift_ci95_high": 0.20327901577135882
+        },
+        "blk": {
+          "n": 80,
+          "dates": 80,
+          "hit_rate": 0.9125,
+          "matched_random_under_rate": 0.6906559717072538,
+          "lift": 0.2218440282927463,
+          "lift_ci95_low": 0.1584153013810115,
+          "lift_ci95_high": 0.2852727552044811
+        },
+        "stl": {
+          "n": 72,
+          "dates": 72,
+          "hit_rate": 0.8472222222222222,
+          "matched_random_under_rate": 0.6702379621255345,
+          "lift": 0.17698426009668763,
+          "lift_ci95_low": 0.09703295306617137,
+          "lift_ci95_high": 0.2569355671272039
+        },
+        "trb": {
+          "n": 81,
+          "dates": 81,
+          "hit_rate": 0.6172839506172839,
+          "matched_random_under_rate": 0.5344186590348103,
+          "lift": 0.08286529158247362,
+          "lift_ci95_low": -0.023543966619029563,
+          "lift_ci95_high": 0.1892745497839768
+        },
+        "tov": {
+          "n": 52,
+          "dates": 52,
+          "hit_rate": 0.8076923076923077,
+          "matched_random_under_rate": 0.524475596958082,
+          "lift": 0.28321671073422566,
+          "lift_ci95_low": 0.17752328465908054,
+          "lift_ci95_high": 0.3889101368093708
+        }
+      }
+    },
+    "holdout": {
+      "production_lanes_combined": {
+        "n": 52,
+        "dates": 20,
+        "hit_rate": 0.5961538461538461,
+        "matched_random_under_rate": 0.6065246845983677,
+        "lift": -0.010370838444521559,
+        "lift_ci95_low": -0.13215880806503805,
+        "lift_ci95_high": 0.11141713117599492
+      },
+      "all_declared_lanes_combined": {
+        "n": 73,
+        "dates": 20,
+        "hit_rate": 0.6027397260273972,
+        "matched_random_under_rate": 0.5861060532682216,
+        "lift": 0.016633672759175627,
+        "lift_ci95_low": -0.08905446227627789,
+        "lift_ci95_high": 0.12232180779462914
+      },
+      "per_target": {
+        "ast": {
+          "n": 20,
+          "dates": 20,
+          "hit_rate": 0.4,
+          "matched_random_under_rate": 0.522249788067451,
+          "lift": -0.12224978806745115,
+          "lift_ci95_low": -0.34231921856529895,
+          "lift_ci95_high": 0.09781964243039665
+        },
+        "blk": {
+          "n": 17,
+          "dates": 17,
+          "hit_rate": 0.7058823529411765,
+          "matched_random_under_rate": 0.6627325289089995,
+          "lift": 0.043149824032176966,
+          "lift_ci95_low": -0.13727544380581805,
+          "lift_ci95_high": 0.22357509187017197
+        },
+        "stl": {
+          "n": 15,
+          "dates": 15,
+          "hit_rate": 0.7333333333333333,
+          "matched_random_under_rate": 0.655188989754207,
+          "lift": 0.07814434357912618,
+          "lift_ci95_low": -0.145216714608785,
+          "lift_ci95_high": 0.30150540176703733
+        },
+        "trb": {
+          "n": 19,
+          "dates": 19,
+          "hit_rate": 0.631578947368421,
+          "matched_random_under_rate": 0.5349013134806171,
+          "lift": 0.09667763388780391,
+          "lift_ci95_low": -0.1305240508198504,
+          "lift_ci95_high": 0.3238793185954582
+        },
+        "tov": {
+          "n": 2,
+          "dates": 2,
+          "hit_rate": 0.5,
+          "matched_random_under_rate": 0.5416666666666666,
+          "lift": -0.04166666666666666,
+          "lift_ci95_low": -0.7766666666666665,
+          "lift_ci95_high": 0.6933333333333332
+        }
+      }
+    }
+  }
+}

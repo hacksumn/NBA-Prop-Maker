@@ -104,7 +104,7 @@ run_gui.bat  →  vegas_gui.py  (Streamlit)
 ```
 Launches the local "Vegas Intelligence Console" — a Streamlit dashboard that reads from `data/`, `models/`, and `output/` and exposes picks, performance metrics, model room, and command controls.
 
-**3. Command Center (read-only HTML dashboard)**
+**3. Jake's NBA Dashboard (read-only HTML dashboard)**
 ```bat
 run_dashboard.bat  →  scripts/build_dashboard.py  →  output/dashboard_pro.html
 ```

@@ -1,7 +1,7 @@
 {
   "status": "collecting",
   "start_date": "2026-11-13",
-  "runs_excluded_for_drift": 3,
+  "runs_excluded_for_drift": 5,
   "binary_contracts": 26,
   "completed_dates": 1,
   "comparisons": {

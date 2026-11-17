@@ -1,0 +1,10 @@
+{
+  "writer": "scripts/train_availability_minutes_model.py",
+  "written_at_utc": "2026-11-15T21:01:58.677545+00:00",
+  "pid": 42604,
+  "pipeline_context": "",
+  "artifacts": {
+    "availability_minutes_model.pkl": "a8dc2d759532b23cdd581f4eb75893ed5254f1e57f26c0d2b71653ed596c2379",
+    "availability_minutes_policy.json": "bb70783133c2950eef15e2f882f4d8f1da6733793ec2ef9b1af662688cfa7985"
+  }
+}
