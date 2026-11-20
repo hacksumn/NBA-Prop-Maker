@@ -246,6 +246,24 @@ function Invoke-DashboardPublish {
             Write-Host "$label FAILED: scripts\dashboard_publish.local.json has an invalid project or branch name; the hosted dashboard was NOT updated." -ForegroundColor Yellow
             return
         }
+        # Where wrangler keeps its Cloudflare login. The Claude desktop app is a packaged app: it redirects everything it
+        # writes under AppData into a private folder that Task Scheduler cannot see, so a login made from inside it is
+        # invisible to the 07:30 run (DEC-102). "wranglerConfigHome" in the settings file names a folder outside AppData
+        # that every program, including the scheduled task, sees; wrangler is pointed at it through XDG_CONFIG_HOME.
+        $configHome = [string]$config.wranglerConfigHome
+        if ($configHome) {
+            if (-not [IO.Path]::IsPathRooted($configHome) -or -not (Test-Path -LiteralPath $configHome -PathType Container)) {
+                Write-Host "$label FAILED: wranglerConfigHome in scripts\dashboard_publish.local.json is not an existing absolute folder; the hosted dashboard was NOT updated." -ForegroundColor Yellow
+                return
+            }
+            $credentialFile = Join-Path $configHome '.wrangler\config\default.toml'
+        }
+        elseif ($env:XDG_CONFIG_HOME) {
+            $credentialFile = Join-Path $env:XDG_CONFIG_HOME '.wrangler\config\default.toml'
+        }
+        else {
+            $credentialFile = Join-Path $env:APPDATA 'xdg.config\.wrangler\config\default.toml'
+        }
         $page = Join-Path $ProjectRoot 'output\dashboard_pro.html'
         if (-not (Test-Path -LiteralPath $page -PathType Leaf)) {
             Write-Host "$label SKIPPED: $page not found; the hosted dashboard was NOT updated." -ForegroundColor Yellow
@@ -265,9 +283,16 @@ function Invoke-DashboardPublish {
                 Set-Item -LiteralPath "Env:$name" -Value $persisted
             }
         }
-        foreach ($pair in @(@('CI', 'true'), @('WRANGLER_SEND_METRICS', 'false'))) {
+        $envPairs = @(@('CI', 'true'), @('WRANGLER_SEND_METRICS', 'false'))
+        if ($configHome) { $envPairs += , @('XDG_CONFIG_HOME', $configHome) }
+        foreach ($pair in $envPairs) {
             $savedEnv[$pair[0]] = [Environment]::GetEnvironmentVariable($pair[0], 'Process')
             Set-Item -LiteralPath ("Env:" + $pair[0]) -Value $pair[1]
+        }
+        # Say plainly when there is no login to use, instead of wrangler's generic "non-interactive environment" error.
+        if ([string]::IsNullOrWhiteSpace($env:CLOUDFLARE_API_TOKEN) -and -not (Test-Path -LiteralPath $credentialFile -PathType Leaf)) {
+            Write-Host "$label FAILED: no Cloudflare login found at $credentialFile and no CLOUDFLARE_API_TOKEN is set. Run scripts\cloudflare_login.bat once from a normal window (not from inside another app); the hosted dashboard was NOT updated." -ForegroundColor Yellow
+            return
         }
         $stageDir = Join-Path ([IO.Path]::GetTempPath()) ('dash_site_' + [guid]::NewGuid().ToString('N'))
         $null = New-Item -ItemType Directory -Path $stageDir -ErrorAction Stop
@@ -293,14 +318,16 @@ function Invoke-DashboardPublish {
         $exitCode = $process.ExitCode
         foreach ($path in @($stdoutPath, $stderrPath)) {
             foreach ($line in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
-                if ($line -and $line.Trim()) { Write-Host "$label $line" }
+                # Drop colour codes and box-drawing characters so the log stays readable.
+                $clean = ($line -replace '\x1b\[[0-9;]*m', '') -replace '[^\x20-\x7E]', ''
+                if ($clean.Trim()) { Write-Host "$label $clean" }
             }
         }
         if ($exitCode -eq 0) {
             Write-Host "$label OK: hosted dashboard updated ($project, branch $branch)." -ForegroundColor Green
         }
         else {
-            Write-Host "$label FAILED with exit code $exitCode; the hosted dashboard was NOT updated and will show its age." -ForegroundColor Yellow
+            Write-Host "$label FAILED with exit code $exitCode; the hosted dashboard was NOT updated and will show its age. If wrangler reports an expired or missing login, run scripts\cloudflare_login.bat once from a normal window." -ForegroundColor Yellow
         }
     }
     catch {

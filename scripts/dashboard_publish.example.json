@@ -1,5 +1,6 @@
 {
   "enabled": false,
   "project": "your-cloudflare-project-name",
-  "branch": "main"
+  "branch": "main",
+  "wranglerConfigHome": "C:\\Users\\<you>\\.fresh_start_nba\\cloudflare"
 }

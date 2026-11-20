@@ -30,10 +30,14 @@ STAND_IN = r"""@echo off
 dir /b > "%STANDIN_OUT%\files.txt"
 copy /y index.html "%STANDIN_OUT%\index_copy.html" >nul
 copy /y _headers "%STANDIN_OUT%\headers_copy.txt" >nul
-> "%STANDIN_OUT%\env.txt" echo CI=%CI% METRICS=%WRANGLER_SEND_METRICS%
+> "%STANDIN_OUT%\env.txt" echo CI=%CI% METRICS=%WRANGLER_SEND_METRICS% XDG=%XDG_CONFIG_HOME%
 if "%STANDIN_MODE%"=="fail" (
   echo deploy exploded 1>&2
   exit /b 3
+)
+if "%STANDIN_MODE%"=="fancy" (
+  echo ESC[31mX [ERROR]ESC[0m shown ACCENTS
+  exit /b 0
 )
 if "%STANDIN_MODE%"=="hang" (
   ping -n 60 127.0.0.1 >nul
@@ -42,6 +46,16 @@ if "%STANDIN_MODE%"=="hang" (
 echo Deployment complete! https://abc123.example.pages.dev
 exit /b 0
 """
+
+
+def _user_token_set() -> bool:
+    """True when a Cloudflare API token is stored in the user's environment (the function reads it at user scope)."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            return bool(winreg.QueryValueEx(key, "CLOUDFLARE_API_TOKEN")[0])
+    except (ImportError, OSError):
+        return False
 
 
 def _script_text() -> str:
@@ -103,8 +117,23 @@ class StructureTests(unittest.TestCase):
         self.assertIn("scripts/dashboard_publish.local.json", ignore)
         example = json.loads((ROOT / "scripts" / "dashboard_publish.example.json").read_text(encoding="utf-8"))
         self.assertIs(example["enabled"], False)                      # the tracked template does nothing by itself
-        self.assertEqual(set(example), {"enabled", "project", "branch"})
+        self.assertEqual(set(example), {"enabled", "project", "branch", "wranglerConfigHome"})
         self.assertIn("dashboard_publish.local.json", _function_text())   # the function reads the ignored file
+
+    def test_login_script_matches_the_pinned_tool_version_and_stays_out_of_appdata(self):
+        bat = (ROOT / "scripts" / "cloudflare_login.bat").read_text(encoding="utf-8")
+        in_script = re.search(r"wrangler@(\d+\.\d+\.\d+)", _function_text()).group(1)
+        self.assertIn(f"wrangler@{in_script}", bat)                   # one version everywhere
+        self.assertIn(r"XDG_CONFIG_HOME=%USERPROFILE%\.fresh_start_nba\cloudflare", bat)   # outside AppData
+        self.assertNotIn("APPDATA", bat.replace("AppData", "").replace("REM", ""))  # never stores the login under AppData
+        for scope in ("account:read", "user:read", "pages:write"):     # only what a Pages upload needs
+            self.assertIn(scope, bat)
+        self.assertNotIn("workers:write", bat)
+
+    def test_pages_upload_never_runs_without_the_login_check(self):
+        fn = _function_text()
+        self.assertIn("wranglerConfigHome", fn)
+        self.assertLess(fn.index("no Cloudflare login found"), fn.index("Start-Process"))   # checked before launching
 
     def test_script_still_parses(self):
         if not POWERSHELL:
@@ -119,15 +148,30 @@ class StructureTests(unittest.TestCase):
 class PublishBehaviourTests(unittest.TestCase):
     """Run the real function against a stand-in npx.cmd in a synthetic project folder."""
 
-    def _run(self, config=GOOD_CONFIG, page=True, mode="ok", age_minutes=0, timeout_s=60, no_npx=False, wall=120):
+    def _run(self, config=GOOD_CONFIG, page=True, mode="ok", age_minutes=0, timeout_s=60, no_npx=False, wall=120,
+             appdata_login=True, home_login=False, make_home_dir=True):
+        """appdata_login: a wrangler login exists under the (test) %APPDATA%. home_login: one exists in the folder named
+        by wranglerConfigHome. A config value of "{HOME}" is replaced by that test folder's real path."""
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             root, out, tmp, binp = base / "proj", base / "out", base / "tmp", base / "bin"
-            for d in (root / "scripts", root / "output", out, tmp, binp):
+            appdata, cfhome = base / "appdata", base / "cfhome"
+            for d in (root / "scripts", root / "output", out, tmp, binp, appdata):
                 d.mkdir(parents=True)
-            (binp / "npx.cmd").write_text(STAND_IN, encoding="ascii")
+            if make_home_dir:
+                cfhome.mkdir()
+            if appdata_login:
+                (appdata / "xdg.config" / ".wrangler" / "config").mkdir(parents=True)
+                (appdata / "xdg.config" / ".wrangler" / "config" / "default.toml").write_text("oauth_token = \"x\"\n", encoding="ascii")
+            if home_login:
+                (cfhome / ".wrangler" / "config").mkdir(parents=True)
+                (cfhome / ".wrangler" / "config" / "default.toml").write_text("oauth_token = \"x\"\n", encoding="ascii")
+            (binp / "npx.cmd").write_bytes(STAND_IN.replace("ESC", "\x1b").replace("ACCENTS", "â\u0095\u0090").encode("latin-1"))
             if config is not None:
-                text = config if isinstance(config, str) else json.dumps(config)
+                if isinstance(config, str):
+                    text = config
+                else:
+                    text = json.dumps({k: (str(cfhome) if v == "{HOME}" else v) for k, v in config.items()})
                 (root / "scripts" / "dashboard_publish.local.json").write_text(text, encoding="utf-8")
             if page:
                 target = root / "output" / "dashboard_pro.html"
@@ -140,11 +184,11 @@ class PublishBehaviourTests(unittest.TestCase):
             harness = base / "harness.ps1"
             harness.write_text(
                 "$ErrorActionPreference = 'Stop'\n"
-                f"$ProjectRoot = '{root}'\n$env:TMP = '{tmp}'\n$env:TEMP = '{tmp}'\n"
+                f"$ProjectRoot = '{root}'\n$env:TMP = '{tmp}'\n$env:TEMP = '{tmp}'\n$env:APPDATA = '{appdata}'\n"
                 f"$env:STANDIN_OUT = '{out}'\n$env:STANDIN_MODE = '{mode}'\n{path_line}\n"
-                "$env:CI = $null; $env:WRANGLER_SEND_METRICS = $null\n"
+                "$env:CI = $null; $env:WRANGLER_SEND_METRICS = $null; $env:XDG_CONFIG_HOME = $null; $env:CLOUDFLARE_API_TOKEN = $null\n"
                 f"{_function_text()}\nInvoke-DashboardPublish -TimeoutSeconds {timeout_s}\n"
-                "Write-Host \"AFTER CI=[$env:CI] METRICS=[$env:WRANGLER_SEND_METRICS]\"\nWrite-Host 'HARNESS-FINISHED'\n",
+                "Write-Host \"AFTER CI=[$env:CI] METRICS=[$env:WRANGLER_SEND_METRICS] XDG=[$env:XDG_CONFIG_HOME]\"\nWrite-Host 'HARNESS-FINISHED'\n",
                 encoding="utf-8")
             started = time.time()
             done = subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
@@ -156,6 +200,7 @@ class PublishBehaviourTests(unittest.TestCase):
                 "files": sorted((read("files.txt") or "").split()), "headers": read("headers_copy.txt"),
                 "index": (out / "index_copy.html").read_bytes() if (out / "index_copy.html").exists() else None,
                 "env": (read("env.txt") or "").strip(), "root": str(root), "left_in_tmp": sorted(p.name for p in tmp.iterdir()),
+                "home": str(cfhome), "appdata": str(appdata),
             }
 
     def _assert_finished_quietly(self, r):
@@ -176,8 +221,55 @@ class PublishBehaviourTests(unittest.TestCase):
         self.assertIn("X-Robots-Tag: noindex", r["headers"])
         self.assertNotEqual(Path(r["cwd"]).resolve(), Path(r["root"]).resolve())   # not run from the project folder
         self.assertNotIn(r["root"].lower(), r["cwd"].lower())
-        self.assertEqual(r["env"], "CI=true METRICS=false")           # non-interactive, no telemetry...
-        self.assertIn("AFTER CI=[] METRICS=[]", r["log"])             # ...and restored afterwards
+        self.assertEqual(r["env"], "CI=true METRICS=false XDG=")      # non-interactive, no telemetry, no login-folder override...
+        self.assertIn("AFTER CI=[] METRICS=[] XDG=[]", r["log"])      # ...and restored afterwards
+
+    def test_login_in_a_folder_outside_appdata_is_used_and_handed_to_wrangler(self):
+        # The fix for DEC-102: the scheduled task cannot see a login made inside the Claude desktop app (AppData is
+        # redirected there), so the settings file can name a folder outside AppData and wrangler is pointed at it.
+        r = self._run(config={**GOOD_CONFIG, "wranglerConfigHome": "{HOME}"}, appdata_login=False, home_login=True)
+        self._assert_finished_quietly(r)
+        self.assertIn("[Dashboard publish] OK", r["log"])
+        self.assertEqual(r["env"], f"CI=true METRICS=false XDG={r['home']}")
+        self.assertIn("AFTER CI=[] METRICS=[] XDG=[]", r["log"])      # restored for the rest of the run
+
+    def test_a_login_that_exists_only_under_appdata_is_not_trusted_when_a_login_folder_is_configured(self):
+        # This is the exact failure of 2026-11-19: a login existed, but only where the scheduled task cannot see it.
+        r = self._run(config={**GOOD_CONFIG, "wranglerConfigHome": "{HOME}"}, appdata_login=True, home_login=False)
+        self._assert_finished_quietly(r)
+        self.assertFalse(r["called"])
+        self.assertIn("no Cloudflare login found at", r["log"])
+        self.assertIn("cfhome", r["log"])
+        self.assertIn("NOT updated", r["log"])
+
+    def test_missing_login_is_reported_plainly_and_nothing_is_uploaded(self):
+        import os
+        if os.environ.get("CLOUDFLARE_API_TOKEN") or _user_token_set():
+            self.skipTest("a Cloudflare API token is set on this machine, which legitimately replaces the login file")
+        r = self._run(appdata_login=False)
+        self._assert_finished_quietly(r)
+        self.assertFalse(r["called"])
+        self.assertIn("no Cloudflare login found at", r["log"])
+        self.assertIn("cloudflare_login.bat", r["log"])
+        self.assertIn("NOT updated", r["log"])
+
+    def test_bad_login_folder_setting_fails_safe(self):
+        for bad, kwargs in (("relative\\folder", {}), ("{HOME}", {"make_home_dir": False})):
+            with self.subTest(bad=bad):
+                r = self._run(config={**GOOD_CONFIG, "wranglerConfigHome": bad}, **kwargs)
+                self._assert_finished_quietly(r)
+                self.assertFalse(r["called"])
+                self.assertIn("not an existing absolute folder", r["log"])
+
+    def test_tool_output_is_cleaned_of_colour_codes_and_box_characters(self):
+        r = self._run(mode="fancy")
+        self._assert_finished_quietly(r)
+        self.assertIn("[Dashboard publish] X [ERROR] shown", r["log"])
+        self.assertNotIn("\x1b", r["log"])
+        relayed = [l for l in r["log"].splitlines() if l.startswith("[Dashboard publish]")]
+        self.assertTrue(relayed)
+        for line in relayed:
+            self.assertTrue(all(32 <= ord(c) < 127 for c in line), repr(line))
 
     def test_disabled_does_nothing_and_says_why(self):
         r = self._run(config={**GOOD_CONFIG, "enabled": False})
