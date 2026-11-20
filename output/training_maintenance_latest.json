@@ -1,5 +1,5 @@
 {
-  "ended_at": "2026-11-17T09:32:50.475596-06:00",
+  "ended_at": "2026-11-20T09:32:56.268331-06:00",
   "mode": "refresh",
   "production_hashes_after": {
     "models\\bias_advanced.json": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c",
@@ -118,7 +118,7 @@
     "models\\xgb_trb_advanced.pkl": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806"
   },
   "production_unchanged": true,
-  "started_at": "2026-11-17T09:30:06.736361-06:00",
+  "started_at": "2026-11-20T09:30:06.901082-06:00",
   "status": "complete",
   "steps": [
     {
@@ -131,28 +131,28 @@
         "--features-json",
         "C:\\Users\\jakep\\Downloads\\Fresh_Start_NBA\\feature_cols_advanced.json"
       ],
-      "ended_at": "2026-11-17T09:30:43.631364-06:00",
+      "ended_at": "2026-11-20T09:30:45.132955-06:00",
       "name": "Advanced feature table",
       "returncode": 0,
-      "started_at": "2026-11-17T09:30:06.736361-06:00"
+      "started_at": "2026-11-20T09:30:06.901082-06:00"
     },
     {
       "command": [
         "scripts/train_availability_minutes_model.py"
       ],
-      "ended_at": "2026-11-17T09:31:36.097452-06:00",
+      "ended_at": "2026-11-20T09:31:38.775230-06:00",
       "name": "Availability/minutes OOF model",
       "returncode": 0,
-      "started_at": "2026-11-17T09:30:43.631364-06:00"
+      "started_at": "2026-11-20T09:30:45.132955-06:00"
     },
     {
       "command": [
         "scripts/audit_availability_minutes_model.py"
       ],
-      "ended_at": "2026-11-17T09:31:39.539646-06:00",
+      "ended_at": "2026-11-20T09:31:42.557944-06:00",
       "name": "Availability/minutes holdout audit",
       "returncode": 0,
-      "started_at": "2026-11-17T09:31:36.097452-06:00"
+      "started_at": "2026-11-20T09:31:38.775230-06:00"
     },
     {
       "command": [
@@ -164,19 +164,19 @@
         "--summary",
         "output/availability_prop_training_join_summary.json"
       ],
-      "ended_at": "2026-11-17T09:31:57.852924-06:00",
+      "ended_at": "2026-11-20T09:32:01.810030-06:00",
       "name": "Availability feature join",
       "returncode": 0,
-      "started_at": "2026-11-17T09:31:39.539646-06:00"
+      "started_at": "2026-11-20T09:31:42.557944-06:00"
     },
     {
       "command": [
         "scripts/build_pointintime_team_defense.py"
       ],
-      "ended_at": "2026-11-17T09:32:29.424403-06:00",
+      "ended_at": "2026-11-20T09:32:34.377136-06:00",
       "name": "Point-in-time team defense",
       "returncode": 0,
-      "started_at": "2026-11-17T09:31:57.852924-06:00"
+      "started_at": "2026-11-20T09:32:01.810030-06:00"
     },
     {
       "command": [
@@ -188,27 +188,27 @@
         "--summary",
         "output/full_prop_training_join_summary.json"
       ],
-      "ended_at": "2026-11-17T09:32:47.239510-06:00",
+      "ended_at": "2026-11-20T09:32:52.865361-06:00",
       "name": "Unified availability + defense join",
       "returncode": 0,
-      "started_at": "2026-11-17T09:32:29.424403-06:00"
+      "started_at": "2026-11-20T09:32:34.377136-06:00"
     }
   ],
   "training_profile": {
     "freshness_gap_days": 0,
     "raw": {
       "columns": 74,
-      "date_max": "2026-11-16",
+      "date_max": "2026-11-19",
       "date_min": "2023-10-24",
       "path": "data/nba_data.csv",
-      "rows": 85683
+      "rows": 86154
     },
     "unified_training": {
       "columns": 296,
-      "date_max": "2026-11-16",
+      "date_max": "2026-11-19",
       "date_min": "2024-03-08",
       "path": "data/model_data_full_advanced.csv",
-      "rows": 55921
+      "rows": 56343
     }
   }
 }

@@ -6546,7 +6546,7 @@ game_date,player,stat,odds_prop,line,direction,model_side_prob,bet_snapshot_ts,b
 2026-11-11,Victor Wembanyama,trb,player_rebounds,11.5,UNDER,0.5216000000000001,2026-11-11T05:01:27.963039-06:00,-130.0,1.7692307692307692,0.5281576830249397,,,,,,,,,,,no_later_snapshot,9.0,WIN,0.7692307692307692
 2026-11-11,Shai Gilgeous-Alexander,trb,player_rebounds,3.5,UNDER,0.5216000000000001,2026-11-11T05:01:27.963039-06:00,102.0,2.02,0.46209273182957394,,,,,,,,,,,no_later_snapshot,4.0,LOSS,-1.0
 2026-11-11,Andrew Nembhard,trb,player_rebounds,2.5,UNDER,0.5685,2026-11-11T05:01:27.963039-06:00,112.0,2.12,0.4414696667616063,,,,,,,,,,,no_later_snapshot,2.0,WIN,1.12
-2026-11-11,Andre Drummond,trb,player_rebounds,6.5,OVER,0.5,2026-11-11T05:01:27.963039-06:00,-108.0,1.925925925925926,0.48581617766250607,,,,,,,,,,,no_later_snapshot,5.0,LOSS,-1.0
+2026-11-11,Andre Drummond,trb,player_rebounds,6.5,OVER,0.5,2026-11-11T05:01:27.963039-06:00,-108.0,1.925925925925926,0.48581617766250607,,,,,,,,,,,no_later_snapshot,4.0,LOSS,-1.0
 2026-11-11,Trae Young,trb,player_rebounds,2.5,OVER,0.5,2026-11-11T05:01:27.963039-06:00,-138.0,1.7246376811594204,0.5418848167539266,,,,,,,,,,,no_later_snapshot,3.0,WIN,0.7246376811594204
 2026-11-11,Toumani Camara,trb,player_rebounds,4.5,UNDER,0.5832999999999999,2026-11-11T05:01:27.963039-06:00,-166.0,1.6024096385542168,0.5829675153643546,,,,,,,,,,,no_later_snapshot,5.0,LOSS,-1.0
 2026-11-11,Brandin Podziemski,trb,player_rebounds,4.5,UNDER,0.5216000000000001,2026-11-11T05:01:27.963039-06:00,-106.0,1.9433962264150944,0.4808467741935484,,,,,,,,,,,no_later_snapshot,6.0,LOSS,-1.0
@@ -6803,7 +6803,7 @@ game_date,player,stat,odds_prop,line,direction,model_side_prob,bet_snapshot_ts,b
 2026-11-11,Shai Gilgeous-Alexander,pr,player_points_rebounds,36.5,UNDER,0.5161,2026-11-11T05:01:27.963039-06:00,-110.0,1.9090909090909092,0.48800959232613905,,,,,,,,,,,no_later_snapshot,35.0,WIN,0.9090909090909092
 2026-11-11,Andrew Nembhard,pr,player_points_rebounds,18.5,UNDER,0.5077,2026-11-11T05:01:27.963039-06:00,-102.0,1.9803921568627452,0.4718423169750603,,,,,,,,,,,no_later_snapshot,19.0,LOSS,-1.0
 2026-11-11,Cam Spencer,pr,player_points_rebounds,9.5,UNDER,0.5077,2026-11-11T05:01:27.963039-06:00,-114.0,1.8771929824561404,0.5,,,,,,,,,,,no_later_snapshot,18.0,LOSS,-1.0
-2026-11-11,Andre Drummond,pr,player_points_rebounds,11.5,UNDER,0.5138,2026-11-11T05:01:27.963039-06:00,-132.0,1.7575757575757576,0.532258064516129,,,,,,,,,,,no_later_snapshot,5.0,WIN,0.7575757575757576
+2026-11-11,Andre Drummond,pr,player_points_rebounds,11.5,UNDER,0.5138,2026-11-11T05:01:27.963039-06:00,-132.0,1.7575757575757576,0.532258064516129,,,,,,,,,,,no_later_snapshot,4.0,WIN,0.7575757575757576
 2026-11-11,Trae Young,pr,player_points_rebounds,20.5,UNDER,0.5077,2026-11-11T05:01:27.963039-06:00,-102.0,1.9803921568627452,0.4718423169750603,,,,,,,,,,,no_later_snapshot,18.0,WIN,0.9803921568627452
 2026-11-11,Toumani Camara,pr,player_points_rebounds,17.5,UNDER,0.5077,2026-11-11T05:01:27.963039-06:00,-118.0,1.847457627118644,0.5060689431946916,,,,,,,,,,,no_later_snapshot,19.0,LOSS,-1.0
 2026-11-11,Brandin Podziemski,pr,player_points_rebounds,20.5,UNDER,0.5077,2026-11-11T05:01:27.963039-06:00,-125.0,1.8,0.5191532258064516,,,,,,,,,,,no_later_snapshot,28.0,LOSS,-1.0
