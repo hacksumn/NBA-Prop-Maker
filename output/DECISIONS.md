@@ -4513,3 +4513,13 @@ No new pipeline code change was necessary in this step. The failed historical lo
 **Not changed (decisions for Jake):** manual runs outside the 07:30 job (`PicksNow`, `PredictCached`) still do not rebuild or republish the page; only `DailySafe` does. The 2026-11-18 smoke failure (`[WinError 5]` on a `__pycache__` file) was not investigated.
 
 **Impact:** no pick, gate, model, schema, history or `run_daily.py` change. `scripts/project_operator.ps1` (the scheduled path) changed; the step is still non-throwing and inert unless enabled. Rollback: set `"enabled": false` in the local settings file.
+
+## 2026-11-19 — DEC-103 — One-time Claude scheduled check of the first real post-fix dashboard upload
+
+**Context:** after DEC-102 the upload was proven only through a throwaway Task Scheduler job. The first real proof is the 2026-11-20 07:30 `DailySafe` run. Jake chose to have that checked automatically (asked as a direct question; he answered "Yes, schedule a check").
+
+**Decision:** created one Claude desktop scheduled task, `check-dashboard-upload-2026-11-20` (stored at `C:\Users\jakep\.claude\scheduled-tasks\check-dashboard-upload-2026-11-20\SKILL.md`), firing once at 2026-11-20 08:15 local time (about 25 minutes after the 07:30 run normally ends) and then disabling itself. It is read-only by instruction: it reads `logs/scheduled_dailysafe.log` (stripping NUL bytes because the log mixes ASCII and UTF-16) from the last `START DailySafe` onward, looks for `[Dashboard rebuild] OK`, `[Dashboard publish] OK` or the exact FAILED/SKIPPED line and `COMPLETE DailySafe`, opens the hosted page (project name read from the git-ignored `scripts/dashboard_publish.local.json`) and checks that its "Built" stamp is dated 2026-11-20 with no "Out of date" banner, then reports PASS or FAIL in five lines or fewer. It must not edit, create or delete files, run the pipeline, touch Cloudflare credentials, commit or push. On a failure it tells Jake to run `scripts\cloudflare_login.bat` from a normal window. It does not close the `VERIFY — DEC-102` item in `output/TASKS.md`; that stays a manual step.
+
+**Limits:** it runs only while the Claude app is open (otherwise at the next launch), and it did not inherit this session's permission mode, so it may pause for tool approvals unless Jake opens it once in the app's Scheduled list and uses "Run now". It is a convenience check only: the daily upload itself does not depend on it. Rollback: delete the task from the app's Scheduled list.
+
+**Impact:** no pick, gate, model, schema, history, `run_daily.py` or Task Scheduler change; the four `FreshStartNBA-*` tasks are untouched.
