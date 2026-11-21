@@ -1,54 +1,58 @@
-/* Fresh Start NBA · Command Center — design system (dark-first, light supported) */
+/* Dime City Data · street-poster design system.
+   ONLY four colours are used: red, black, white and green (greys are just black/white mixes).
+   Green = win/positive, red = loss/negative and the brand accent, white = neutral emphasis. A test pins this. */
 :root {
-  --bg: #060913;
-  --bg2: #0a1020;
-  --panel: rgba(17, 24, 44, .72);
-  --panel-solid: #0f1729;
-  --panel-hi: rgba(26, 36, 64, .85);
-  --line: rgba(255, 255, 255, .075);
-  --line-hi: rgba(255, 255, 255, .16);
-  --text: #e9edf7;
-  --muted: #8d98b3;
-  --faint: #5c6785;
-  --accent: #ff8a3d;
-  --accent-2: #35d6ff;
-  --violet: #9d8cff;
-  --win: #2ee6a6;
-  --loss: #ff5470;
-  --amber: #ffc857;
-  --win-bg: rgba(46, 230, 166, .13);
-  --loss-bg: rgba(255, 84, 112, .13);
-  --amber-bg: rgba(255, 200, 87, .13);
-  --info-bg: rgba(53, 214, 255, .12);
-  --shadow: 0 18px 50px -18px rgba(0, 0, 0, .7), 0 1px 0 rgba(255, 255, 255, .04) inset;
-  --radius: 18px;
-  --radius-sm: 11px;
+  --bg: #050505;
+  --bg2: #0d0d0d;
+  --panel: rgba(12, 12, 12, .88);
+  --panel-solid: #0e0e0e;
+  --panel-hi: rgba(34, 34, 34, .94);
+  --line: rgba(255, 255, 255, .17);
+  --line-hi: rgba(255, 255, 255, .38);
+  --text: #ffffff;
+  --muted: #c4c4c4;
+  --faint: #8a8a8a;
+  --accent: #ff2a2a;
+  --accent-2: #ffffff;
+  --violet: #d4d4d4;
+  --win: #19e65a;
+  --loss: #ff2a2a;
+  --amber: #f2f2f2;
+  --win-bg: rgba(25, 230, 90, .14);
+  --loss-bg: rgba(255, 42, 42, .16);
+  --amber-bg: rgba(255, 255, 255, .09);
+  --info-bg: rgba(255, 255, 255, .08);
+  --shadow: 0 14px 40px -18px rgba(0, 0, 0, .9), 0 0 0 1px rgba(255, 255, 255, .04) inset;
+  --radius: 10px;
+  --radius-sm: 7px;
   --sans: "Inter", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --display: "Sedgwick Ave Display", "Permanent Marker", "Ink Free", "Segoe Print", "Marker Felt", "Comic Sans MS", cursive;   /* titles only */
+  --num: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;   /* every number: heavy, slanted, easy to read */
   --mono: "Cascadia Mono", "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
   color-scheme: dark;
 }
 :root[data-theme="light"] {
-  --bg: #eef1f8;
-  --bg2: #e6eaf4;
-  --panel: rgba(255, 255, 255, .86);
+  --bg: #f2f2f2;
+  --bg2: #e6e6e6;
+  --panel: rgba(255, 255, 255, .95);
   --panel-solid: #ffffff;
   --panel-hi: #ffffff;
-  --line: rgba(14, 21, 38, .09);
-  --line-hi: rgba(14, 21, 38, .2);
-  --text: #0e1526;
-  --muted: #5a6683;
-  --faint: #8d97b0;
-  --accent: #f26a0f;
-  --accent-2: #0a8fc2;
-  --violet: #6b57e8;
-  --win: #0f9f6e;
-  --loss: #e0314f;
-  --amber: #c98a00;
-  --win-bg: rgba(15, 159, 110, .12);
-  --loss-bg: rgba(224, 49, 79, .1);
-  --amber-bg: rgba(201, 138, 0, .12);
-  --info-bg: rgba(10, 143, 194, .1);
-  --shadow: 0 14px 38px -20px rgba(30, 41, 80, .35), 0 1px 0 rgba(255, 255, 255, .9) inset;
+  --line: rgba(0, 0, 0, .2);
+  --line-hi: rgba(0, 0, 0, .55);
+  --text: #0a0a0a;
+  --muted: #404040;
+  --faint: #7a7a7a;
+  --accent: #e01515;
+  --accent-2: #0a0a0a;
+  --violet: #3d3d3d;
+  --win: #079a38;
+  --loss: #d90f0f;
+  --amber: #1a1a1a;
+  --win-bg: rgba(7, 154, 56, .13);
+  --loss-bg: rgba(217, 15, 15, .11);
+  --amber-bg: rgba(0, 0, 0, .07);
+  --info-bg: rgba(0, 0, 0, .06);
+  --shadow: 0 12px 30px -18px rgba(0, 0, 0, .4), 0 1px 0 rgba(255, 255, 255, .9) inset;
   color-scheme: light;
 }
 
@@ -95,9 +99,10 @@ a { color: var(--accent-2); }
 .bgfx .wall {
   position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity .45s ease;
   background: var(--wall, none) 58% 28% / cover no-repeat;
+  filter: grayscale(1) contrast(1.12) brightness(.8);   /* a colour photo would break the four-colour palette */
 }
 :root[data-wall="on"] .wall { opacity: var(--wall-o); }
-:root[data-theme="dark"][data-wall="on"] { --panel: rgba(13, 19, 36, .54); --panel-hi: rgba(26, 36, 64, .78); }
+:root[data-theme="dark"][data-wall="on"] { --panel: rgba(10, 10, 10, .6); --panel-hi: rgba(34, 34, 34, .82); }
 :root[data-theme="light"][data-wall="on"] { --panel: rgba(255, 255, 255, .68); }
 .iconbtn[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 /* things that normally sit directly on the page background get their own frosted backing while the image is on */
@@ -118,7 +123,7 @@ a { color: var(--accent-2); }
 }
 .logo {
   width: 52px; height: 52px; border-radius: 16px; margin: 0 auto 14px; display: grid; place-items: center;
-  background: conic-gradient(from 210deg, var(--accent), #ff4d6d, var(--violet), var(--accent-2), var(--accent));
+  background: var(--accent);
   box-shadow: 0 8px 28px -8px color-mix(in srgb, var(--accent) 70%, transparent);
   position: relative;
 }
@@ -162,7 +167,7 @@ a { color: var(--accent-2); }
   background: radial-gradient(closest-side, rgba(0, 0, 0, .55), transparent); filter: blur(1.5px);
   animation: i3dground 6s ease-in-out infinite; animation-delay: calc(var(--i, 0) * -.65s);
 }
-:root[data-theme="light"] .nav .ground { background: radial-gradient(closest-side, rgba(30, 41, 80, .34), transparent); }
+:root[data-theme="light"] .nav .ground { background: radial-gradient(closest-side, rgba(0, 0, 0, .34), transparent); }
 .defs3d { position: absolute; width: 0; height: 0; overflow: hidden; }
 @keyframes i3dfloat {
   0%, 100% { transform: translateY(0) rotateX(12deg) rotateY(-22deg); }
@@ -184,7 +189,13 @@ a { color: var(--accent-2); }
 main { padding: 22px clamp(16px, 2.6vw, 38px) 60px; min-width: 0; max-width: 1760px; width: 100%; margin: 0 auto; }
 .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
 .top h1 { margin: 0; font-size: clamp(20px, 2.1vw, 28px); font-weight: 750; letter-spacing: -.02em; }
-.top h1 .grad { background: linear-gradient(95deg, var(--accent), #ff5d8a 55%, var(--violet)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.top h1 .grad { background: linear-gradient(95deg, var(--accent), var(--text)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+/* header logo (transparent image): sized by height so it keeps its proportions, readable on both themes */
+.top h1.brandmark { line-height: 0; font-size: 0; letter-spacing: 0; }
+.top h1.brandmark img { display: block; height: clamp(84px, 8vw, 112px); width: auto; max-width: 100%; filter: drop-shadow(0 2px 10px rgba(0, 0, 0, .5)); }
+:root[data-theme="light"] .top h1.brandmark img { filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .28)); }
+/* desktop: let the title block shrink so its long "Built ..." line wraps instead of pushing the theme button onto a second row */
+@media (min-width: 861px) { .top > div:first-child { flex: 1 1 720px; min-width: 0; } }
 .top .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .top .grow { flex: 1 1 auto; min-width: 8px; }
 .seg { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); backdrop-filter: blur(10px); }
@@ -399,7 +410,7 @@ svg.pie .sl:hover { transform: scale(1.045); filter: brightness(1.18) drop-shado
 .tlogo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; filter: drop-shadow(0 0 1.4px rgba(255, 255, 255, .7)) drop-shadow(0 0 .5px rgba(255, 255, 255, .6)); }
 .tlogo i { position: absolute; inset: 0; background: center / contain no-repeat; filter: drop-shadow(0 0 1.4px rgba(255, 255, 255, .7)) drop-shadow(0 0 .5px rgba(255, 255, 255, .6)); }
 :root[data-theme="light"] .tlogo img, :root[data-theme="light"] .tlogo i { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .35)); }
-.tlogo b { display: none; position: absolute; inset: 0; place-items: center; border-radius: 50%; font-size: calc(var(--s) * .3); font-weight: 800; letter-spacing: -.02em; color: #fff; background: color-mix(in srgb, var(--c, #667) 70%, #000); border: 1.5px solid var(--c, #667); }
+.tlogo b { display: none; position: absolute; inset: 0; place-items: center; border-radius: 50%; font-size: calc(var(--s) * .3); font-weight: 800; letter-spacing: -.02em; color: #fff; background: color-mix(in srgb, var(--c, #777) 70%, #000); border: 1.5px solid var(--c, #777); }
 .tlogo.nologo img { display: none; } .tlogo.nologo b { display: grid; }
 .tm { display: inline-flex; align-items: center; gap: 7px; }
 .tm .ab { font-weight: 700; }
@@ -420,6 +431,86 @@ svg.pie .sl:hover { transform: scale(1.045); filter: brightness(1.18) drop-shado
 #tip.on { opacity: 1; transform: none; }
 #tip b { color: var(--text); } #tip .k { color: var(--muted); }
 
+/* =====================================================================
+   Dime City Data street theme: graffiti display font, hard edges, skewed tags, grain and drips.
+   Colours come only from the tokens at the top of this file (red, black, white, green).
+   ===================================================================== */
+::selection { background: var(--accent); color: #fff; }
+::-webkit-scrollbar-thumb { background: var(--accent); }
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .09;   /* film grain, like the logo's dry brush */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-theme="light"] body::after { opacity: .07; }
+.bgfx::before {
+  background:
+    radial-gradient(900px 520px at 6% -8%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 62%),
+    radial-gradient(760px 500px at 100% 108%, color-mix(in srgb, var(--text) 7%, transparent), transparent 62%);
+}
+:root[data-theme="light"] { --wall-o: .24; }   /* the grey photo is quieter on the light theme */
+
+/* header: big logo, with red paint drips along its bottom edge */
+.top { position: relative; margin-bottom: 36px; }
+.top::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -26px; height: 26px; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='26' viewBox='0 0 150 26'%3E%3Cpath fill='%23ff2a2a' d='M0 0h150v5H0zM14 5v14a3 3 0 0 0 6 0V5zM47 5v8a2.6 2.6 0 0 0 5.2 0V5zM83 5v18a3.3 3.3 0 0 0 6.6 0V5zM118 5v10a2.8 2.8 0 0 0 5.6 0V5z'/%3E%3C/svg%3E") repeat-x left top / 150px 26px;
+}
+.top > div.titleblock { display: flex; align-items: center; gap: 22px; flex-wrap: nowrap; flex: 0 1 auto !important; }
+.titleblock .sub { margin: 0; max-width: 430px; font-style: italic; font-weight: 600; min-width: 0; }
+
+/* rail + navigation */
+.rail { border-right: 3px solid var(--accent); background: var(--bg); }
+.logo { border-radius: 8px; transform: rotate(-6deg); box-shadow: 4px 4px 0 var(--text); }
+.logo::after { border-radius: 6px; background: var(--bg); }
+.nav button { font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; font-size: 9.5px; border-radius: 6px; }
+.nav button:hover { color: var(--text); background: color-mix(in srgb, var(--text) 9%, transparent); box-shadow: inset 0 0 0 2px var(--line-hi); }
+@media (min-width: 861px) {
+  .nav button[aria-current="true"] { color: #fff; background: var(--accent); box-shadow: 4px 4px 0 var(--text); }
+  .nav button[aria-current="true"]::before { display: none; }
+}
+
+/* green is reserved for positive figures (.t-win text, win zones and slices in charts): status chips, edges and
+   decoration use white instead */
+.chip.win { color: var(--text); background: var(--amber-bg); border-color: color-mix(in srgb, var(--text) 50%, transparent); }
+.insight.good .ic { background: var(--amber-bg); color: var(--text); }
+.pcard.W { --edge: var(--text); } .tile.pos { --edge: var(--text); } .kpi.win { --glow: var(--text); }
+.step::before { background: var(--text); }
+
+/* controls */
+.seg { border-radius: 6px; border-width: 2px; border-color: var(--line-hi); }
+.seg button { border-radius: 3px; font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; box-shadow: none; }
+.iconbtn { border-width: 2px; border-radius: 6px; border-color: var(--line-hi); }
+.btn { border-width: 2px; border-radius: 6px; font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+input[type="search"], select { border-width: 2px; border-radius: 6px; }
+.chip { border-radius: 4px; font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; font-size: 10.5px; }
+#tip { border-width: 2px; border-radius: 6px; }
+
+/* panels: thick outline, a red tag slash and a graffiti title */
+.panel, .kpi, .pcard, .game, .tile, .slip, .todo, .insight, .step { border-width: 2px; }
+.panel { border-color: var(--line-hi); }
+.panel::before { inset: -3px auto auto 16px; width: 54px; height: 6px; opacity: 1; background: var(--accent); transform: skewX(-24deg); }
+.panel h2 { font-family: var(--display); font-weight: 400; font-size: 21px; letter-spacing: .03em; line-height: 1.1; text-shadow: 2px 2px 0 var(--accent); }
+:root[data-theme="light"] .panel h2 { text-shadow: 2px 2px 0 rgba(224, 21, 21, .4); }
+.panel h2 .dot { width: 9px; height: 17px; border-radius: 1px; background: var(--accent); box-shadow: none; transform: skewX(-18deg); }
+.panel .psub { font-style: italic; }
+
+/* KPI cards: a slanted colour slab on the left and graffiti numbers */
+.kpi { padding-left: 36px; border-color: var(--line-hi); }
+.kpi::after { left: -4px; right: auto; top: -25%; width: 14px; height: 150%; border-radius: 0; transform: skewX(-20deg); filter: none; opacity: .95; background: var(--glow, var(--accent)); }
+.kpi .lab { font-style: italic; font-weight: 800; letter-spacing: .1em; }
+.kpi .val { font-family: var(--num); font-weight: 800; font-style: italic; letter-spacing: -.02em; font-size: clamp(30px, 2.7vw, 40px); white-space: nowrap; text-shadow: 2px 2px 0 rgba(0, 0, 0, .85); }
+:root[data-theme="light"] .kpi .val { text-shadow: 2px 2px 0 rgba(0, 0, 0, .12); }
+.kpi .val small { font-family: var(--sans); font-style: italic; font-weight: 800; }
+.stat-row b, .ringrow .rt b, .pcard .bet .big, .pcard .bet .px { font-family: var(--num); font-weight: 800; font-style: italic; letter-spacing: -.02em; }
+.stat-row b { font-size: 24px; } .pcard .bet .big { font-size: 34px; }
+.dial .dl, th, .step .sid { font-style: italic; font-weight: 800; }
+th { border-bottom-width: 2px; }
+.pcard .who, .game .tms .side { font-weight: 800; font-style: italic; }
+.pcard .bet .dir { border-radius: 3px; font-style: italic; }
+.pcard { border-color: var(--line-hi); }
+.tile { border-radius: 8px; }
+
 @media (max-width: 1180px) {
   .c3, .c4, .c5 { grid-column: span 6; } .c7, .c8, .c9 { grid-column: span 12; } .c6 { grid-column: span 12; }
 }
@@ -435,6 +526,8 @@ svg.pie .sl:hover { transform: scale(1.045); filter: brightness(1.18) drop-shado
   main { padding-left: 14px; padding-right: 14px; }
   .stat-row { gap: 14px; } .kpi .val { font-size: 28px; }
   .step { flex-basis: 100%; }
+  .top h1.brandmark img { height: 78px; }   /* header logo, phone size */
+  .top > div.titleblock { flex-direction: column; align-items: flex-start; gap: 6px; flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }

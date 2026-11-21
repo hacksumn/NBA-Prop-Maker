@@ -326,7 +326,7 @@
     const large = a1 - a0 > Math.PI ? 1 : 0;
     return `M${pt(polar(cx, cy, r, a0))}A${r} ${r} 0 ${large} 1 ${pt(polar(cx, cy, r, a1))}`;
   }
-  const palette = () => [css('--accent'), css('--accent-2'), css('--violet'), css('--win'), css('--amber'), '#ff7eb6', '#7be0c3', '#8ea2ff', '#f59e0b', '#94a3b8'];
+  const palette = () => [css('--accent'), css('--accent-2'), css('--violet'), '#8a8a8a', '#c40000', '#5c5c5c', '#b01818', '#bdbdbd', '#ff5c5c', '#3d3d3d'];
 
   /* ---------- pie / donut with legend, hover lift and centre label ---------- */
   function pie(el, cfg) {
@@ -388,7 +388,7 @@
     }
     s += `<circle cx="${cx}" cy="${cy}" r="8" fill="${css('--panel-solid')}" stroke="${css('--text')}" stroke-width="2.5"/>`;
     s += `<text x="${cx - r}" y="${cy + 16}" text-anchor="middle" style="font-size:10px">${esc(o.minLabel != null ? o.minLabel : lo)}</text><text x="${cx + r}" y="${cy + 16}" text-anchor="middle" style="font-size:10px">${esc(o.maxLabel != null ? o.maxLabel : hi)}</text>`;
-    s += `<text x="${cx}" y="${cy + 33}" text-anchor="middle" style="font-size:${Math.round(W * 0.115)}px;font-weight:790;fill:${valCol};letter-spacing:-.03em">${esc(o.text)}</text>`;
+    s += `<text x="${cx}" y="${cy + 33}" text-anchor="middle" style="font-family:var(--num);font-size:${Math.round(W * 0.115)}px;font-weight:800;font-style:italic;fill:${valCol};letter-spacing:-.02em">${esc(o.text)}</text>`;
     if (o.sub) s += `<text x="${cx}" y="${cy + 47}" text-anchor="middle" style="font-size:10.5px">${esc(o.sub)}</text>`;
     return s + '</svg>';
   }

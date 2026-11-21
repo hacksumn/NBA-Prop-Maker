@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import math
 import os
@@ -39,6 +40,10 @@ LOGO_DIR = ASSET_DIR / "logos"       # committed <ABBR>.svg files, inlined into 
 MAX_LOGO_BYTES = 64 * 1024
 WALLPAPER_NAMES = ("wallpaper.jpg", "wallpaper.jpeg", "wallpaper.png", "wallpaper.webp")   # optional page background
 MAX_WALLPAPER_BYTES = 1_500_000
+BRAND_NAMES = ("brand.webp", "brand.png", "brand.jpg", "brand.jpeg")   # optional header logo, shown instead of the text title
+MAX_BRAND_BYTES = 600_000
+FONT_FILES = (("Sedgwick Ave Display", "SedgwickAveDisplay-Regular.ttf"),)   # optional graffiti display font (SIL OFL, see OFL.txt)
+MAX_FONT_BYTES = 400_000
 
 # ---------------------------------------------------------------------------
 # Era definitions. Boundaries come from DEC-036 (March rows were backfilled after the
@@ -801,7 +806,170 @@ def build_models(paths: Paths, col: Collector) -> dict:
             res.append({"k": k, "w": w, "l": l, "hit": (w / (w + l)) if (w + l) else None})
         return {"days": int(len(d)), "start": str(d["game_date"].min()), "end": str(d["game_date"].max()), "tops": res}
     out["backtest"] = col.run("output/backtest_daily_summary.csv", bt, {})
+    out["shadow"] = build_shadow(paths, col)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Shadow models (DEC-108 paper-only UNDER lanes, DEC-109 market-anchored probability model).
+# Paper only: none of this is ever published, bet or promoted. The review minima below are counts, never an
+# automatic trigger (output/SHADOW_LANES.md, output/MARKET_PROBABILITY_REBUILD.md).
+# ---------------------------------------------------------------------------
+SHADOW_MODEL_FILE = "market_probability_shadow.json"
+SHADOW_MODEL_HISTORY = "market_probability_history.csv"
+SHADOW_LANES_HISTORY = "shadow_lanes_history.csv"
+SHADOW_MIN_BINARY = 300          # WIN/LOSS outcomes needed before a review (per lane / for the market model)
+SHADOW_MIN_DATES_MARKET = 30     # settled dates the market model also needs
+SHADOW_LANES = {                 # mirrors DEC-108 / output/SHADOW_LANES.md; an unknown lane id in the file still shows
+    "pra_under_meta_gt_070": {"label": "PRA UNDER · meta above 0.70",
+                              "rule": "FanDuel main-line PRA UNDER, 0.70 < meta ≤ 1.00"},
+    "pts_under_meta_050_070": {"label": "PTS UNDER · meta 0.50 to 0.70",
+                               "rule": "FanDuel main-line PTS UNDER, 0.50 ≤ meta ≤ 0.70"},
+}
+
+
+def _shadow_frame(path: Path) -> pd.DataFrame:
+    """A shadow history file as text columns (the files hold blanks until a row is graded)."""
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    for needed in ("game_date", "result"):
+        if needed not in df.columns:
+            raise ValueError(f"{path.name} has no '{needed}' column")
+    df["result"] = df["result"].str.strip()
+    return df
+
+
+def _shadow_record(df: pd.DataFrame) -> dict:
+    """Counts and paper P&L for one shadow group, using the same rules as run_daily.py Step 1.9:
+    only WIN/LOSS count toward the hit rate and the 300-outcome counter; pushes and DNPs are shown apart; paper
+    units and ROI average the recorded profit_units of the WIN/LOSS rows."""
+    res = df["result"]
+    binary = df[res.isin(["WIN", "LOSS"])]
+    wins = int((binary["result"] == "WIN").sum())
+    profits = num(binary["profit_units"]).dropna() if "profit_units" in binary.columns else pd.Series(dtype=float)
+    return {
+        "rows": int(len(df)), "binary": int(len(binary)), "wins": wins,
+        "dates": int(binary["game_date"].nunique()),
+        "hit": (wins / len(binary)) if len(binary) else None,
+        "priced": int(len(profits)), "units": float(profits.sum()),
+        "roi": float(profits.mean()) if len(profits) else None,
+        "push": int((res == "PUSH").sum()), "dnp": int((res == "DNP").sum()), "pending": int((res == "").sum()),
+        "first": str(df["game_date"].min()) if len(df) else None, "last": str(df["game_date"].max()) if len(df) else None,
+    }
+
+
+def _logloss_gap(binary: pd.DataFrame, column: str) -> dict | None:
+    """Mean log-loss of a probability column minus that of the no-vig market, on the same settled rows.
+    The shadow rows are UNDER offers, so an OVER outcome is a LOSS. Negative = better than the market."""
+    if column not in binary.columns or "nv_over" not in binary.columns:
+        return None
+    over = (binary["result"] == "LOSS").astype(float)
+    p, q = num(binary[column]), num(binary["nv_over"])
+    ok = p.between(0, 1) & q.between(0, 1)
+    if not ok.any():
+        return {"n": 0, "diff": None}
+
+    def loss(prob: pd.Series) -> pd.Series:
+        prob = prob[ok].clip(1e-9, 1 - 1e-9)
+        y = over[ok]
+        return -(y * np.log(prob) + (1 - y) * np.log1p(-prob))
+
+    return {"n": int(ok.sum()), "diff": float((loss(p) - loss(q)).mean())}
+
+
+def _shadow_eval_block(b: Any) -> dict | None:
+    """One evaluation block from evaluation.json, reduced to what the page shows."""
+    if not isinstance(b, dict):
+        return None
+    ci = b.get("date_cluster_difference_95") or [None, None]
+    ev = b.get("under_ev_001") or {}
+    return {"rows": b.get("rows"), "dates": b.get("dates"), "market": b.get("market_log_loss"),
+            "model": b.get("model_log_loss"), "diff": b.get("difference"),
+            "lo": ci[0] if len(ci) > 0 else None, "hi": ci[1] if len(ci) > 1 else None,
+            "under_picks": ev.get("picks"), "under_roi": ev.get("roi"), "under_units": ev.get("profit_units")}
+
+
+def _shadow_market(paths: Paths, col: Collector) -> dict:
+    model_path = paths.output / SHADOW_MODEL_FILE
+    if not model_path.exists():
+        return {"installed": False}
+    model = load_json(model_path)
+    out: dict[str, Any] = {
+        "installed": True, "version": model.get("version"), "status": model.get("evaluation_status"),
+        "trained_through": model.get("trained_through"), "training_rows": model.get("training_rows"),
+        "training_dates": model.get("training_dates"), "props": len(model.get("props") or []),
+        "penalty": model.get("penalty"), "max_correction": model.get("max_logit_correction"),
+        "min_binary": SHADOW_MIN_BINARY, "min_dates": SHADOW_MIN_DATES_MARKET, "evaluation": None,
+    }
+    # The install record names its evaluation file by an absolute path; resolve it by its last two parts under
+    # THIS project's output folder so a moved or copied project still works.
+    parts = [p for p in str(model.get("evaluation_artifact") or "").replace("\\", "/").split("/") if p]
+    if len(parts) >= 2 and ".." not in parts[-2:] and "." not in parts[-2:]:
+        ev_path = paths.output / parts[-2] / parts[-1]
+        ev = col.run(f"output/{parts[-2]}/{parts[-1]}", lambda: load_json(ev_path), None)
+        if ev:
+            recorded = model.get("evaluation_sha256")
+            actual = hashlib.sha256(ev_path.read_bytes()).hexdigest()
+            out["evaluation_hash_ok"] = (actual == recorded) if recorded else None
+            if recorded and actual != recorded:
+                col.warnings.append("shadow model: the evaluation file does not match the SHA-256 recorded when the "
+                                    "model was installed; its figures are shown but should not be trusted")
+            spec = ev.get("specification") or {}
+            by_prop = []
+            for prop, blk in (ev.get("walk_forward_by_prop") or {}).items():
+                b = _shadow_eval_block(blk)
+                if b:
+                    by_prop.append({"prop": str(prop).upper(), **b})
+            out["evaluation"] = {
+                "created": ev.get("created_utc"), "promotion_eligible": ev.get("promotion_eligible"),
+                "promotion_reason": ev.get("promotion_reason"), "evidence_pass": ev.get("historical_evidence_pass"),
+                "forward_start": spec.get("forward_start"), "data_end": spec.get("data_end"),
+                "frozen": _shadow_eval_block(ev.get("frozen_prior_season")),
+                "walk": _shadow_eval_block(ev.get("walk_forward")),
+                "anchored_same_rows": _shadow_eval_block(ev.get("anchored_on_production_comparable")),
+                "incumbent_same_rows": _shadow_eval_block(ev.get("production_cal_comparable")),
+                "by_prop": by_prop,
+            }
+    # Prospective record: rows logged by the daily run since the model was installed (empty until collection starts).
+    hist_path = paths.output / SHADOW_MODEL_HISTORY
+    pros: dict[str, Any] = {"present": hist_path.exists()}
+    if hist_path.exists():
+        df = _shadow_frame(hist_path)
+        if "shadow_lane" in df.columns and model.get("version") in set(df["shadow_lane"]):
+            df = df[df["shadow_lane"] == model.get("version")]      # only this model version's rows
+        pros.update(_shadow_record(df))
+        binary = df[df["result"].isin(["WIN", "LOSS"])]
+        pros["fallbacks"] = (int(df["history_fallback_to_market"].str.lower().eq("true").sum())
+                             if "history_fallback_to_market" in df.columns else None)
+        pros["vs_market"] = [{"label": label, "key": key, **(_logloss_gap(binary, key) or {"n": 0, "diff": None})}
+                             for label, key in (("Market-anchored", "anchored_over"), ("Incumbent (calibrated)", "production_cal"))]
+        pros["review_minimum"] = bool(pros["binary"] >= SHADOW_MIN_BINARY and pros["dates"] >= SHADOW_MIN_DATES_MARKET)
+    out["prospective"] = pros
+    return out
+
+
+def _shadow_lanes(paths: Paths) -> dict:
+    path = paths.output / SHADOW_LANES_HISTORY
+    out: dict[str, Any] = {"present": path.exists(), "min_binary": SHADOW_MIN_BINARY, "lanes": []}
+    df = _shadow_frame(path) if path.exists() else None
+    if df is not None and "shadow_lane" not in df.columns:
+        raise ValueError(f"{path.name} has no 'shadow_lane' column")
+    ids = list(SHADOW_LANES) + ([] if df is None else sorted(set(df["shadow_lane"]) - set(SHADOW_LANES) - {""}))
+    empty = pd.DataFrame({"game_date": [], "result": []}, dtype=str)
+    for lane in ids:
+        info = SHADOW_LANES.get(lane, {"label": lane, "rule": ""})
+        part = empty if df is None else df[df["shadow_lane"] == lane]
+        out["lanes"].append({"id": lane, "label": info["label"], "rule": info["rule"], **_shadow_record(part)})
+    return out
+
+
+def build_shadow(paths: Paths, col: Collector) -> dict:
+    """Paper-only shadow results for the Models tab. A history file that does not exist yet means 'not collecting
+    yet' and is not an error; a file that exists but is unreadable is reported in the warning banner."""
+    return {
+        "market": col.run(f"output/{SHADOW_MODEL_FILE}", lambda: _shadow_market(paths, col), {"installed": False}),
+        "lanes": col.run(f"output/{SHADOW_LANES_HISTORY}", lambda: _shadow_lanes(paths),
+                         {"present": False, "min_binary": SHADOW_MIN_BINARY, "lanes": []}),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1245,11 +1413,66 @@ def load_wallpaper(asset_dir: Path | None = None) -> tuple[str | None, str | Non
     return None, None
 
 
+def load_brand_logo(asset_dir: Path | None = None) -> tuple[str | None, str | None]:
+    """Return (data: URI, problem) for the optional header logo (``brand.webp|png|jpg|jpeg``).
+
+    Embedded byte for byte, like the wallpaper, so the page stays one offline file. No file is fine: (None, None)
+    and the header keeps its text title. A file that is empty, too large or not really a JPEG/PNG/WebP is NOT
+    embedded and is explained in ``problem`` (the header then also keeps its text title, never a blank).
+    """
+    asset_dir = ASSET_DIR if asset_dir is None else Path(asset_dir)
+    for name in BRAND_NAMES:
+        f = asset_dir / name
+        if not f.is_file():
+            continue
+        try:
+            raw = f.read_bytes()
+        except OSError as exc:
+            return None, f"header logo {name} could not be read ({exc}); the header shows its text title"
+        if not raw or len(raw) > MAX_BRAND_BYTES:
+            return None, (f"header logo {name} is {len(raw):,} bytes, outside 1..{MAX_BRAND_BYTES:,}; "
+                          "it was not embedded and the header shows its text title")
+        mime = _image_mime(raw)
+        if mime is None:
+            return None, f"header logo {name} is not a JPEG, PNG or WebP image; it was not embedded and the header shows its text title"
+        return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii"), None
+    return None, None
+
+
+def load_fonts(asset_dir: Path | None = None) -> tuple[str, list[str]]:
+    """CSS ``@font-face`` rules (fonts embedded as data: URIs, so the page works offline) and a list of problems.
+
+    The display font is optional: no file is fine (the page falls back to its font stack). A file that is empty, too
+    large or not really a TrueType/OpenType font is NOT embedded and is explained in the problems.
+    """
+    asset_dir = ASSET_DIR if asset_dir is None else Path(asset_dir)
+    rules: list[str] = []
+    problems: list[str] = []
+    for family, name in FONT_FILES:
+        f = asset_dir / name
+        if not f.is_file():
+            continue
+        try:
+            raw = f.read_bytes()
+        except OSError as exc:
+            problems.append(f"font {name} could not be read ({exc}); the page uses its fallback fonts")
+            continue
+        magic = raw[:4]
+        if not raw or len(raw) > MAX_FONT_BYTES or magic not in (b"\x00\x01\x00\x00", b"true", b"OTTO"):
+            problems.append(f"font {name} is not a usable TrueType/OpenType file within 1..{MAX_FONT_BYTES:,} bytes; "
+                            "it was not embedded and the page uses its fallback fonts")
+            continue
+        mime, fmt = ("font/otf", "opentype") if magic == b"OTTO" else ("font/ttf", "truetype")
+        rules.append('@font-face{font-family:"%s";src:url(data:%s;base64,%s) format("%s");font-weight:400;'
+                     'font-style:normal;font-display:swap}' % (family, mime, base64.b64encode(raw).decode("ascii"), fmt))
+    return "\n".join(rules), problems
+
+
 # ---------------------------------------------------------------------------
 # Assemble + render
 # ---------------------------------------------------------------------------
 def build_payload(root: Path, now: datetime | None = None, logo_dir: Path | None = None,
-                  wallpaper_dir: Path | None = None) -> dict:
+                  wallpaper_dir: Path | None = None, brand_dir: Path | None = None, font_dir: Path | None = None) -> dict:
     paths = Paths(root)
     col = Collector()
     now = now or datetime.now()
@@ -1273,6 +1496,10 @@ def build_payload(root: Path, now: datetime | None = None, logo_dir: Path | None
     payload["wallpaper"], wallpaper_problem = load_wallpaper(wallpaper_dir)
     if wallpaper_problem:
         col.warnings.append(wallpaper_problem)
+    payload["brand"], brand_problem = load_brand_logo(brand_dir)
+    if brand_problem:
+        col.warnings.append(brand_problem)
+    col.warnings.extend(load_fonts(font_dir)[1])
     payload["eras"] = []
     for e in ERAS:
         g = picks[picks["era"] == e["key"]]
@@ -1311,6 +1538,8 @@ def render_html(payload: dict) -> str:
     """Inline CSS/JS/data into the template. '</' is escaped so data can never close the script tag."""
     tpl = (ASSET_DIR / "template.html").read_text(encoding="utf-8")
     css = (ASSET_DIR / "style.css").read_text(encoding="utf-8")
+    font_css = load_fonts()[0]
+    css = f"{font_css}\n{css}" if font_css else css
     charts = (ASSET_DIR / "charts.js").read_text(encoding="utf-8")
     app = (ASSET_DIR / "app.js").read_text(encoding="utf-8")
     data = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))

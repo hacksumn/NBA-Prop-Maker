@@ -40,7 +40,7 @@
     const t = TEAMS[abbr] || {}, s = size || 24, emb = hasEmbedded(abbr);
     const pic = emb ? `<i role="img" aria-label="${esc(abbr)}"></i>`
       : (t.id ? `<img src="${logoUrl(t.id)}" alt="${esc(abbr)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '');
-    return `<span class="tlogo${emb ? ' e-' + abbr : ''}${emb || t.id ? '' : ' nologo'}" style="--s:${s}px;--c:${t.color || '#667'}" data-tip="${esc('<b>' + (t.name || abbr) + '</b>')}">${pic}<b>${esc(abbr)}</b></span>`;
+    return `<span class="tlogo${emb ? ' e-' + abbr : ''}${emb || t.id ? '' : ' nologo'}" style="--s:${s}px;--c:${t.color || '#777'}" data-tip="${esc('<b>' + (t.name || abbr) + '</b>')}">${pic}<b>${esc(abbr)}</b></span>`;
   }
   const team = (abbr, size) => (abbr ? `<span class="tm">${logo(abbr, size || 22)}<span class="ab">${esc(abbr)}</span></span>` : '<span class="t-muted">–</span>');
   // image errors do not bubble, so listen in the capture phase and flip the badge on
@@ -48,6 +48,8 @@
 
   /* ---------- optional wallpaper (embedded by the builder as a data: URI; see style.css) ---------- */
   const WALL = (typeof D.wallpaper === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(D.wallpaper)) ? D.wallpaper : null;
+  // header logo (scripts/dashboard_assets/brand.*): only a plain base64 image data URI is ever used; anything else keeps the text title
+  const BRAND = (typeof D.brand === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(D.brand)) ? D.brand : null;
   if (WALL) document.documentElement.style.setProperty('--wall', `url("${WALL}")`);
   let wallOn = store.get('nba.wall', 'on') !== 'off';
   function applyWall() {
@@ -80,16 +82,16 @@
      real layers in 3D space, tilting the icon shows true side depth. %M% is the main paint and %A% the accent
      (white detail on the face, dark on the slices, hidden on the gloss). c = [light, base] gradient, d = extrusion. */
   const ICON3D = {
-    overview: { c: ['#ffc58a', '#ff6a2b'], d: '#7a2f0c', s: '<rect x="3" y="3" width="8.2" height="10.4" rx="2.4" fill="%M%"/><rect x="12.8" y="3" width="8.2" height="6.2" rx="2.4" fill="%M%"/><rect x="12.8" y="10.8" width="8.2" height="10.2" rx="2.4" fill="%M%"/><rect x="3" y="15" width="8.2" height="6" rx="2.4" fill="%M%"/>' },
-    today: { c: ['#ff9d86', '#ff3d4f'], d: '#7a1226', s: '<circle cx="12" cy="12" r="9.6" fill="%M%"/><circle cx="12" cy="12" r="6.6" fill="%A%"/><circle cx="12" cy="12" r="3.9" fill="%M%"/><circle cx="12" cy="12" r="1.5" fill="%A%"/>' },
-    perf: { c: ['#c4f77a', '#34c759'], d: '#17622c', s: '<rect x="3" y="13.2" width="4.4" height="7.8" rx="1.5" fill="%M%"/><rect x="9.8" y="8.6" width="4.4" height="12.4" rx="1.5" fill="%M%"/><rect x="16.6" y="3" width="4.4" height="18" rx="1.5" fill="%M%"/>' },
-    explorer: { c: ['#9be9ff', '#2a9dff'], d: '#0f4a82', s: '<circle cx="10.4" cy="10.4" r="6.6" fill="none" stroke="%M%" stroke-width="3.2"/><path d="M15.4 15.4l5 5" fill="none" stroke="%M%" stroke-width="3.6" stroke-linecap="round"/><path d="M7.4 9.4a3.4 3.4 0 0 1 2.6-2.1" fill="none" stroke="%A%" stroke-width="1.5" stroke-linecap="round"/>' },
-    gates: { c: ['#ffa8ef', '#d63fe8'], d: '#68157a', s: '<path d="M3.2 4.2h17.6L14.2 12v6.6l-4.4 2.2V12z" fill="%M%" stroke="%M%" stroke-width="1.6" stroke-linejoin="round"/>' },
-    clv: { c: ['#9fc0ff', '#3f6bff'], d: '#1a2c88', s: '<path d="M2.6 12.8h4.2l2.6-7.4 4.6 13.2 2.6-5.8h4.8" fill="none" stroke="%M%" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' },
-    models: { c: ['#8bf5ea', '#10bccb'], d: '#0a5560', s: '<path d="M9.4 3h5.2v5.4l4.7 8.3a3.1 3.1 0 0 1-2.7 4.6H7.4a3.1 3.1 0 0 1-2.7-4.6l4.7-8.3z" fill="%M%" stroke="%M%" stroke-width="1" stroke-linejoin="round"/><rect x="8" y="2" width="8" height="2.6" rx="1.3" fill="%M%"/><path d="M7.2 15.4h9.6" fill="none" stroke="%A%" stroke-width="2" stroke-linecap="round"/><circle cx="10.6" cy="18.2" r="1" fill="%A%"/><circle cx="14" cy="17.6" r=".8" fill="%A%"/>' },
-    slips: { c: ['#ffe493', '#ffab1a'], d: '#85560a', s: '<path d="M6.6 2.6h10.8A1.6 1.6 0 0 1 19 4.2v17.2l-2.5-1.7-2.2 1.7-2.3-1.7-2.3 1.7-2.2-1.7L5 21.4V4.2a1.6 1.6 0 0 1 1.6-1.6z" fill="%M%" stroke="%M%" stroke-width=".8" stroke-linejoin="round"/><path d="M8.6 8h6.8M8.6 11.6h6.8M8.6 15.2h4" fill="none" stroke="%A%" stroke-width="1.8" stroke-linecap="round"/>' },
-    health: { c: ['#86f2cf', '#12b886'], d: '#0b5e47', s: '<path d="M12 2.4l8 3v6.4c0 4.9-3.3 8.4-8 9.8-4.7-1.4-8-4.9-8-9.8V5.4z" fill="%M%" stroke="%M%" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 12.2l2.9 2.9 5.2-5.7" fill="none" stroke="%A%" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' },
-    decisions: { c: ['#c5b6ff', '#7058ff'], d: '#2f1f94', s: '<path d="M6 2.8h11.6A1.4 1.4 0 0 1 19 4.2v14.6a1.4 1.4 0 0 1-1.4 1.4H7a3 3 0 0 1-3-3V4.8a2 2 0 0 1 2-2z" fill="%M%" stroke="%M%" stroke-width=".8" stroke-linejoin="round"/><path d="M8 2.8v17.4" fill="none" stroke="%A%" stroke-width="1.6"/><path d="M11 8h5M11 11.4h3.6" fill="none" stroke="%A%" stroke-width="1.8" stroke-linecap="round"/>' },
+    overview: { c: ['#ff5c5c', '#ff2a2a'], d: '#6b0707', s: '<rect x="3" y="3" width="8.2" height="10.4" rx="2.4" fill="%M%"/><rect x="12.8" y="3" width="8.2" height="6.2" rx="2.4" fill="%M%"/><rect x="12.8" y="10.8" width="8.2" height="10.2" rx="2.4" fill="%M%"/><rect x="3" y="15" width="8.2" height="6" rx="2.4" fill="%M%"/>' },
+    today: { c: ['#ffffff', '#cfcfcf'], d: '#4a4a4a', s: '<circle cx="12" cy="12" r="9.6" fill="%M%"/><circle cx="12" cy="12" r="6.6" fill="%A%"/><circle cx="12" cy="12" r="3.9" fill="%M%"/><circle cx="12" cy="12" r="1.5" fill="%A%"/>' },
+    perf: { c: ['#ff5c5c', '#ff2a2a'], d: '#6b0707', s: '<rect x="3" y="13.2" width="4.4" height="7.8" rx="1.5" fill="%M%"/><rect x="9.8" y="8.6" width="4.4" height="12.4" rx="1.5" fill="%M%"/><rect x="16.6" y="3" width="4.4" height="18" rx="1.5" fill="%M%"/>' },
+    explorer: { c: ['#ffffff', '#cfcfcf'], d: '#4a4a4a', s: '<circle cx="10.4" cy="10.4" r="6.6" fill="none" stroke="%M%" stroke-width="3.2"/><path d="M15.4 15.4l5 5" fill="none" stroke="%M%" stroke-width="3.6" stroke-linecap="round"/><path d="M7.4 9.4a3.4 3.4 0 0 1 2.6-2.1" fill="none" stroke="%A%" stroke-width="1.5" stroke-linecap="round"/>' },
+    gates: { c: ['#ff5c5c', '#ff2a2a'], d: '#6b0707', s: '<path d="M3.2 4.2h17.6L14.2 12v6.6l-4.4 2.2V12z" fill="%M%" stroke="%M%" stroke-width="1.6" stroke-linejoin="round"/>' },
+    clv: { c: ['#ffffff', '#cfcfcf'], d: '#4a4a4a', s: '<path d="M2.6 12.8h4.2l2.6-7.4 4.6 13.2 2.6-5.8h4.8" fill="none" stroke="%M%" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' },
+    models: { c: ['#ff5c5c', '#ff2a2a'], d: '#6b0707', s: '<path d="M9.4 3h5.2v5.4l4.7 8.3a3.1 3.1 0 0 1-2.7 4.6H7.4a3.1 3.1 0 0 1-2.7-4.6l4.7-8.3z" fill="%M%" stroke="%M%" stroke-width="1" stroke-linejoin="round"/><rect x="8" y="2" width="8" height="2.6" rx="1.3" fill="%M%"/><path d="M7.2 15.4h9.6" fill="none" stroke="%A%" stroke-width="2" stroke-linecap="round"/><circle cx="10.6" cy="18.2" r="1" fill="%A%"/><circle cx="14" cy="17.6" r=".8" fill="%A%"/>' },
+    slips: { c: ['#ffffff', '#cfcfcf'], d: '#4a4a4a', s: '<path d="M6.6 2.6h10.8A1.6 1.6 0 0 1 19 4.2v17.2l-2.5-1.7-2.2 1.7-2.3-1.7-2.3 1.7-2.2-1.7L5 21.4V4.2a1.6 1.6 0 0 1 1.6-1.6z" fill="%M%" stroke="%M%" stroke-width=".8" stroke-linejoin="round"/><path d="M8.6 8h6.8M8.6 11.6h6.8M8.6 15.2h4" fill="none" stroke="%A%" stroke-width="1.8" stroke-linecap="round"/>' },
+    health: { c: ['#ff5c5c', '#ff2a2a'], d: '#6b0707', s: '<path d="M12 2.4l8 3v6.4c0 4.9-3.3 8.4-8 9.8-4.7-1.4-8-4.9-8-9.8V5.4z" fill="%M%" stroke="%M%" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 12.2l2.9 2.9 5.2-5.7" fill="none" stroke="%A%" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' },
+    decisions: { c: ['#ffffff', '#cfcfcf'], d: '#4a4a4a', s: '<path d="M6 2.8h11.6A1.4 1.4 0 0 1 19 4.2v14.6a1.4 1.4 0 0 1-1.4 1.4H7a3 3 0 0 1-3-3V4.8a2 2 0 0 1 2-2z" fill="%M%" stroke="%M%" stroke-width=".8" stroke-linejoin="round"/><path d="M8 2.8v17.4" fill="none" stroke="%A%" stroke-width="1.6"/><path d="M11 8h5M11 11.4h3.6" fill="none" stroke="%A%" stroke-width="1.8" stroke-linecap="round"/>' },
   };
   const darker = (hex, k) => '#' + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * k).toString(16).padStart(2, '0')).join('');
   const layer3d = (shapes, main, accent, cls, style) => `<span class="sl ${cls}" style="${style}"><svg viewBox="0 0 24 24" focusable="false">${shapes.replace(/%M%/g, main).replace(/%A%/g, accent)}</svg></span>`;
@@ -478,7 +480,7 @@
         ${panel({ title: 'Gate experiment (DEC-071/073)', cls: 'c4', sub: 'Alternative thresholds measured forward on the same candidates', body: gateExperiment() })}
       </div>`;
     const bk = {}; GATES.buckets.forEach((b) => { bk[b.bucket] = b; });
-    const bcol = { published: C.css('--win'), blocked_price: C.css('--amber'), blocked_other: C.css('--violet') };
+    const bcol = { published: C.css('--accent-2'), blocked_price: C.css('--loss'), blocked_other: C.css('--violet') };
     C.pie($('#gt-pie-bucket'), { size: 180, hole: 0, legend: 'bottom', slices: GATES.buckets.map((b) => ({ label: BUCKET_LABEL[b.bucket][0], value: b.n + b.p + b.dnp + b.pending, text: `${b.w}-${b.l}`, color: bcol[b.bucket], tip: tipRows(BUCKET_LABEL[b.bucket][0], [['Candidates', b.n + b.p + b.dnp + b.pending], ['Graded record', `${b.w}-${b.l}`], ['Units', F.u(b.units)]]) })) });
     C.pie($('#gt-pie-reason'), { size: 180, center: { text: String(GATES.rows), sub: 'candidates' }, legend: 'bottom', slices: (GATES.categories || []).map((c) => ({ label: c.category, value: c.n + c.p + c.dnp + c.pending, text: `${c.w}-${c.l}`, tip: tipRows(c.category, [['Candidates', c.n + c.p + c.dnp + c.pending], ['Record', `${c.w}-${c.l}`], ['Units', F.u(c.units)]]) })) });
     const pub = bk.published;
@@ -494,7 +496,7 @@
     const sP = series('published'); cum = { published: 0, blocked_price: 0, blocked_other: 0 };
     const sB = series('blocked_price'); cum = { published: 0, blocked_price: 0, blocked_other: 0 };
     const sO = series('blocked_other');
-    C.line($('#gt-cum'), { height: 260, labels: GATES.by_day.map((d) => F.date(d.date)), yFmt: (v) => v.toFixed(0) + 'u', series: [{ color: C.css('--win'), area: true, data: sP }, { color: C.css('--amber'), data: sB }, { color: C.css('--violet'), data: sO }], tip: (i) => tipRows(F.dateY(GATES.by_day[i].date), [['Published', `${GATES.by_day[i].published.w}-${GATES.by_day[i].published.l} · ${F.u(sP[i].y)} cum`], ['Blocked: price', `${GATES.by_day[i].blocked_price.w}-${GATES.by_day[i].blocked_price.l} · ${F.u(sB[i].y)} cum`], ['Blocked: other', `${GATES.by_day[i].blocked_other.w}-${GATES.by_day[i].blocked_other.l} · ${F.u(sO[i].y)} cum`]]) });
+    C.line($('#gt-cum'), { height: 260, labels: GATES.by_day.map((d) => F.date(d.date)), yFmt: (v) => v.toFixed(0) + 'u', series: [{ color: C.css('--accent-2'), area: true, data: sP }, { color: C.css('--loss'), data: sB }, { color: C.css('--violet'), data: sO }], tip: (i) => tipRows(F.dateY(GATES.by_day[i].date), [['Published', `${GATES.by_day[i].published.w}-${GATES.by_day[i].published.l} · ${F.u(sP[i].y)} cum`], ['Blocked: price', `${GATES.by_day[i].blocked_price.w}-${GATES.by_day[i].blocked_price.l} · ${F.u(sB[i].y)} cum`], ['Blocked: other', `${GATES.by_day[i].blocked_other.w}-${GATES.by_day[i].blocked_other.l} · ${F.u(sO[i].y)} cum`]]) });
     countUp(root);
   }
   function gateExperiment() {
@@ -539,7 +541,7 @@
     $('#cv-g2').innerHTML = C.gauge({ min: 0, max: 1, value: o.moved_toward_side_rate, ref: 0.5, refLabel: '50%', zones: [{ from: 0, to: 0.45, color: C.css('--loss') }, { from: 0.45, to: 0.55, color: C.css('--amber') }, { from: 0.55, to: 1, color: C.css('--win') }], text: F.pct(o.moved_toward_side_rate, 0), sub: `${F.pct(o.moved_away_rate, 0)} moved against us`, minLabel: '0', maxLabel: '100%' });
     const cq = pk.close_quality_counts || {};
     C.pie($('#cv-pie'), { size: 170, center: { text: String(pk.all_rows || 0), sub: 'picks' }, legend: 'bottom', slices: [
-      { label: 'Exact-line close', value: cq.exact_line, color: C.css('--win') }, { label: 'No later snapshot', value: cq.no_later_snapshot, color: C.css('--faint') }, { label: 'Line moved at close', value: cq.line_moved, color: C.css('--amber') }] });
+      { label: 'Exact-line close', value: cq.exact_line, color: C.css('--accent-2') }, { label: 'No later snapshot', value: cq.no_later_snapshot, color: C.css('--faint') }, { label: 'Line moved at close', value: cq.line_moved, color: C.css('--loss') }] });
     const h = CLV.hist || [];
     C.bars($('#cv-hist'), { height: 250, yFmt: (v) => v.toFixed(0), data: h.map((b) => ({ label: `${(b.lo * 100).toFixed(0)}%`, value: b.n, color: b.hi <= 0 ? C.css('--loss') : C.css('--win'), tip: tipRows(`${(b.lo * 100).toFixed(0)}% to ${(b.hi * 100).toFixed(0)}%`, [['Picks', b.n]]) })), xTicks: 6 });
     C.scatter($('#cv-sc'), { height: 280, xDomain: [0.3, 0.8], yDomain: [0.3, 0.8], diag: true, xLabel: 'no-vig probability at bet time', yLabel: 'at the close', groups: [{ color: C.css('--faint'), points: (CLV.scatter || []).map((p) => ({ x: p.b, y: p.c, color: p.res === 'WIN' ? C.css('--win') : p.res === 'LOSS' ? C.css('--loss') : C.css('--faint'), r: 5, tip: tipRows(p.stat, [['Bet', F.pct(p.b)], ['Close', F.pct(p.c)], ['Move', F.pts(p.c - p.b)], ['Result', p.res || 'pending']]) })) }] });
@@ -560,6 +562,7 @@
       <div class="grid stagger">
         ${panel({ title: 'Production models: what the evidence says', cls: 'c12', sub: 'Real-line out-of-fold accuracy, meta-classifier AUC, and the always-UNDER check. Live lanes are the props that actually published this season.', body: `<div class="tablewrap"><table><thead><tr><th>Prop</th><th>Live this season</th><th class="n">Real lines</th><th class="n">OOF hit rate</th><th class="n">Meta AUC</th><th class="n">Features</th><th class="n">MAE</th><th class="n">Audit n</th><th class="n">Model</th><th class="n">Always-UNDER</th><th class="n">Edge</th><th>Audit</th></tr></thead><tbody>${props.map((p) => `<tr><td class="pl">${esc(p.prop)}</td><td>${live.has(p.prop) ? chip('LIVE', 'win') : chip('off', '')}</td><td class="n">${F.n(p.n_real)}</td><td class="n">${hitBar({ hit: p.real_hit })}</td><td class="n ${p.meta_auc > 0.6 ? 't-win' : ''}">${p.meta_auc != null ? p.meta_auc.toFixed(3) : '–'}</td><td class="n">${p.n_feat ?? '–'}<span class="t-muted">/${p.n_feat_orig ?? '–'}</span></td><td class="n">${p.mae != null ? p.mae.toFixed(2) : '–'}</td><td class="n">${p.audit_n ?? '–'}</td><td class="n">${p.audit_model != null ? p.audit_model.toFixed(1) + '%' : '–'}</td><td class="n">${p.audit_under != null ? p.audit_under.toFixed(1) + '%' : '–'}</td><td class="n ${F.tone(p.audit_edge)}">${p.audit_edge != null ? (p.audit_edge >= 0 ? '+' : '−') + Math.abs(p.audit_edge).toFixed(1) + ' pts' : '–'}</td><td>${p.audit_status ? chip(p.audit_status, p.audit_status === 'PASS' ? 'win' : 'loss') : '<span class="t-muted">–</span>'}</td></tr>`).join('')}</tbody></table></div><div class="note" style="margin-top:10px">Meta AUC ≈ 0.50 means the classifier cannot rank winners from losers; only STL (${fmtAuc('STL')}) and BLK (${fmtAuc('BLK')}) clear 0.6, which matches the UNDER-only lane policy. The audit compares against always betting UNDER on pick history (as of ${esc(String(MODELS.audit_ts || '').slice(0, 10))}).</div>` })}
       </div>
+      ${shadowSection()}
       <div class="grid stagger">
         ${panel({ title: 'Meta-classifier AUC dials', cls: 'c12', sub: 'How well each prop\'s meta-classifier ranks winners from losers. 0.50 (amber tick) is a coin flip; only STL and BLK clear 0.60, which is why the live card is limited to UNDER lanes.', body: `<div class="dial-sm">${props.map((p) => dial(p.prop + (live.has(p.prop) ? ' · LIVE' : ''), C.gauge({ size: 170, min: 0.45, max: 0.7, value: p.meta_auc, ref: 0.5, zones: [{ from: 0.45, to: 0.5, color: C.css('--loss') }, { from: 0.5, to: 0.6, color: C.css('--amber') }, { from: 0.6, to: 0.7, color: C.css('--win') }], text: p.meta_auc != null ? p.meta_auc.toFixed(3) : '–', minLabel: '.45', maxLabel: '.70' }), `${F.n(p.n_real)} real lines`)).join('')}</div>` })}
       </div>
@@ -583,6 +586,7 @@
       const per = state.lane === 'holdout' ? lanes.hold : lanes.dev;
       $('#ml-lane-note').innerHTML = per ? `Top pick per prop per date vs a date/prop-matched random UNDER, ${per.dates} dates (${esc(per.date_min)} → ${esc(per.date_max)}). Positive lift with a CI above 0 is the evidence behind the ranking policy.` : '';
     };
+    drawShadowForest();
     drawLane(); onSeg(root, 'lane', (v) => { state.lane = v; drawLane(); });
     const drawFeat = () => {
       const f = (MODELS.features || {})[state.feat] || [], mx = Math.max(...f.map((x) => x.v), 1e-9);
@@ -597,13 +601,96 @@
     const all = c.results.find((r) => r.prop === 'ALL'), per = c.results.filter((r) => r.prop !== 'ALL');
     const dates = all ? all.dates : 0, need = c.min_dates || 15, pctDone = Math.min(100, (dates / need) * 100);
     const rowsDone = c.min_rows ? Math.min(1, (c.rows || 0) / c.min_rows) : 0;
-    return `<div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:12px"><div class="ringrow">${C.miniRing(pctDone / 100, { size: 76, text: `${dates}/${need}`, color: C.css('--accent') })}<div class="rt"><b>Dates</b><span>${need} needed before review</span></div></div><div class="ringrow">${C.miniRing(rowsDone, { size: 76, text: rowsDone >= 1 ? '✓' : `${F.n(c.rows)}`, color: C.css('--win') })}<div class="rt"><b>Contracts</b><span>${F.n(c.rows)} of ${c.min_rows} minimum</span></div></div></div>
+    return `<div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:12px"><div class="ringrow">${C.miniRing(pctDone / 100, { size: 76, text: `${dates}/${need}`, color: C.css('--accent') })}<div class="rt"><b>Dates</b><span>${need} needed before review</span></div></div><div class="ringrow">${C.miniRing(rowsDone, { size: 76, text: rowsDone >= 1 ? '✓' : `${F.n(c.rows)}`, color: C.css('--accent-2') })}<div class="rt"><b>Contracts</b><span>${F.n(c.rows)} of ${c.min_rows} minimum</span></div></div></div>
       <div class="tablewrap"><table><thead><tr><th>Prop</th><th class="n">Rows</th><th class="n">Candidate</th><th class="n">Production</th><th class="n">Always-UNDER</th><th class="n">vs prod.</th></tr></thead><tbody>${[...(all ? [all] : []), ...per].map((r) => `<tr><td class="pl">${esc(r.prop)}</td><td class="n">${r.rows}</td><td class="n">${F.pct(r.cand)}</td><td class="n">${F.pct(r.prod)}</td><td class="n">${F.pct(r.under)}</td><td class="n ${F.tone(r.vs_prod)}" data-tip="${esc('95% CI ' + F.pts(r.vs_prod_ci && r.vs_prod_ci[0]) + ' to ' + F.pts(r.vs_prod_ci && r.vs_prod_ci[1]))}">${F.pts(r.vs_prod)}</td></tr>`).join('')}</tbody></table></div>
       <div class="note" style="margin-top:8px">Nothing is promoted unless it clears ${need} dates and ${c.min_rows} rows <i>and</i> beats production and always-UNDER with a positive interval.</div>`;
   }
+  /* ---------- shadow models (DEC-109 market-anchored probability, DEC-108 UNDER lanes): paper only, never published ---------- */
+  const llTxt = (v) => (v != null && isFinite(v) ? v.toFixed(4) : '–');
+  const llDiff = (v) => (v != null && isFinite(v) ? (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(4) : '–');
+  // lower log loss is better: a negative difference whose interval stays below zero is the only clearly good case
+  const llTone = (b) => (b && b.hi != null && b.hi < 0 ? 't-win' : b && b.lo != null && b.lo > 0 ? 't-loss' : 't-amber');
+  const progBar = (n, need) => `<span class="barcell"><span class="minibar"><i style="width:${Math.min(100, (n / need) * 100).toFixed(0)}%;background:var(--accent)"></i></span><span class="num">${F.n(n)}/${need}</span></span>`;
+
+  function shadowMarketPanel(m) {
+    if (!m || !m.installed) return panel({ title: 'Shadow model: market-anchored probability', cls: 'c12', body: '<div class="empty">The shadow model is not installed (output/market_probability_shadow.json is missing).</div>' });
+    const ev = m.evaluation;
+    const chips = [chip(m.status === 'shadow_only' ? 'shadow only' : String(m.status || 'unknown'), 'info'), chip(`trained through ${m.trained_through || '–'}`), chip(`${F.n(m.training_rows)} fit rows · ${F.n(m.training_dates)} dates`)];
+    if (ev) chips.push(ev.promotion_eligible ? chip('promotion eligible', 'win') : chip('not promotion-eligible', 'amber'));
+    if (m.evaluation_hash_ok === true) chips.push(chip('evidence file verified', 'win'));
+    if (m.evaluation_hash_ok === false) chips.push(chip('evidence file changed since install', 'loss'));
+    if (!ev) return panel({ title: 'Shadow model: market-anchored probability', cls: 'c8', body: `<div class="chips-row" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${chips.join('')}</div><div class="empty">Its evaluation file could not be read. Check the warnings banner.</div>` });
+    const tests = [
+      ['Frozen prior-season fit', ev.frozen, 'Fit once on last season, scored on this season\'s forward offers.'],
+      ['Expanding, prior dates only', ev.walk, 'Refit before each date using only earlier whole dates.'],
+      ['Same rows · anchored model', ev.anchored_same_rows, 'Offers that also have an archived incumbent probability; anchored model vs the market.'],
+      ['Same rows · incumbent (calibrated)', ev.incumbent_same_rows, 'The same offers scored by the current production probability, for comparison.'],
+    ].filter((t) => t[1]);
+    const sub = (t) => `<div class="t-muted" style="font-size:11px;font-weight:400">${t}</div>`;
+    const rowHtml = tests.map(([label, b, tip]) => `<tr><td class="pl" data-tip="${esc(tip)}">${esc(label)}${sub(`${F.n(b.rows)} offers · ${F.n(b.dates)} dates`)}</td><td class="n">${llTxt(b.market)}</td><td class="n">${llTxt(b.model)}</td><td class="n ${llTone(b)}">${llDiff(b.diff)}${sub(`${llDiff(b.lo)} to ${llDiff(b.hi)}`)}</td><td class="n">${b.under_picks == null ? '–' : b.under_picks === 0 ? '<span class="t-muted">none qualify</span>' : `${F.n(b.under_picks)}${sub(`ROI ${F.pct(b.under_roi)}`)}`}</td></tr>`).join('');
+    const forestNote = (ev.by_prop || []).length ? '<div class="psub" style="margin:14px 0 2px">Change in log loss vs the market by prop (×1000, expanding fit). Left of the dashed line is better than the market.</div><div id="sh-forest"></div>' : '';
+    return panel({
+      title: 'Shadow model: market-anchored probability', cls: 'c8',
+      sub: `Starts from FanDuel's no-vig price and learns only a small correction. Scored on offers from ${esc(F.dateY(ev.forward_start))} to ${esc(F.dateY(ev.data_end))}. Paper only; the live card does not use it.`,
+      body: `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${chips.join('')}</div>
+        <div class="tablewrap"><table><thead><tr><th>Test</th><th class="n">Market</th><th class="n">Model</th><th class="n" data-tip="Model minus market, with the 95% interval from resampling whole dates">Difference · 95% CI</th><th class="n" data-tip="UNDER picks the model would take at +1% EV or better at the offered price">UNDERs at +1% EV</th></tr></thead><tbody>${rowHtml}</tbody></table></div>
+        <div class="note" style="margin-top:8px">Log loss, lower is better. The gain over the market is real but tiny (about 0.001), the intervals only just clear zero, and no UNDER reaches +1% EV at the offered price, so this is a better probability estimate, not a betting edge. ${esc(ev.promotion_reason || '')}</div>${forestNote}`,
+    });
+  }
+
+  function shadowProspectivePanel(m) {
+    if (!m || !m.installed) return '';
+    const pro = m.prospective || {}, need = m.min_binary || 300, needD = m.min_dates || 30;
+    let body;
+    if (!pro.present) {
+      body = '<div class="empty">No prospective rows yet. The next FanDuel prediction run starts the log, and each offer is graded by the morning run after its game.</div>';
+    } else {
+      const dates = pro.dates || 0, bin = pro.binary || 0;
+      const vs = (pro.vs_market || []).map((v) => `<tr><td class="pl">${esc(v.label)}</td><td class="n">${F.n(v.n)}</td><td class="n ${v.diff != null ? (v.diff < 0 ? 't-win' : v.diff > 0 ? 't-loss' : '') : ''}">${llDiff(v.diff)}</td></tr>`).join('');
+      body = `<div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:12px"><div class="ringrow">${C.miniRing(Math.min(1, dates / needD), { size: 76, text: `${dates}/${needD}`, color: C.css('--accent') })}<div class="rt"><b>Settled dates</b><span>${needD} needed before review</span></div></div><div class="ringrow">${C.miniRing(Math.min(1, bin / need), { size: 76, text: F.n(bin), color: C.css('--accent-2') })}<div class="rt"><b>Settled offers</b><span>${F.n(need)} needed before review</span></div></div></div>
+        <div class="stat-row"><div><b>${F.n(pro.rows)}</b><span>offers logged</span></div><div><b>${F.n(pro.pending)}</b><span>awaiting grade</span></div><div><b>${F.n((pro.push || 0) + (pro.dnp || 0))}</b><span>push / DNP</span></div></div>
+        ${bin ? `<div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Log loss vs market</th><th class="n">Settled rows</th><th class="n">Difference</th></tr></thead><tbody>${vs}</tbody></table></div>` : '<div class="note" style="margin-top:10px">The comparison with the market appears once offers settle.</div>'}
+        ${pro.fallbacks ? `<div class="note" style="margin-top:8px">${F.n(pro.fallbacks)} offer(s) lacked enough history and used the market price unchanged.</div>` : ''}`;
+    }
+    return panel({
+      title: 'Prospective record', cls: 'c4', sub: pro.present && pro.first ? `Offers from ${esc(F.dateY(pro.first))} to ${esc(F.dateY(pro.last))}` : 'Collecting from the next prediction run',
+      body: `${body}<div class="note" style="margin-top:10px">Needs ${needD} settled dates <i>and</i> ${F.n(need)} settled offers before a review, and reaching them promotes nothing. The retrospective numbers on the left do not count toward this record.</div>`,
+    });
+  }
+
+  function shadowLanesPanel(L) {
+    const need = (L && L.min_binary) || 300, lanes = (L && L.lanes) || [];
+    const rows = lanes.map((l) => `<tr><td class="pl">${esc(l.label)}<div class="t-muted" style="font-size:11px;font-weight:400">${esc(l.rule)}</div></td><td class="n">${F.n(l.rows)}</td><td class="n">${progBar(l.binary || 0, need)}</td><td class="n">${F.n(l.dates)}</td><td class="n">${l.binary ? hitBar({ hit: l.hit }) : '<span class="t-muted">–</span>'}</td><td class="n ${l.binary ? F.tone(l.units) : ''}">${l.binary ? F.u(l.units) : '–'}</td><td class="n ${l.binary ? F.tone(l.roi) : ''}">${l.binary ? F.pct(l.roi) : '–'}</td><td class="n t-muted">${F.n(l.push)} · ${F.n(l.dnp)} · ${F.n(l.pending)}</td></tr>`).join('');
+    return panel({
+      title: 'Shadow UNDER lanes · paper only', cls: 'c12',
+      sub: L && L.present ? 'The first eligible FanDuel offer per player, prop and day, at the exact recorded price. Nothing here is published, bet or used for training.' : 'Collecting from the next prediction run. Nothing here is published, bet or used for training.',
+      body: `<div class="tablewrap"><table><thead><tr><th>Lane</th><th class="n">Logged</th><th class="n">Settled (win/loss)</th><th class="n">Dates</th><th class="n">Hit</th><th class="n">Paper units</th><th class="n">ROI</th><th class="n">Push · DNP · pending</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No lanes are defined.</td></tr>'}</tbody></table></div>
+        <div class="note" style="margin-top:8px">About 40 combinations were screened to find these two, so their earlier results may be luck; only rows logged from now on count. The ${need}-outcome review minimum applies to each lane on its own (they are not pooled) and reaching it is not authorization to bet.</div>`,
+    });
+  }
+
+  function shadowSection() {
+    const S = MODELS.shadow || {};
+    return `<div class="grid stagger">${shadowMarketPanel(S.market)}${shadowProspectivePanel(S.market)}</div>
+      <div class="grid stagger">${shadowLanesPanel(S.lanes)}</div>`;
+  }
+
+  function drawShadowForest() {
+    const el = $('#sh-forest'), ev = ((MODELS.shadow || {}).market || {}).evaluation;
+    if (!el || !ev) return;
+    const rows = (ev.by_prop || []).filter((p) => p.diff != null).map((p) => {
+      const est = p.diff * 1000, lo = p.lo != null ? p.lo * 1000 : null, hi = p.hi != null ? p.hi * 1000 : null;
+      return { label: p.prop, sub: `${F.n(p.rows)} offers`, est, lo, hi, value: (est > 0 ? '+' : est < 0 ? '−' : '') + Math.abs(est).toFixed(2),
+        color: hi != null && hi < 0 ? C.css('--win') : lo != null && lo > 0 ? C.css('--loss') : C.css('--accent-2'),
+        tip: tipRows(p.prop, [['Offers', F.n(p.rows)], ['Market', llTxt(p.market)], ['Model', llTxt(p.model)], ['Difference', `<b>${llDiff(p.diff)}</b>`], ['95% CI', `${llDiff(p.lo)} to ${llDiff(p.hi)}`]]) };
+    });
+    if (!rows.length) return;
+    const lo = Math.min(0, ...rows.map((r) => (r.lo != null ? r.lo : r.est))), hi = Math.max(0, ...rows.map((r) => (r.hi != null ? r.hi : r.est))), pad = (hi - lo) * 0.08 || 0.5;
+    C.forest(el, { rows, domain: [lo - pad, hi + pad], ref: 0, refLabel: 'market', fmt: (v) => v.toFixed(1), rowH: 30, labelW: 120 });
+  }
   function integrityPanel() {
     const m = HEALTH.maintenance || {}, rc = HEALTH.reconciliation || {};
-    return `<div class="stat-row"><div><b class="${m.production_unchanged ? 't-win' : 't-loss'}">${m.production_unchanged ? 'Locked' : 'Changed'}</b><span>production bundle</span></div><div><b>${m.artifacts_hashed ?? '–'}</b><span>artifacts hashed</span></div><div><b>${esc(m.status || '–')}</b><span>${esc(m.mode || 'maintenance')} job</span></div></div>
+    return `<div class="stat-row"><div><b class="${m.production_unchanged ? '' : 't-loss'}">${m.production_unchanged ? 'Locked' : 'Changed'}</b><span>production bundle</span></div><div><b>${m.artifacts_hashed ?? '–'}</b><span>artifacts hashed</span></div><div><b>${esc(m.status || '–')}</b><span>${esc(m.mode || 'maintenance')} job</span></div></div>
       <div class="note">Last training maintenance ended <b>${esc(String(m.ended_at || '–').replace('T', ' ').slice(0, 16))}</b>. The Sunday job trains into an isolated candidates folder and verifies every production file hash is unchanged (DEC-057).<br><br>Grade reconciliation checked <b>${F.n(rc.checked)}</b> stored grades: <b class="${rc.current_conflicts ? 't-amber' : 't-win'}">${rc.current_conflicts ?? 0} conflicts</b>, ${rc.outcome_conflicts ?? 0} that flip a W/L outcome.</div>`;
   }
 
@@ -663,7 +750,7 @@
         ${kpi({ label: 'Last box score', val: F.dateY((data.nba_data || {}).last_date), tone: 'info', sub: `${F.n((data.nba_data || {}).rows)} rows · ${F.n((data.nba_data || {}).players)} players` })}
         ${kpi({ label: 'Lines archive', val: F.n((data.lines || {}).rows), tone: 'violet', sub: `through ${F.dateY((data.lines || {}).last_date)}` })}
         ${kpi({ label: 'Odds API credits', count: lastCredit && lastCredit.credits, fmt: 'int', val: lastCredit ? F.n(lastCredit.credits) : '–', tone: lastCredit && lastCredit.credits < 2000 ? 'loss' : 'amber', sub: lastCredit ? `as of ${esc(lastCredit.t)}` : 'not logged' })}
-        ${kpi({ label: 'Production models', val: (HEALTH.maintenance || {}).production_unchanged ? 'Locked' : '–', vcls: 't-win', tone: 'win', sub: `${(HEALTH.maintenance || {}).artifacts_hashed || '–'} artifacts hashed` })}
+        ${kpi({ label: 'Production models', val: (HEALTH.maintenance || {}).production_unchanged ? 'Locked' : '–', vcls: '', tone: 'win', sub: `${(HEALTH.maintenance || {}).artifacts_hashed || '–'} artifacts hashed` })}
         ${kpi({ label: 'Repo', val: esc(git.commit || '–'), tone: 'info', sub: `${esc(git.branch || '')} · ${git.dirty ?? '?'} uncommitted` })}
       </div>
       ${flags.map((f) => `<div class="banner bad"><b>Integrity</b><span>${esc(f.text)} ${esc(f.hint || '')}</span></div>`).join('')}
@@ -680,7 +767,7 @@
         ${panel({ title: 'Odds API credits', cls: 'c7', sub: 'Remaining provider credits, each time the pipeline logged them', body: '<div id="hl-credits"></div>' })}
       </div>
       <div class="grid stagger">
-        ${panel({ title: 'File freshness', cls: 'c7', sub: 'Ring fills as a file ages toward 48 hours', body: `<div class="tablewrap"><table><thead><tr><th></th><th>File</th><th>Modified</th><th>Age</th></tr></thead><tbody>${(HEALTH.files || []).map((f) => `<tr><td>${C.miniRing(f.age_h == null ? 0 : Math.max(0.03, 1 - Math.min(f.age_h / 48, 1)), { size: 34, text: '', color: f.age_h == null ? C.css('--faint') : f.age_h < 14 ? C.css('--win') : f.age_h < 36 ? C.css('--amber') : C.css('--loss') })}</td><td class="pl">${esc(f.file)}</td><td class="t-muted">${esc(String(f.mtime || '–').replace('T', ' '))}</td><td>${ageChip(f.age_h)}</td></tr>`).join('')}</tbody></table></div>` })}
+        ${panel({ title: 'File freshness', cls: 'c7', sub: 'Ring fills as a file ages toward 48 hours', body: `<div class="tablewrap"><table><thead><tr><th></th><th>File</th><th>Modified</th><th>Age</th></tr></thead><tbody>${(HEALTH.files || []).map((f) => `<tr><td>${C.miniRing(f.age_h == null ? 0 : Math.max(0.03, 1 - Math.min(f.age_h / 48, 1)), { size: 34, text: '', color: f.age_h == null ? C.css('--faint') : f.age_h < 14 ? C.css('--accent-2') : f.age_h < 36 ? C.css('--violet') : C.css('--loss') })}</td><td class="pl">${esc(f.file)}</td><td class="t-muted">${esc(String(f.mtime || '–').replace('T', ' '))}</td><td>${ageChip(f.age_h)}</td></tr>`).join('')}</tbody></table></div>` })}
         ${panel({ title: 'Grade reconciliation', cls: 'c5', sub: 'Stored grades that disagree with the current box score', body: reconTable() })}
       </div>`;
     const drawRun = () => {
@@ -739,7 +826,7 @@
     { id: 'decisions', label: 'Memory', icon: 'decisions', render: vDecisions },
   ];
   const dirty = new Set();
-  function logoSvg() { return '<svg viewBox="0 0 32 32" fill="none" stroke="url(#lg)" stroke-width="2" stroke-linecap="round"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#9d8cff"/></linearGradient></defs><circle cx="16" cy="16" r="11"/><path d="M5 16h22M16 5v22M8 8c5 4 5 12 0 16M24 8c-5 4-5 12 0 16"/></svg>'; }
+  function logoSvg() { return '<svg viewBox="0 0 32 32" fill="none" stroke="url(#lg)" stroke-width="2" stroke-linecap="round"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff2a2a"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs><circle cx="16" cy="16" r="11"/><path d="M5 16h22M16 5v22M8 8c5 4 5 12 0 16M24 8c-5 4-5 12 0 16"/></svg>'; }
   function renderShell() {
     const flagBad = (HEALTH.flags || []).length || ((HEALTH.pipeline || {}).last_run || {}).err;
     $('#rail').innerHTML = `${defs3d()}<div class="logo" title="Jake's NBA Dashboard">${logoSvg()}</div><nav class="nav">${VIEWS.map((v, i) => `<button data-view="${v.id}" title="${v.label}">${icon3d(v.icon, i)}<span class="flat" aria-hidden="true">${svgi(v.icon)}</span><span>${v.label}</span>${v.id === 'health' && flagBad ? '<i class="badge-dot"></i>' : ''}</button>`).join('')}</nav><div class="spacer"></div>`;
@@ -763,7 +850,8 @@
     const builtAt = meta.generated_at ? new Date(meta.generated_at) : null;
     const ageH = builtAt && !isNaN(builtAt.getTime()) ? Math.max(0, (Date.now() - builtAt.getTime()) / 36e5) : null;
     const ageTxt = ageH == null ? '' : ageH < 1 ? 'under 1 hour ago' : ageH < 48 ? Math.round(ageH) + ' hours ago' : Math.floor(ageH / 24) + ' days ago';
-    $('#top').innerHTML = `<div><h1><span class="grad">Jake's NBA</span> Dashboard</h1><div class="sub">Built ${esc((meta.generated_at || '').replace('T', ' '))}${ageTxt ? ' (' + ageTxt + ')' : ''} ·${F.n(meta.total_picks)} picks logged ${esc(F.dateY(meta.first_pick))} → ${esc(F.dateY(meta.last_pick))}${meta.git && meta.git.commit ? ' · ' + esc(meta.git.branch) + '@' + esc(meta.git.commit) : ''}</div></div><div class="grow"></div>
+    const titleHtml = BRAND ? `<h1 class="brandmark"><img src="${BRAND}" alt="Dime City Data" decoding="async"></h1>` : `<h1><span class="grad">Jake's NBA</span> Dashboard</h1>`;
+    $('#top').innerHTML = `<div class="${BRAND ? 'titleblock' : ''}">${titleHtml}<div class="sub">Built ${esc((meta.generated_at || '').replace('T', ' '))}${ageTxt ? ' (' + ageTxt + ')' : ''} ·${F.n(meta.total_picks)} picks logged ${esc(F.dateY(meta.first_pick))} → ${esc(F.dateY(meta.last_pick))}${meta.git && meta.git.commit ? ' · ' + esc(meta.git.branch) + '@' + esc(meta.git.commit) : ''}</div></div><div class="grow"></div>
       <div id="scopeseg">${seg('scope', [['season', '2026-27 season'], ['live', 'All live'], ['all', 'Everything']], state.scope)}</div>
       <span class="chip ${TODAY.pending ? 'info pulse' : 'win'}"><i class="pip"></i>${TODAY.pending ? TODAY.pending + ' picks live' : 'card settled'}</span>
       ${WALL ? `<button class="iconbtn" id="wallbtn" title="Show or hide the wallpaper" aria-label="Show or hide the wallpaper" aria-pressed="${wallOn}">${svgi('image')}</button>` : ''}

@@ -568,11 +568,23 @@ class AssetContractTests(unittest.TestCase):
         self.assertIn('.nav button[aria-current="page"]::before { display: none; }', phone)
         css = self._source()["style.css"]
         self.assertIn(".nav button svg { width: 21px; height: 21px; stroke: currentColor;", css)   # the original flat-icon rule
-        # the active-item highlight is desktop-only; outside that block aria-current="true" only drives 3D parts (.face/.spin)
-        desktop = self._css_block("@media (min-width: 861px)")
+        # the active-item highlight is desktop-only; outside every desktop block aria-current="true" only drives 3D parts (.face/.spin)
+        desktop_blocks, pos = [], 0
+        while (start := css.find("@media (min-width: 861px)", pos)) != -1:
+            depth, i = 0, css.index("{", start)
+            for j in range(i, len(css)):
+                depth += (css[j] == "{") - (css[j] == "}")
+                if depth == 0:
+                    desktop_blocks.append(css[start:j + 1])
+                    pos = j + 1
+                    break
+        desktop = "\n".join(desktop_blocks)
         self.assertIn('.nav button[aria-current="true"]::before {', desktop)
-        self.assertIn('.nav button[aria-current="true"] { color: var(--text);', desktop)
-        outside = css.replace(desktop, "")
+        self.assertIn('.nav button[aria-current="true"] { color: var(--text);', desktop)                 # the original desktop highlight
+        self.assertIn('.nav button[aria-current="true"] { color: #fff; background: var(--accent);', desktop)   # the street-theme red highlight
+        outside = css
+        for block in desktop_blocks:
+            outside = outside.replace(block, "")
         for line in outside.splitlines():
             if 'aria-current="true"' in line and not line.lstrip().startswith("/*"):
                 self.assertTrue(".face" in line or ".spin" in line, line)
@@ -869,6 +881,538 @@ class FailureTests(unittest.TestCase):
             payload = bd.build_payload(root, now=NOW)
             self.assertEqual(payload["scopes"]["season"]["summary"]["l"], 1)  # unchanged by the junk row
             self.assertIn("unusable_picks", [f["kind"] for f in payload["health"]["flags"]])
+
+
+def _has_alpha(raw: bytes) -> bool:
+    """True when a WebP or PNG carries a transparency channel (so it cannot show as a white box on the dark theme)."""
+    import struct
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        pos = 12
+        while pos + 8 <= len(raw):
+            tag, ln = raw[pos:pos + 4], struct.unpack("<I", raw[pos + 4:pos + 8])[0]
+            body = raw[pos + 8:pos + 8 + ln]
+            if tag == b"ALPH" or (tag == b"VP8X" and body[0] & 0x10) or (tag == b"VP8L" and (struct.unpack("<I", body[1:5])[0] >> 28) & 1):
+                return True
+            pos += 8 + ln + (ln & 1)
+        return False
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return raw[25] in (4, 6) or b"tRNS" in raw
+    return False
+
+
+class BrandLogoTests(unittest.TestCase):
+    """The optional header logo (scripts/dashboard_assets/brand.*) is embedded byte for byte, only if it is really an image."""
+
+    def _load(self, name, data):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / name).write_bytes(data)
+            return bd.load_brand_logo(d)
+
+    def test_no_logo_file_is_fine_and_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(bd.load_brand_logo(Path(td)), (None, None))
+            root = Path(td) / "proj"
+            root.mkdir()
+            make_project(root)
+            payload = bd.build_payload(root, now=NOW, brand_dir=Path(td))
+        self.assertIsNone(payload["brand"])
+        self.assertEqual([w for w in payload["meta"]["warnings"] if "header logo" in w], [])
+
+    def test_valid_images_are_embedded_byte_for_byte_with_the_mime_from_their_magic_bytes(self):
+        import base64
+        for name, data, mime in (("brand.webp", WEBP_BYTES, "image/webp"), ("brand.png", PNG_BYTES, "image/png"),
+                                 ("brand.jpg", JPEG_BYTES, "image/jpeg"), ("brand.webp", PNG_BYTES, "image/png")):   # name never decides
+            with self.subTest(name=name, mime=mime):
+                uri, problem = self._load(name, data)
+                self.assertIsNone(problem)
+                prefix = f"data:{mime};base64,"
+                self.assertTrue(uri.startswith(prefix))
+                self.assertEqual(base64.b64decode(uri[len(prefix):]), data)
+
+    def test_a_file_that_is_not_an_image_empty_or_too_large_is_refused_and_explained(self):
+        for label, data in (("not an image", b"<html><script>alert(1)</script></html>"), ("empty", b""),
+                            ("too large", WEBP_BYTES + b"\0" * (bd.MAX_BRAND_BYTES + 1))):
+            with self.subTest(label):
+                uri, problem = self._load("brand.webp", data)
+                self.assertIsNone(uri)
+                self.assertIn("text title", problem)                      # says what the header does instead
+
+    def test_a_refused_logo_is_reported_in_the_warning_banner_and_the_page_still_builds(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "brand.webp").write_bytes(b"not an image")
+            root = Path(td) / "proj"
+            root.mkdir()
+            make_project(root)
+            payload = bd.build_payload(root, now=NOW, brand_dir=Path(td))
+        self.assertIsNone(payload["brand"])
+        self.assertTrue(any("header logo" in w and "text title" in w for w in payload["meta"]["warnings"]))
+        self.assertEqual(payload["scopes"]["season"]["summary"]["w"], 3)  # the rest of the page is unaffected
+
+
+class BrandAssetTests(unittest.TestCase):
+    """The shipped header logo and the header code that shows it."""
+
+    ASSETS = Path(bd.ASSET_DIR)
+
+    def _shipped(self):
+        files = [self.ASSETS / n for n in bd.BRAND_NAMES if (self.ASSETS / n).is_file()]
+        self.assertTrue(files, "no scripts/dashboard_assets/brand.* logo is shipped")
+        return files[0]
+
+    def test_the_shipped_logo_is_a_real_transparent_image_within_the_size_limit(self):
+        raw = self._shipped().read_bytes()
+        self.assertIsNotNone(bd._image_mime(raw))
+        self.assertLessEqual(len(raw), bd.MAX_BRAND_BYTES)
+        self.assertTrue(_has_alpha(raw), "the logo has no transparency: it would show as a white box on the dark theme")
+
+    def test_the_default_build_embeds_the_shipped_logo_without_warnings(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_project(root)
+            payload = bd.build_payload(root, now=NOW)
+            html = bd.render_html(payload)
+        self.assertTrue(payload["brand"].startswith("data:image/"))
+        self.assertEqual([w for w in payload["meta"]["warnings"] if "header logo" in w], [])
+        self.assertIn('"brand":"data:image/', html.replace('"brand": "', '"brand":"'))
+        self.assertIn("<title>Jake's NBA Dashboard</title>", html)       # the tab title is deliberately unchanged
+
+    def test_the_header_uses_the_logo_only_through_the_strict_check_and_keeps_the_text_fallback(self):
+        app = (self.ASSETS / "app.js").read_text(encoding="utf-8")
+        strict = r"/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/"
+        self.assertIn(f"const BRAND = (typeof D.brand === 'string' && {strict}.test(D.brand)) ? D.brand : null;", app)
+        self.assertIn('<h1 class="brandmark"><img src="${BRAND}" alt="Dime City Data" decoding="async"></h1>', app)
+        self.assertIn("<h1><span class=\"grad\">Jake's NBA</span> Dashboard</h1>", app)       # never a blank header
+        self.assertEqual(app.count("${BRAND}"), 1)                                           # used in exactly one place
+
+    def test_the_logo_is_sized_by_height_and_has_a_phone_size(self):
+        css = (self.ASSETS / "style.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"\.top h1\.brandmark img \{[^}]*height: clamp\([^)]*\)[^}]*width: auto")
+        phone = css[css.index("@media (max-width: 860px) {\n"):]
+        phone = phone[:phone.index("\n}\n")]                                  # the one phone block
+        self.assertRegex(phone, r"\.top h1\.brandmark img \{ height: \d+px; \}")
+        self.assertGreater(css.index("@media (max-width: 860px) {\n"), css.index(".top h1.brandmark img {"))   # later in the file, so it wins
+        self.assertIn(':root[data-theme="light"] .top h1.brandmark img', css)
+        self.assertEqual(css.count("{"), css.count("}"))
+
+
+def _colour_family(r, g, b):
+    """'neutral' (black, white, greys), 'red', 'green' or 'other' for one RGB colour (0-255)."""
+    mx, mn = max(r, g, b), min(r, g, b)
+    if mx - mn <= 22 or mx <= 45:
+        return "neutral"
+    d, sat = mx - mn, (mx - mn) / mx
+    if mx == r:
+        h = ((g - b) / d) % 6
+    elif mx == g:
+        h = (b - r) / d + 2
+    else:
+        h = (r - g) / d + 4
+    h = (h * 60) % 360
+    if (h >= 345 or h <= 15) and sat >= 0.55:
+        return "red"
+    if 110 <= h <= 160 and sat >= 0.55:
+        return "green"
+    return "other"
+
+
+def _colour_literals(text):
+    """Every colour written out in a source file: (family, literal, line number). Selectors like #top are ignored."""
+    import re
+    found = []
+    for n, line in enumerate(text.splitlines(), 1):
+        for m in re.finditer(r"(?:#|%23)([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![0-9a-zA-Z_-])", line):
+            h = m.group(1)
+            if len(h) == 3:
+                h = "".join(c * 2 for c in h)
+            found.append((_colour_family(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)), m.group(0), n))
+        for m in re.finditer(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", line):
+            found.append((_colour_family(*(int(x) for x in m.groups())), m.group(0), n))
+    return found
+
+
+class PaletteTests(unittest.TestCase):
+    """Dime City Data look: the page is red, black and white, and green appears ONLY on positive figures
+    (Jake's rule, 2026-11-21). Greys are just black/white mixes."""
+
+    ASSETS = Path(bd.ASSET_DIR)
+
+    def _files(self):
+        return {n: (self.ASSETS / n).read_text(encoding="utf-8") for n in ("style.css", "app.js", "charts.js", "template.html")}
+
+    def test_every_colour_in_the_page_code_is_red_black_white_or_green(self):
+        for name, text in self._files().items():
+            for family, literal, line in _colour_literals(text):
+                self.assertIn(family, ("neutral", "red", "green"), f"{name}:{line} uses {literal}, which is outside the palette")
+
+    def test_green_is_only_defined_as_the_win_tokens_and_never_written_into_the_scripts(self):
+        files = self._files()
+        for name in ("app.js", "charts.js", "template.html"):
+            self.assertEqual([x for x in _colour_literals(files[name]) if x[0] == "green"], [], f"{name} hard-codes a green")
+        css_lines = files["style.css"].splitlines()
+        for family, literal, line in _colour_literals(files["style.css"]):
+            if family == "green":
+                self.assertRegex(css_lines[line - 1], r"^\s*--win(-bg)?:", f"style.css:{line} writes {literal} outside the --win tokens")
+
+    def test_the_secondary_tokens_are_neutral_so_nothing_but_win_can_be_green(self):
+        css = self._files()["style.css"]
+        import re
+        for theme in (css[css.index(":root {"):css.index(":root[data-theme=\"light\"] {")], css[css.index(":root[data-theme=\"light\"] {"):css.index("* { box-sizing")]):
+            tokens = dict(re.findall(r"--([a-z0-9-]+):\s*(#[0-9a-fA-F]{6})", theme))
+            fam = lambda k: _colour_family(*(int(tokens[k][i:i + 2], 16) for i in (1, 3, 5)))
+            for neutral in ("bg", "bg2", "text", "muted", "faint", "accent-2", "violet", "amber", "panel-solid"):
+                self.assertEqual(fam(neutral), "neutral", neutral)
+            for red in ("accent", "loss"):
+                self.assertEqual(fam(red), "red", red)
+            self.assertEqual(fam("win"), "green")
+
+    def test_status_chips_and_decoration_use_white_while_positive_numbers_stay_green(self):
+        import re
+        css = self._files()["style.css"]
+        self.assertIn(".t-win { color: var(--win); }", css)                       # positive figures
+        override = css[css.index("green is reserved for positive figures"):css.index("/* controls */")]
+        self.assertRegex(override, r"\.chip\.win \{ color: var\(--text\);")       # status chips are not green
+        for rule in (".pcard.W { --edge: var(--text); }", ".tile.pos { --edge: var(--text); }", ".kpi.win { --glow: var(--text); }",
+                     ".step::before { background: var(--text); }", ".insight.good .ic { background: var(--amber-bg); color: var(--text); }"):
+            self.assertIn(rule, override)
+        app = self._files()["app.js"]
+        self.assertNotRegex(app, r"class=\"\$\{m\.production_unchanged \? 't-win'")  # a status word is never green
+        self.assertNotIn("vcls: 't-win', tone: 'win', sub: `${(HEALTH.maintenance", app)
+
+
+class FontTests(unittest.TestCase):
+    """The optional embedded graffiti title font (Sedgwick Ave Display, SIL OFL) and the readable number font."""
+
+    TTF = b"\x00\x01\x00\x00" + b"\0" * 64
+    OTF = b"OTTO" + b"\0" * 64
+
+    def _load(self, name, data):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / name).write_bytes(data)
+            return bd.load_fonts(Path(td))
+
+    def test_no_font_file_is_fine_and_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(bd.load_fonts(Path(td)), ("", []))
+
+    def test_a_real_font_is_embedded_byte_for_byte(self):
+        import base64
+        for data, mime, fmt in ((self.TTF, "font/ttf", "truetype"), (self.OTF, "font/otf", "opentype")):
+            with self.subTest(fmt=fmt):
+                css, problems = self._load("SedgwickAveDisplay-Regular.ttf", data)
+                self.assertEqual(problems, [])
+                self.assertIn('@font-face{font-family:"Sedgwick Ave Display";', css)
+                self.assertIn(f"format(\"{fmt}\")", css)
+                self.assertIn("font-display:swap", css)
+                b64 = css.split(f"data:{mime};base64,", 1)[1].split(")", 1)[0]
+                self.assertEqual(base64.b64decode(b64), data)
+
+    def test_a_file_that_is_not_a_font_is_empty_or_too_large_is_refused_and_explained(self):
+        for label, data in (("not a font", b"<html><script>alert(1)</script></html>"), ("empty", b""),
+                            ("too large", self.TTF + b"\0" * bd.MAX_FONT_BYTES)):
+            with self.subTest(label):
+                css, problems = self._load("SedgwickAveDisplay-Regular.ttf", data)
+                self.assertEqual(css, "")
+                self.assertEqual(len(problems), 1)
+                self.assertIn("fallback fonts", problems[0])
+
+    def test_a_refused_font_reaches_the_warning_banner_and_the_page_still_builds(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "SedgwickAveDisplay-Regular.ttf").write_bytes(b"nope")
+            root = Path(td) / "proj"
+            root.mkdir()
+            make_project(root)
+            payload = bd.build_payload(root, now=NOW, font_dir=Path(td))
+        self.assertTrue(any("fallback fonts" in w for w in payload["meta"]["warnings"]))
+        self.assertEqual(payload["scopes"]["season"]["summary"]["w"], 3)
+
+    def test_the_shipped_font_and_its_license_travel_together_and_the_page_embeds_them(self):
+        ttf = Path(bd.ASSET_DIR) / "SedgwickAveDisplay-Regular.ttf"
+        raw = ttf.read_bytes()
+        self.assertEqual(raw[:4], b"\x00\x01\x00\x00")
+        self.assertLessEqual(len(raw), bd.MAX_FONT_BYTES)
+        license_text = (Path(bd.ASSET_DIR) / "OFL.txt").read_text(encoding="utf-8")
+        self.assertIn("SIL OPEN FONT LICENSE", license_text.upper())
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_project(root)
+            payload = bd.build_payload(root, now=NOW)
+            html = bd.render_html(payload)
+        self.assertEqual([w for w in payload["meta"]["warnings"] if "font" in w], [])
+        self.assertIn('@font-face{font-family:"Sedgwick Ave Display";src:url(data:font/ttf;base64,', html)
+
+    def test_titles_use_the_graffiti_font_and_every_number_uses_the_readable_one(self):
+        css = (Path(bd.ASSET_DIR) / "style.css").read_text(encoding="utf-8")
+        charts = (Path(bd.ASSET_DIR) / "charts.js").read_text(encoding="utf-8")
+        self.assertIn('--display: "Sedgwick Ave Display"', css)
+        self.assertIn('--num: "Bahnschrift"', css)
+        self.assertIn(".panel h2 { font-family: var(--display);", css)
+        self.assertIn(".kpi .val { font-family: var(--num); font-weight: 800; font-style: italic;", css)
+        self.assertIn(".stat-row b, .ringrow .rt b, .pcard .bet .big, .pcard .bet .px { font-family: var(--num);", css)
+        self.assertIn("font-family:var(--num)", charts)                           # the number in the middle of every dial
+        for numbers_in_display in (".kpi .val { font-family: var(--display)", "font-family:var(--display);font-size:${Math.round(W"):
+            self.assertNotIn(numbers_in_display, css + charts)
+
+
+LANE_A, LANE_B = "pra_under_meta_gt_070", "pts_under_meta_050_070"
+
+
+def _eval_block(market, model, lo, hi, picks=0, roi=None, rows=100, dates=10):
+    return {"rows": rows, "dates": dates, "market_log_loss": market, "model_log_loss": model, "difference": model - market,
+            "date_cluster_difference_95": [lo, hi], "under_ev_001": {"picks": picks, "profit_units": 0.0, "roi": roi, "hit_rate": None}}
+
+
+def make_shadow(root: Path, lane_rows=None, market_rows=None) -> Path:
+    """Add the DEC-108/109 shadow files to a synthetic project. The install record names its evaluation file by an
+    absolute path somewhere else, as the real one does, and carries that file's SHA-256."""
+    out = root / "output"
+    folder = out / "market_probability_test"
+    folder.mkdir(parents=True, exist_ok=True)
+    evaluation = {
+        "specification": {"forward_start": "2026-10-21", "data_end": "2026-11-19"},
+        "frozen_prior_season": _eval_block(0.690, 0.689, -0.002, -0.0001),
+        "walk_forward": _eval_block(0.690, 0.6885, -0.003, 0.0005),
+        "walk_forward_by_prop": {"ast": _eval_block(0.686, 0.685, -0.003, 0.001, rows=50),
+                                 "blk": _eval_block(0.664, 0.662, -0.004, -0.0005, rows=20)},
+        "production_cal_comparable": _eval_block(0.688, 0.690, -0.002, 0.004, picks=12, roi=0.02),
+        "anchored_on_production_comparable": _eval_block(0.688, 0.687, -0.002, 0.0001),
+        "promotion_eligible": False, "promotion_reason": "Prospective validation required",
+        "historical_evidence_pass": True, "created_utc": "2026-11-21T00:35:40+00:00",
+    }
+    ev_path = folder / "evaluation.json"
+    ev_path.write_text(json.dumps(evaluation), encoding="utf-8")
+    model = {"version": "market_offset_v1", "props": ["pts", "ast"], "evaluation_status": "shadow_only",
+             "trained_through": "2026-11-19", "training_rows": 1234, "training_dates": 56, "penalty": 0.02,
+             "max_logit_correction": 0.5,
+             "evaluation_artifact": "C:\\somewhere\\else\\market_probability_test\\evaluation.json",
+             "evaluation_sha256": hashlib.sha256(ev_path.read_bytes()).hexdigest()}
+    (out / "market_probability_shadow.json").write_text(json.dumps(model), encoding="utf-8")
+    if lane_rows is not None:
+        _write_csv(out / "shadow_lanes_history.csv", lane_rows)
+    if market_rows is not None:
+        _write_csv(out / "market_probability_history.csv", market_rows)
+    return ev_path
+
+
+def _lane(date, lane, result, profit="", **kw):
+    return {"game_date": date, "player": "P", "prop": "PRA", "direction": "UNDER", "shadow_lane": lane,
+            "result": result, "profit_units": profit, **kw}
+
+
+def _mkt(date, result, nv, anchored, incumbent, fallback="False"):
+    return {"game_date": date, "player": "P", "prop": "PTS", "direction": "UNDER", "shadow_lane": "market_offset_v1",
+            "result": result, "nv_over": nv, "anchored_over": anchored, "production_cal": incumbent,
+            "history_fallback_to_market": fallback, "profit_units": ""}
+
+
+class ShadowTests(unittest.TestCase):
+    """The shadow-model section of the Models tab (DEC-108 lanes, DEC-109 market-anchored model): paper only."""
+
+    def _build(self, lane_rows=None, market_rows=None, install=True, mutate=None):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_project(root)
+            if install:
+                make_shadow(root, lane_rows, market_rows)
+            if mutate:
+                mutate(root)
+            before = _hash_tree(root)
+            payload = bd.build_payload(root, now=NOW)
+            self.assertEqual(before, _hash_tree(root), "building must never change a file")
+            return payload
+
+    def _shadow(self, payload):
+        return payload["models"]["shadow"]
+
+    def _shadow_warnings(self, payload):
+        return [w for w in payload["meta"]["warnings"] if "shadow" in w.lower() or "market_probability" in w]
+
+    def test_nothing_installed_is_quiet_and_shows_both_lanes_as_collecting(self):
+        p = self._build(install=False)
+        s = self._shadow(p)
+        self.assertFalse(s["market"]["installed"])
+        self.assertFalse(s["lanes"]["present"])
+        self.assertEqual([l["id"] for l in s["lanes"]["lanes"]], [LANE_A, LANE_B])
+        self.assertTrue(all(l["binary"] == 0 and l["rows"] == 0 and l["hit"] is None for l in s["lanes"]["lanes"]))
+        self.assertEqual(self._shadow_warnings(p), [])            # an absent file is "not collecting yet", not an error
+
+    def test_installed_before_any_collection_shows_the_evaluation_and_an_empty_prospective_record(self):
+        p = self._build()
+        m = self._shadow(p)["market"]
+        self.assertTrue(m["installed"])
+        self.assertEqual((m["version"], m["status"], m["trained_through"], m["training_rows"]),
+                         ("market_offset_v1", "shadow_only", "2026-11-19", 1234))
+        self.assertIs(m["evaluation_hash_ok"], True)
+        self.assertEqual(m["prospective"], {"present": False})
+        ev = m["evaluation"]
+        self.assertIs(ev["promotion_eligible"], False)
+        self.assertAlmostEqual(ev["frozen"]["diff"], -0.001, places=5)          # model minus market, as recorded
+        self.assertEqual((ev["frozen"]["lo"], ev["frozen"]["hi"]), (-0.002, -0.0001))
+        self.assertEqual(ev["frozen"]["under_picks"], 0)
+        self.assertIsNone(ev["frozen"]["under_roi"])                            # undefined for zero stakes, never 0%
+        self.assertEqual(ev["incumbent_same_rows"]["under_picks"], 12)
+        self.assertEqual([r["prop"] for r in ev["by_prop"]], ["AST", "BLK"])
+        self.assertEqual(self._shadow_warnings(p), [])
+
+    def test_evaluation_file_is_found_under_this_project_not_at_the_recorded_absolute_path(self):
+        # the install record points at C:\somewhere\else\...; the builder must read output/<folder>/evaluation.json
+        self.assertIsNotNone(self._shadow(self._build())["market"]["evaluation"])
+
+    def test_lane_counts_follow_the_step_1_9_rules(self):
+        rows = [_lane("2026-11-21", LANE_A, "WIN", "0.91"), _lane("2026-11-21", LANE_A, "WIN", "0.91"),
+                _lane("2026-11-22", LANE_A, "LOSS", "-1"), _lane("2026-11-22", LANE_A, "PUSH", "0"),
+                _lane("2026-11-22", LANE_A, "DNP", ""), _lane("2026-11-23", LANE_A, ""),
+                _lane("2026-11-21", LANE_B, "LOSS", "-1"), _lane("2026-11-21", LANE_B, "WIN", "")]   # one unpriced win
+        s = self._shadow(self._build(lane_rows=rows))["lanes"]
+        a = {l["id"]: l for l in s["lanes"]}[LANE_A]
+        self.assertTrue(s["present"])
+        self.assertEqual((a["rows"], a["binary"], a["wins"], a["push"], a["dnp"], a["pending"]), (6, 3, 2, 1, 1, 1))
+        self.assertEqual(a["dates"], 2)                                        # settled WIN/LOSS dates only
+        self.assertAlmostEqual(a["hit"], 2 / 3, places=5)
+        self.assertEqual(a["priced"], 3)
+        self.assertAlmostEqual(a["units"], 0.82, places=5)
+        self.assertAlmostEqual(a["roi"], 0.82 / 3, places=5)                   # mean of WIN/LOSS profits
+        b = {l["id"]: l for l in s["lanes"]}[LANE_B]
+        self.assertEqual((b["binary"], b["wins"], b["priced"]), (2, 1, 1))     # an unpriced win counts toward hit only
+        self.assertAlmostEqual(b["units"], -1.0, places=5)
+        self.assertEqual((a["first"], a["last"]), ("2026-11-21", "2026-11-23"))
+
+    def test_an_unknown_lane_id_still_appears_after_the_known_ones(self):
+        rows = [_lane("2026-11-21", LANE_A, "WIN", "1"), _lane("2026-11-21", "new_lane_v2", "LOSS", "-1")]
+        ids = [l["id"] for l in self._shadow(self._build(lane_rows=rows))["lanes"]["lanes"]]
+        self.assertEqual(ids, [LANE_A, LANE_B, "new_lane_v2"])
+
+    def test_market_log_loss_gap_matches_a_hand_calculation(self):
+        import math
+        rows = [_mkt("2026-11-21", "LOSS", 0.5, 0.6, 0.45),        # the over happened: anchored 0.6 beats the market's 0.5
+                _mkt("2026-11-21", "WIN", 0.5, 0.4, 0.55),         # the under happened: anchored 0.4 beats 0.5
+                _mkt("2026-11-22", "WIN", 0.5, "", 0.6),           # no anchored probability: excluded from that comparison
+                _mkt("2026-11-22", "", 0.5, 0.4, 0.4)]             # unsettled: excluded
+        pro = self._shadow(self._build(market_rows=rows))["market"]["prospective"]
+        self.assertTrue(pro["present"])
+        self.assertEqual((pro["rows"], pro["binary"], pro["pending"], pro["dates"]), (4, 3, 1, 2))
+        anchored = [v for v in pro["vs_market"] if v["key"] == "anchored_over"][0]
+        self.assertEqual(anchored["n"], 2)
+        self.assertAlmostEqual(anchored["diff"], -math.log(0.6) - (-math.log(0.5)), places=5)
+        self.assertLess(anchored["diff"], 0)                                   # negative = better than the market
+        incumbent = [v for v in pro["vs_market"] if v["key"] == "production_cal"][0]
+        self.assertEqual(incumbent["n"], 3)
+        want = ((-math.log(0.45) + math.log(0.5)) + (-math.log(1 - 0.55) + math.log(0.5)) + (-math.log(1 - 0.6) + math.log(0.5))) / 3
+        self.assertAlmostEqual(incumbent["diff"], want, places=5)
+
+    def test_market_review_minimum_needs_both_300_offers_and_30_dates(self):
+        def rows(n_dates):
+            out = []
+            for i in range(300):
+                out.append(_mkt(f"2026-12-{1 + i % n_dates:02d}", "WIN" if i % 2 else "LOSS", 0.5, 0.5, 0.5))
+            return out
+        self.assertFalse(self._shadow(self._build(market_rows=rows(29)))["market"]["prospective"]["review_minimum"])
+        short = self._shadow(self._build(market_rows=rows(5)))["market"]["prospective"]
+        self.assertEqual(short["binary"], 300)
+        self.assertFalse(short["review_minimum"])                              # enough offers, too few dates
+        self.assertEqual(short["dates"], 5)
+
+    def test_rows_of_another_model_version_are_not_counted(self):
+        rows = [_mkt("2026-11-21", "WIN", 0.5, 0.5, 0.5), dict(_mkt("2026-11-21", "WIN", 0.5, 0.5, 0.5), shadow_lane="other_v9")]
+        pro = self._shadow(self._build(market_rows=rows))["market"]["prospective"]
+        self.assertEqual(pro["rows"], 1)
+
+    def test_an_evaluation_file_changed_after_install_is_flagged_and_reported(self):
+        def tamper(root):
+            ev = root / "output" / "market_probability_test" / "evaluation.json"
+            d = json.loads(ev.read_text(encoding="utf-8"))
+            d["walk_forward"]["model_log_loss"] = 0.1                          # a flattering edit
+            ev.write_text(json.dumps(d), encoding="utf-8")
+        p = self._build(mutate=tamper)
+        self.assertIs(self._shadow(p)["market"]["evaluation_hash_ok"], False)
+        self.assertTrue(any("does not match the SHA-256" in w for w in self._shadow_warnings(p)))
+
+    def test_a_missing_evaluation_file_is_reported_and_the_rest_still_shows(self):
+        p = self._build(lane_rows=[_lane("2026-11-21", LANE_A, "WIN", "1")],
+                        mutate=lambda root: (root / "output" / "market_probability_test" / "evaluation.json").unlink())
+        s = self._shadow(p)
+        self.assertTrue(s["market"]["installed"])
+        self.assertIsNone(s["market"]["evaluation"])
+        self.assertTrue(any("evaluation.json" in w for w in p["meta"]["warnings"]))
+        self.assertEqual({l["id"]: l for l in s["lanes"]["lanes"]}[LANE_A]["binary"], 1)   # other parts unaffected
+
+    def test_a_recorded_evaluation_path_cannot_escape_the_output_folder(self):
+        def escape(root):
+            f = root / "output" / "market_probability_shadow.json"
+            d = json.loads(f.read_text(encoding="utf-8"))
+            d["evaluation_artifact"] = "C:\\x\\..\\evaluation.json"             # second-to-last part is ".."
+            f.write_text(json.dumps(d), encoding="utf-8")
+            # a perfectly valid evaluation file planted where the ".." would lead (the project root)
+            (root / "evaluation.json").write_text((root / "output" / "market_probability_test" / "evaluation.json").read_text(encoding="utf-8"), encoding="utf-8")
+        p = self._build(mutate=escape)
+        self.assertIsNone(self._shadow(p)["market"]["evaluation"])             # ignored, never read from elsewhere
+        self.assertEqual(self._shadow_warnings(p), [])
+
+    def test_a_history_file_without_its_lane_column_degrades_only_the_lanes(self):
+        p = self._build(lane_rows=[{"game_date": "2026-11-21", "result": "WIN"}],        # no shadow_lane column
+                        market_rows=[_mkt("2026-11-21", "WIN", 0.5, 0.5, 0.5)])
+        s = self._shadow(p)
+        self.assertFalse(s["lanes"]["present"])                                # fell back to the empty default
+        self.assertTrue(any("shadow_lanes_history.csv" in w and "shadow_lane" in w for w in p["meta"]["warnings"]))
+        self.assertTrue(s["market"]["prospective"]["present"])                 # the market model is unaffected
+
+    def test_a_garbled_installed_model_record_degrades_only_that_part(self):
+        p = self._build(lane_rows=[_lane("2026-11-21", LANE_A, "WIN", "1")],
+                        mutate=lambda root: (root / "output" / "market_probability_shadow.json").write_text("{not json", encoding="utf-8"))
+        s = self._shadow(p)
+        self.assertEqual(s["market"], {"installed": False})
+        self.assertTrue(any("market_probability_shadow.json" in w for w in p["meta"]["warnings"]))
+        self.assertEqual({l["id"]: l for l in s["lanes"]["lanes"]}[LANE_A]["binary"], 1)
+
+    def test_a_hostile_lane_name_cannot_break_out_of_the_page_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_project(root)
+            make_shadow(root, lane_rows=[_lane("2026-11-21", "</script><b>x", "WIN", "1")])
+            html = bd.render_html(bd.build_payload(root, now=NOW))
+        data_block = html.split("window.__DASH__ = ", 1)[1].split(";</script>", 1)[0]
+        self.assertNotIn("</", data_block)
+        self.assertIn("<\\/script>", data_block)
+
+
+class ShadowAssetContractTests(unittest.TestCase):
+    """The Models tab block that shows the shadow results."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = (Path(bd.ASSET_DIR) / "app.js").read_text(encoding="utf-8")
+
+    def _block(self):
+        start = self.app.index("function shadowMarketPanel")
+        return self.app[start:self.app.index("function integrityPanel")]
+
+    def test_the_models_view_renders_and_draws_the_shadow_section(self):
+        models = self.app[self.app.index("function vModels"):self.app.index("function fmtAuc")]
+        self.assertIn("${shadowSection()}", models)
+        self.assertIn("drawShadowForest();", models)
+        self.assertLess(models.index("${shadowSection()}"), models.index("Meta-classifier AUC dials"))   # near the top
+
+    def test_every_text_field_from_the_data_is_escaped_before_it_reaches_the_page(self):
+        block = self._block()
+        for raw in ("${l.label}", "${l.rule}", "${l.id}", "${v.label}", "${p.prop}", "${label}", "${m.version}",
+                    "${m.status}", "${m.trained_through}", "${ev.promotion_reason}", "${pro.first}", "${pro.last}"):
+            self.assertNotIn(raw, block, f"{raw} is interpolated without esc()")
+        for escaped in ("esc(l.label)", "esc(l.rule)", "esc(v.label)", "esc(ev.promotion_reason", "esc(F.dateY(pro.first))"):
+            self.assertIn(escaped, block)
+
+    def test_it_says_paper_only_and_never_offers_a_promotion_control(self):
+        block = self._block().lower()
+        self.assertIn("paper only", block)
+        self.assertIn("not a betting edge", block)
+        self.assertIn("reaching it is not authorization to bet", block)
+        for forbidden in ("promote(", "<button", "onclick", "fetch(", "xmlhttprequest"):
+            self.assertNotIn(forbidden, block)
+
+    def test_a_negative_log_loss_difference_is_only_green_when_the_interval_clears_zero(self):
+        tone = self.app[self.app.index("const llTone"):self.app.index("const progBar")]
+        self.assertIn("b.hi < 0 ? 't-win'", tone)
+        self.assertIn("b.lo > 0 ? 't-loss'", tone)
+        self.assertIn("'t-amber'", tone)
 
 
 if __name__ == "__main__":
