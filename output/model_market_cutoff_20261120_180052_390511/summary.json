@@ -1,0 +1,244 @@
+{
+  "created_utc": "2026-11-21T00:00:52.422510+00:00",
+  "cutoff": 0.1,
+  "rule": "FanDuel UNDER: model_side_prob - no_vig_side_prob > 0.10",
+  "source_sha256": {
+    "output\\picks_history.csv": "e58704ed28e43d014e75ab11e6666251860ae9dc5ab67c2fb452356d012058d9",
+    "output\\candidates_history.csv": "e3bd91ace44b8332d23bc16afb09f8347cda7d96d30d08d1535e43c6c3493aa8"
+  },
+  "script_sha256": "8878f0324a7ffb366fe83df6d66d2e49e168dace52b94fe52510decaa0463f9b",
+  "method": "Removal only on recorded offers, no refill or retrospective reranking; no training.",
+  "limitations": [
+    "Threshold discovered on this history; this is exploratory, not an independent holdout.",
+    "Candidate and published populations overlap; they are not independent replications.",
+    "Older rows without probabilities are unassessable, never reconstructed with today's model/prices.",
+    "Candidate promotion preserves first-observed prices/probabilities; use published history for published-card P&L.",
+    "Flat one-unit singles only; no parlay or actual stake/bankroll simulation.",
+    "Pushes, DNPs and pending rows excluded from binary hit rate and ROI denominators."
+  ],
+  "populations": {
+    "picks": {
+      "all_logged": {
+        "rows": 1752,
+        "settled_binary": 1619,
+        "wins": 917,
+        "losses": 702,
+        "pushes": 28,
+        "dnps": 95,
+        "pending_or_other": 10,
+        "dates": 67,
+        "hit_rate": 0.5663990117356393,
+        "priced_binary": 134,
+        "unpriced_binary": 1485,
+        "profit_units": 8.816778470822742,
+        "roi": 0.06579685425987121
+      },
+      "comparable_before": {
+        "rows": 152,
+        "settled_binary": 134,
+        "wins": 79,
+        "losses": 55,
+        "pushes": 0,
+        "dnps": 8,
+        "pending_or_other": 10,
+        "dates": 16,
+        "hit_rate": 0.5895522388059702,
+        "priced_binary": 134,
+        "unpriced_binary": 0,
+        "profit_units": 8.816778470822742,
+        "roi": 0.06579685425987121
+      },
+      "after_cutoff": {
+        "rows": 80,
+        "settled_binary": 66,
+        "wins": 43,
+        "losses": 23,
+        "pushes": 0,
+        "dnps": 5,
+        "pending_or_other": 9,
+        "dates": 16,
+        "hit_rate": 0.6515151515151515,
+        "priced_binary": 66,
+        "unpriced_binary": 0,
+        "profit_units": 9.865745509022686,
+        "roi": 0.1494809925609498
+      },
+      "removed": {
+        "rows": 72,
+        "settled_binary": 68,
+        "wins": 36,
+        "losses": 32,
+        "pushes": 0,
+        "dnps": 3,
+        "pending_or_other": 1,
+        "dates": 15,
+        "hit_rate": 0.5294117647058824,
+        "priced_binary": 68,
+        "unpriced_binary": 0,
+        "profit_units": -1.0489670381999434,
+        "roi": -0.015425985855881522
+      },
+      "unknown": {
+        "rows": 38,
+        "settled_binary": 37,
+        "wins": 20,
+        "losses": 17,
+        "pushes": 0,
+        "dnps": 1,
+        "pending_or_other": 0,
+        "dates": 11,
+        "hit_rate": 0.5405405405405406,
+        "priced_binary": 0,
+        "unpriced_binary": 37,
+        "profit_units": null,
+        "roi": null
+      },
+      "outside_scope": {
+        "rows": 1562,
+        "settled_binary": 1448,
+        "wins": 818,
+        "losses": 630,
+        "pushes": 28,
+        "dnps": 86,
+        "pending_or_other": 0,
+        "dates": 42,
+        "hit_rate": 0.5649171270718232,
+        "priced_binary": 0,
+        "unpriced_binary": 1448,
+        "profit_units": null,
+        "roi": null
+      }
+    },
+    "candidates": {
+      "all_logged": {
+        "rows": 317,
+        "settled_binary": 275,
+        "wins": 175,
+        "losses": 100,
+        "pushes": 0,
+        "dnps": 19,
+        "pending_or_other": 23,
+        "dates": 14,
+        "hit_rate": 0.6363636363636364,
+        "priced_binary": 275,
+        "unpriced_binary": 0,
+        "profit_units": 18.487050089087635,
+        "roi": 0.0672256366875914
+      },
+      "comparable_before": {
+        "rows": 317,
+        "settled_binary": 275,
+        "wins": 175,
+        "losses": 100,
+        "pushes": 0,
+        "dnps": 19,
+        "pending_or_other": 23,
+        "dates": 14,
+        "hit_rate": 0.6363636363636364,
+        "priced_binary": 275,
+        "unpriced_binary": 0,
+        "profit_units": 18.487050089087635,
+        "roi": 0.0672256366875914
+      },
+      "after_cutoff": {
+        "rows": 237,
+        "settled_binary": 203,
+        "wins": 134,
+        "losses": 69,
+        "pushes": 0,
+        "dnps": 15,
+        "pending_or_other": 19,
+        "dates": 14,
+        "hit_rate": 0.6600985221674877,
+        "priced_binary": 203,
+        "unpriced_binary": 0,
+        "profit_units": 15.574276989869755,
+        "roi": 0.07672057630477712
+      },
+      "removed": {
+        "rows": 80,
+        "settled_binary": 72,
+        "wins": 41,
+        "losses": 31,
+        "pushes": 0,
+        "dnps": 4,
+        "pending_or_other": 4,
+        "dates": 13,
+        "hit_rate": 0.5694444444444444,
+        "priced_binary": 72,
+        "unpriced_binary": 0,
+        "profit_units": 2.9127730992178833,
+        "roi": 0.04045518193358171
+      },
+      "unknown": {
+        "rows": 0,
+        "settled_binary": 0,
+        "wins": 0,
+        "losses": 0,
+        "pushes": 0,
+        "dnps": 0,
+        "pending_or_other": 0,
+        "dates": 0,
+        "hit_rate": null,
+        "priced_binary": 0,
+        "unpriced_binary": 0,
+        "profit_units": null,
+        "roi": null
+      },
+      "outside_scope": {
+        "rows": 0,
+        "settled_binary": 0,
+        "wins": 0,
+        "losses": 0,
+        "pushes": 0,
+        "dnps": 0,
+        "pending_or_other": 0,
+        "dates": 0,
+        "hit_rate": null,
+        "priced_binary": 0,
+        "unpriced_binary": 0,
+        "profit_units": null,
+        "roi": null
+      }
+    }
+  },
+  "exploratory_date_bootstrap": {
+    "picks": {
+      "dates": 16,
+      "draws": 20000,
+      "usable_draws": 20000,
+      "seed": 104,
+      "before_roi_95": [
+        -0.046652199489581506,
+        0.1836516713814911
+      ],
+      "after_roi_95": [
+        -0.03043525749336585,
+        0.36247398199678543
+      ],
+      "paired_roi_difference_95": [
+        -0.0585128568173896,
+        0.27452295687442346
+      ]
+    },
+    "candidates": {
+      "dates": 14,
+      "draws": 20000,
+      "usable_draws": 20000,
+      "seed": 104,
+      "before_roi_95": [
+        -0.02418917569487877,
+        0.1552082411948311
+      ],
+      "after_roi_95": [
+        -0.043371818542902695,
+        0.1978113295392121
+      ],
+      "paired_roi_difference_95": [
+        -0.05698660156968427,
+        0.07637154712353152
+      ]
+    }
+  },
+  "git_head": "89610db9fe7ebd7e0746467db6e47a9768f46cbc"
+}

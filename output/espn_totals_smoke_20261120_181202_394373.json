@@ -1,0 +1,134 @@
+{
+  "created_utc": "2026-11-21T00:12:02.390369+00:00",
+  "slate_date": "2026-11-20",
+  "source": "ESPN Core API, first odds provider; live read only",
+  "games": [
+    {
+      "home_team": "ATL",
+      "away_team": "CHA",
+      "total": 219.5,
+      "spread": -7.5,
+      "home_ml": -264,
+      "away_ml": 217
+    },
+    {
+      "home_team": "BKN",
+      "away_team": "ORL",
+      "total": 223.5,
+      "spread": 6.5,
+      "home_ml": 206,
+      "away_ml": -249
+    },
+    {
+      "home_team": "CLE",
+      "away_team": "IND",
+      "total": 235.5,
+      "spread": -6.5,
+      "home_ml": -230,
+      "away_ml": 191
+    },
+    {
+      "home_team": "DET",
+      "away_team": "TOR",
+      "total": 215.5,
+      "spread": -6.5,
+      "home_ml": -264,
+      "away_ml": 217
+    },
+    {
+      "home_team": "CHI",
+      "away_team": "WAS",
+      "total": 237.5,
+      "spread": -1.5,
+      "home_ml": -130,
+      "away_ml": 110
+    },
+    {
+      "home_team": "OKC",
+      "away_team": "NOP",
+      "total": 229.5,
+      "spread": -11.5,
+      "home_ml": -479,
+      "away_ml": 368
+    },
+    {
+      "home_team": "UTA",
+      "away_team": "PHX",
+      "total": 225.5,
+      "spread": 4.5,
+      "home_ml": 160,
+      "away_ml": -192
+    },
+    {
+      "home_team": "DEN",
+      "away_team": "HOU",
+      "total": 228.5,
+      "spread": -1.5,
+      "home_ml": -125,
+      "away_ml": 105
+    },
+    {
+      "home_team": "LAL",
+      "away_team": "SAC",
+      "total": 229.5,
+      "spread": -14.5,
+      "home_ml": -890,
+      "away_ml": 600
+    }
+  ],
+  "prediction_rows": 450,
+  "matched_prediction_rows": 450,
+  "score_columns_unchanged": [
+    "mp_deviation_pred",
+    "pts_pred",
+    "trb_pred",
+    "ast_pred",
+    "pra_pred",
+    "pr_pred",
+    "pa_pred",
+    "stl_pred",
+    "blk_pred",
+    "tov_pred",
+    "pts_p_over_raw",
+    "pts_p_over_cal",
+    "trb_p_over_raw",
+    "trb_p_over_cal",
+    "ast_p_over_raw",
+    "ast_p_over_cal",
+    "pra_p_over_raw",
+    "pra_p_over_cal",
+    "pr_p_over_raw",
+    "pr_p_over_cal",
+    "pa_p_over_raw",
+    "pa_p_over_cal",
+    "stl_p_over_raw",
+    "stl_p_over_cal",
+    "blk_p_over_raw",
+    "blk_p_over_cal",
+    "tov_p_over_raw",
+    "tov_p_over_cal",
+    "pts_market_edge_pred",
+    "pts_meta_prob",
+    "trb_market_edge_pred",
+    "trb_meta_prob",
+    "ast_market_edge_pred",
+    "ast_meta_prob",
+    "pra_market_edge_pred",
+    "pra_meta_prob",
+    "pr_market_edge_pred",
+    "pr_meta_prob",
+    "pa_market_edge_pred",
+    "pa_meta_prob",
+    "stl_market_edge_pred",
+    "stl_meta_prob"
+  ],
+  "game_total_scale_values": [
+    1.0
+  ],
+  "source_history_sha256": {
+    "output\\picks_history.csv": "e58704ed28e43d014e75ab11e6666251860ae9dc5ab67c2fb452356d012058d9",
+    "output\\candidates_history.csv": "e3bd91ace44b8332d23bc16afb09f8347cda7d96d30d08d1535e43c6c3493aa8"
+  },
+  "log": "  Game totals context: 9 fetched, 9 valid games; matched 450/450 player rows across 9 games; prediction scaling OFF (game_total_scale=1.0)\n",
+  "nba_props_sha256": "da4c97b9ff732c07e381dd13c8ca68b2fd167247ac2f3451b3326c80664c83c0"
+}

@@ -48,12 +48,39 @@ class FanDuelPriceGateTests(unittest.TestCase):
 
     def test_positive_ev_standard_price_passes(self):
         lines = _lines(prop="player_assists", line=3.5, over_price=-114.0, under_price=-114.0)
-        out = nba_props._attach_live_market_prices(_pick(62.6, prop="AST", line=3.5), lines, now_utc=NOW)
+        out = nba_props._attach_live_market_prices(_pick(59.0, prop="AST", line=3.5), lines, now_utc=NOW)
         row = out.iloc[0]
-        self.assertAlmostEqual(row["ev_per_unit"], round(0.626 * (1 + 100 / 114) - 1, 4), places=4)
+        self.assertAlmostEqual(row["ev_per_unit"], round(0.59 * (1 + 100 / 114) - 1, 4), places=4)
         self.assertAlmostEqual(row["no_vig_side_prob"], 0.5, places=4)
         self.assertTrue(bool(row["price_gate_pass"]))
         self.assertEqual(row["event_id"], "ev1")
+
+    def test_under_gap_boundary_and_config_rollback(self):
+        lines = _lines(prop="player_assists", line=3.5, over_price=-114.0, under_price=-114.0)
+        for probability, passes in [(60.0, True), (60.01, False), (62.6, False)]:
+            with self.subTest(probability=probability):
+                row = nba_props._attach_live_market_prices(
+                    _pick(probability, prop="AST", line=3.5), lines, now_utc=NOW).iloc[0]
+                self.assertEqual(bool(row.price_gate_pass), passes)
+                if not passes:
+                    self.assertIn("model-market gap", row.price_gate_reason)
+                    self.assertFalse(bool(row.exceeds_ev_threshold))
+        with patch.dict(nba_props.CONFIG, {"live_max_under_model_market_gap": None}):
+            row = nba_props._attach_live_market_prices(
+                _pick(62.6, prop="AST", line=3.5), lines, now_utc=NOW).iloc[0]
+            self.assertTrue(bool(row.price_gate_pass))
+
+    def test_under_gap_does_not_change_over_policy(self):
+        lines = _lines(prop="player_assists", line=3.5, over_price=-114.0, under_price=-114.0)
+        row = nba_props._attach_live_market_prices(
+            _pick(70.0, direction="OVER", prop="AST", line=3.5), lines, now_utc=NOW).iloc[0]
+        self.assertTrue(bool(row.price_gate_pass))
+
+    def test_under_gap_configuration_rejects_invalid_values(self):
+        for value in [-.1, 10, float("nan"), float("inf")]:
+            with self.subTest(value=value), patch.dict(nba_props.CONFIG, {"live_max_under_model_market_gap": value}):
+                with self.assertRaisesRegex(ValueError, "model_market_gap"):
+                    nba_props._attach_live_market_prices(_pick(62.6), _lines(), now_utc=NOW)
 
     def test_thin_ev_is_blocked(self):
         # DEC-071 bar is +0.01: 52% at -110 is EV -0.7% (blocked); 53% is +1.2% (passes).

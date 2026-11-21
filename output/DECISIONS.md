@@ -4523,3 +4523,73 @@ No new pipeline code change was necessary in this step. The failed historical lo
 **Limits:** it runs only while the Claude app is open (otherwise at the next launch), and it did not inherit this session's permission mode, so it may pause for tool approvals unless Jake opens it once in the app's Scheduled list and uses "Run now". It is a convenience check only: the daily upload itself does not depend on it. Rollback: delete the task from the app's Scheduled list.
 
 **Impact:** no pick, gate, model, schema, history, `run_daily.py` or Task Scheduler change; the four `FreshStartNBA-*` tasks are untouched.
+
+## 2026-11-20 — DEC-104 — Forward accuracy audit: the base model has no edge over FanDuel; large model edges are overconfidence (EVIDENCE-ONLY, NO CHANGE)
+
+**Data:** `scripts/evaluate_forward_vs_market.py` (new, read-only). It joins each slate's first morning prediction file (2026-10-21..11-19) to the latest FanDuel main-line price at or before that run, and to the actual result from `data/nba_data.csv`. Result: 8,562 graded non-push lines over 21 dates. The production model was trained 2026-08-13 and has seen no 2026-27 games, so this is a true forward test. Reruns were byte-identical.
+
+**Findings:**
+1. **The base model is not better than the market on all lines.** Log loss: model `p_over_cal` 0.6897 vs FanDuel no-vig 0.6876 (difference +0.0021, date-bootstrap 95% CI [−0.0004, +0.0046]). For TRB it is clearly worse (+0.0057, CI [+0.0011, +0.0108]). In a walk-forward logistic stack (fitted on prior dates only, 15 test dates, 6,084 rows), adding the model to the market logit did not improve log loss (0.6872 vs 0.6872). Adding line-vs-L10, line-vs-anchor, prediction-vs-line, injury and spread made it slightly worse (0.6878).
+2. **Large model-over-market edges do not win.** Across all UNDERs with edge > 0.10, the hit rate was 49.0% (n=347, −5.0% ROI); above 0.15 it was 44.8% (n=105, −8.8%). AST UNDERs with edge > 0.10: 46.4% (n=233, −7.8% ROI), against 57.2% for edge 0.05–0.10 (n=327, +10.6%, beats the market by +8.5 points, CI [+3.3, +13.7]). The same split appears in this season's published card: edge ≤ 0.10 went 65.2% (n=66, +14.9% ROI, +9.87u); edge > 0.10 went 52.9% (n=68, −1.5%, −1.05u). The candidate log shows the same direction (0.06–0.10: 72%; > 0.10: 56.9%). These samples overlap and are small.
+3. **The card's edge comes from selection, not the base model.** Graded candidates beat their own no-vig price by +7.5 points (n=275, CI [+2.0, +13.0]). On all AST lines, `meta_prob` 0.5–0.6 beats the market by +8.9 points (n=308, CI [+3.7, +14.0], +10.7% ROI), while `meta_prob` ≤ 0.5 does not (−1.4 points, −8.5% ROI).
+4. **Untested lanes (about 40 cells were examined, so expect some false positives):** PRA UNDER with `meta_prob` > 0.7 beat the market by +10.4 points (n=187, CI [+3.8, +17.6], +13.3% ROI). PTS `meta_prob` 0.5–0.7 beat it by about +5 points. These are hypotheses only.
+5. **Bug:** `fetch_game_totals` (ESPN Core API) returns empty `home_team`/`away_team`, because competitor `team` is now a `$ref`. So `game_total` is blank, `team_spread` is 0 and `game_total_scale` is 1.0 on every live prediction. Every archived 2026-11 prediction file confirms this, while the log still says `Game totals applied: N games`. The trained model does not use these as features; only the post-model PTS/AST/PRA/PA scaling and spread display are affected.
+
+**Decision:** No pick, gate, model or schema change in this entry. The options are recorded in TASKS.md for Jake. In order of evidence:
+- (a) Exclude or down-rank UNDERs whose model-over-market edge exceeds 0.10. This affects picks, so replay it first.
+- (b) Rebuild the probability model so it is anchored to the market price, with the market's no-vig probability as an input, trained on the priced FanDuel history.
+- (c) Shadow-log the PRA and PTS `meta_prob` lanes without publishing them.
+- (d) Fix the ESPN team mapping. Leave the scaling disabled until it is evaluated, and fix the misleading log line.
+
+
+## 2026-11-20 — DEC-105 — A replayed and implemented as a monitored FanDuel UNDER cutoff
+
+Jake requested A, B, C and D sequentially, one at a time. Only A is addressed here. Before changing production, replayed `model_side_prob - no_vig_side_prob > 0.10` against all logged published/candidate rows and showed before/after results. Published comparable binary history: 134 picks, 79 wins, +8.8168u, +6.5797% ROI; retained 66, 43 wins, +9.8657u, +14.9481%; removed 68, 36 wins, -1.0490u. Full candidate offers: 275, +18.4871u becomes 203, +15.5743u; removed 72 return +2.9128u. Thus the candidate pattern is weaker accuracy, not a losing removed group. Older 1,485 binary published rows lack the required probability pair and cannot assess this rule. No invented/backfilled historical probabilities.
+
+The published ROI difference has exploratory date-bootstrap 95% interval [-5.85,+27.45] percentage points; candidate difference [-5.70,+7.64]. Threshold was discovered on this sample. Benefit is concentrated in AST; removed BLK/STL were profitable. Implement the requested broad exposure cutoff without fitting new prop exceptions to the same outcomes. This is a monitored provisional policy, not proof of future returns.
+
+`nba_props.py`: config `live_max_under_model_market_gap=0.10` (None restores previous policy), exact-contract price-gate rejection for UNDER only, after prior price/EV/time checks, before final card selection. Exactly 10pp passes. Existing rejection reason, candidate history/grading and run receipts preserve evidence. No schema or model change. Future picks and slips can change; no saved histories/latest card were rewritten or pipeline run triggered. Gate requires the existing FanDuel price gate enabled.
+
+New read-only replay script and boundary/accounting tests. Evidence: `output/model_market_cutoff_20261120_180052_390511/summary.json` plus full annotated rows/date/prop breakdowns; report: `output/MODEL_MARKET_CUTOFF_REPLAY_2026-11-20.md`. Source hashes unchanged. No refill, retrospective reranking or slip simulation. Candidate and published cohorts overlap; candidate prices describe first-recorded offers, published P&L uses publication prices. Independent American-price payout and logged-actual/grade checks passed on all 134 published and 275 candidate binary rows. Production price cutoff agrees with all 152 assessable published-offer replay decisions. 46 focused tests plus 16 subtests passed.
+
+Freeze cutoff; prospective review begins with full slates Nov 21 after >=30 new completed dates and >=300 new binary candidates; these are review minima, not a statistical guarantee. Compare rejected vs retained offers and published returns separately, with prop mix, units, ROI and date uncertainty. No automatic retuning. Next real run must confirm cutoff reason and retained rejected candidates. B, C and D are untouched and queued, B next in isolation. Updated STATUS/TASKS while preserving pre-existing audit edits.
+
+**Final verification:** `python -m pytest -q` finished with 389 passed, 4 failed, 85 subtests passed (330 warnings). All four failures are dashboard-upload harness tests (hung upload, external login folder, success upload, cleaned output). Recreated those tests and all dependencies from unchanged Git HEAD in an isolated temporary folder: the same four failures reproduce (4 failed, 20 deselected); no A code is loaded there. They are pre-existing in this environment and were not changed in this scoped task. Focused A tests remain 46 passed, 16 subtests. Second replay into a temporary fresh directory exactly reproduced populations, source hashes and bootstrap intervals.
+
+
+## 2026-11-20 — DEC-106 — D prioritized: ESPN totals mapping repaired; context only, scaling remains off
+
+**Authorization/scope:** Jake explicitly moved D ahead of B/C: fix ESPN totals and the false applied message, keep scaling off until evaluated. Existing A work and the independent scratchpad-retrain task are preserved. No model artifacts, live config, historical records, or saved cards were changed for D.
+
+**Cause confirmed from live ESPN responses:** competitor team objects contain `$ref` links, so reading their abbreviation directly returns blank strings. Team codes also require the existing ESPN-to-NBA aliases (GS/GSW, NY/NYK, SA/SAS, etc.). The prior log counted fetched rows even when no prediction team matched. A further issue in the old function used an undefined `time.sleep` after appending each row; it now uses the existing `_time` import.
+
+**Repair in nba_props.py:** resolve team references with per-fetch caching and HTTP-status checks; support embedded teams, referenced competitions/odds, and the actual competition ID. Normalize/validate all NBA codes; omit unresolved matchups with a diagnostic. Use HTTPS and the active prediction slate date, defaulting to America/Chicago today. Prefer the explicitly signed home point spread; fallback uses favorite flags to avoid making a home underdog a favorite. No public column/interface rename. New `_attach_game_total_context` validates finite positive totals, attaches total and opposing home/away spreads, and reports fetched/valid counts plus actual matched player rows/games, including explicit zero-coverage messages. Removed the false `Game totals applied` message.
+
+**Scaling and score isolation:** context attaches only after all probability/market/meta scoring, and `game_total_scale` is always 1.0. The base model is not the only consumer to consider: `_build_market_feature_block` can accept total/spread/blowout inputs. Moving attachment after scoring prevents this small repair from silently changing those scores. The existing `apply_game_totals` argument controls fetching context; false performs no request. No enabling switch or untested scale path was added. Enabling environment adjustments/model inputs is a future evaluated change, not part of this fix.
+
+**Verification:** `python -m pytest -q tests/test_espn_game_totals.py tests/test_live_gate_entry_points.py tests/test_fanduel_price_gate.py tests/test_live_card_selection.py --tb=short` passed 42 tests and 24 subtests. New tests cover linked and expanded teams, aliases, odds references, signed home-underdog spreads, request failures/unmapped teams, invalid and missing totals, zero/partial attachment, score preservation, exact active slate forwarding, and actual generate_predictions runs with fetching enabled/disabled. The generation test checks neutral inputs at market/meta scoring and identical scored outputs afterward.
+
+**Live smoke (read-only, Nov 20 slate):** fetched 9 valid games; attached totals to all 450 saved prediction rows across 9 games; all saved projection/probability/meta score columns remain identical and scale is 1.0 throughout. Both history SHA-256 values remained unchanged. Receipt: `output/espn_totals_smoke_20261120_181202_394373.json`. This does not validate future betting benefit or scaling. The pipeline was not run and no saved prediction/card/history file was rewritten. STATUS/TASKS updated. Next real-run log confirmation remains open. B/C remain separate queued work.
+
+**Broader regression result:** `python -m pytest -q --ignore=tests/test_dashboard_publish_step.py --disable-warnings --tb=short` passed 378 tests and 81 subtests (330 warnings). The dashboard-upload test file was explicitly excluded because its four failures already reproduced against unchanged HEAD during DEC-105; its code is untouched by D. `git diff --check` passed. No further production changes followed these tests.
+
+## 2026-11-20 — DEC-107 — Side test: retraining on 2026-27 data barely changes forecasts (EVIDENCE-ONLY, NO CHANGE)
+
+**Question (Jake):** would retraining the model on this season's data help? Jake's constraint: do not change the live models or config. Nothing in `models/` or the config was touched. The SHA-256 of all `models/*.pkl|json` was identical before and after the run.
+
+**Method:**
+- Trained a candidate with the normal trainer (`train_advanced_models.py --require-availability-features --require-defense-rating-features --no-auto-build-features`) on `data/model_data_full_advanced.csv` rows through 2026-11-05 (54,371 rows). Training ran in the session scratchpad.
+- Scored the production and candidate probability sidecars through the trainer's own `_predict_probability_sidecar` on the same causal training-table rows for 2026-11-06..11-19. Both were scored at the FanDuel main line from the DEC-104 forward set. Result: 5,151 graded non-push rows over 13 dates.
+- Both models were compared uncalibrated (`p_over_raw`), so the comparison is like for like. Production applies a calibrator live, which DEC-104 measured at 0.6897.
+
+**Result (log loss; lower is better):**
+
+| Market | Production raw | Candidate raw | Candidate − production | Candidate − market |
+|---|---|---|---|---|
+| 0.6876 | 0.7104 | 0.7098 | −0.0006, 95% CI [−0.0022, +0.0008] | +0.0222, CI [+0.0129, +0.0305] |
+
+- By prop: AST −0.0036 (CI [−0.0074, +0.0000]) and STL −0.0042 (CI [−0.0095, +0.0006]) were nominally better. TRB and PR were slightly worse. Nothing was significant.
+- Average probability shift between the two models: 0.0195.
+- UNDER bets where the model beats break-even by more than 2 points: production 50.4%, −5.8% ROI (n=1,847); candidate 51.0%, −4.7% (n=1,811). Both lose.
+
+**Conclusion:** A plain retrain on 2026-27 data is not worth promoting. It moves forecasts by about 2 points, does not measurably improve accuracy, and both models remain well behind the FanDuel no-vig price. The structural fix is DEC-104 option (b): a probability model anchored to the market price. Retraining the existing design is not that fix. No promotion and no config change. Scratch artifacts were not copied into the project.

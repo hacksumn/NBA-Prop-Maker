@@ -109,6 +109,9 @@ CONFIG = {
     # returned +7% ROI (n=303) vs ~+2% above +3% (n=601); 8 days only - review.
     'live_min_ev_per_unit': 0.01,
     'live_max_favorite_american': -200,
+    # DEC-105: exploratory overconfidence cutoff, replayed on recorded FanDuel
+    # UNDERs. Keep exactly +10pp; None restores the prior price policy.
+    'live_max_under_model_market_gap': 0.10,
     # DEC-071: sanity-check HIGH VOLATILITY limit (L10 CV) raised from 0.70.
     # Picks removed at CV 0.70-1.00 hit 68% (n=304, 2026) - no worse than published.
     'sanity_volatility_cv_limit': 1.00,
@@ -1337,6 +1340,13 @@ def _attach_live_market_prices(picks_df: pd.DataFrame,
 
     min_ev = float(CONFIG.get('live_min_ev_per_unit', 0.03))
     max_fav = float(CONFIG.get('live_max_favorite_american', -200))
+    max_under_gap = CONFIG.get('live_max_under_model_market_gap')
+    if max_under_gap is not None:
+        max_under_gap = float(max_under_gap)
+        if not np.isfinite(max_under_gap) or not 0 <= max_under_gap <= 1:
+            raise ValueError('live_max_under_model_market_gap must be None or a probability in [0, 1]')
+    # Use the same four-decimal probabilities preserved in the replay histories.
+    model_market_gap = (working['model_side_prob'] - working['no_vig_side_prob']).round(4)
     commence = pd.to_datetime(working['commence_time'], errors='coerce', utc=True, format="mixed")
     snapshot = pd.to_datetime(working['line_snapshot_ts'], errors='coerce', utc=True, format="mixed")
     reasons = []
@@ -1354,6 +1364,11 @@ def _attach_live_market_prices(picks_df: pd.DataFrame,
         elif working.at[idx, 'ev_per_unit'] < min_ev:
             reasons.append(
                 f"EV {working.at[idx, 'ev_per_unit']:+.3f}<{min_ev:+.3f} at {working.at[idx, 'side_price']:+.0f}"
+            )
+        elif (max_under_gap is not None and is_under.at[idx]
+              and model_market_gap.at[idx] > max_under_gap + 1e-12):
+            reasons.append(
+                f"UNDER model-market gap {model_market_gap.at[idx]:+.4f}>{max_under_gap:.4f} cap"
             )
         else:
             reasons.append('')
@@ -3571,61 +3586,133 @@ def fetch_game_totals(game_date: str = None) -> pd.DataFrame:
     Returns DataFrame with columns: home_team, away_team, total, spread, home_ml, away_ml
     Team abbreviations match NBA team codes (LAL, BOS, etc.).
     """
-    if game_date is None:
-        game_date = datetime.now().strftime('%Y%m%d')
-    else:
-        game_date = game_date.replace('-', '')
+    game_date = pd.Timestamp(game_date or pd.Timestamp.now(tz=CONFIG['local_timezone'])).strftime('%Y%m%d')
+
+    def get_json(url, timeout=8):
+        response = requests.get(url.replace('http://', 'https://', 1), timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+
+    team_cache = {}
+
+    def team_abbreviation(team):
+        if not team.get('abbreviation') and team.get('$ref'):
+            ref = team['$ref']
+            if ref not in team_cache:
+                team_cache[ref] = get_json(ref)
+            team = team_cache[ref]
+        code = str(team.get('abbreviation') or '').strip().upper()
+        code = ESPN_TEAM_ABBR_ALIASES.get(code, code)
+        return code if code in NBA_TEAM_TRICODES else ''
+
     try:
-        url = f'http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events?dates={game_date}&limit=20'
-        r = requests.get(url, timeout=10)
-        if r.status_code != 200:
-            return pd.DataFrame()
-        items = r.json().get('items', [])
+        url = f'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events?dates={game_date}&limit=20'
+        items = get_json(url, timeout=10).get('items', [])
         rows = []
+        skipped = 0
         for item in items:
             ref = item.get('$ref', '')
             if not ref:
                 continue
             try:
-                ev = requests.get(ref, timeout=8).json()
+                ev = get_json(ref)
                 comps = ev.get('competitions', [])
                 if not comps:
                     continue
                 comp = comps[0]
+                if not comp.get('competitors') and comp.get('$ref'):
+                    comp = get_json(comp['$ref'])
                 competitors = comp.get('competitors', [])
                 home_abbr = away_abbr = ''
                 for c in competitors:
-                    team = c.get('team', {})
-                    abbr = team.get('abbreviation', '')
+                    abbr = team_abbreviation(c.get('team') or {})
                     if c.get('homeAway') == 'home':
                         home_abbr = abbr
-                    else:
+                    elif c.get('homeAway') == 'away':
                         away_abbr = abbr
+                if not home_abbr or not away_abbr or home_abbr == away_abbr:
+                    skipped += 1
+                    continue
                 # Fetch odds
                 event_id = ev.get('id', '')
-                odds_url = f'http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/{event_id}/competitions/{event_id}/odds'
-                odds_r = requests.get(odds_url, timeout=8)
-                if odds_r.status_code != 200:
-                    continue
-                odds_items = odds_r.json().get('items', [])
+                competition_id = comp.get('id', event_id)
+                odds_url = f'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/events/{event_id}/competitions/{competition_id}/odds'
+                odds_items = get_json(odds_url).get('items', [])
                 if not odds_items:
                     continue
                 o = odds_items[0]  # use first provider (DraftKings)
+                if 'overUnder' not in o and o.get('$ref'):
+                    o = get_json(o['$ref'])
+                # The top-level spread can describe the favorite rather than the
+                # home team. Prefer the explicitly signed home point spread.
+                home_odds = o.get('homeTeamOdds') or {}
+                home_spread = pd.to_numeric(
+                    (home_odds.get('current') or {}).get('pointSpread', {}).get('american'),
+                    errors='coerce',
+                )
+                if pd.isna(home_spread):
+                    home_spread = pd.to_numeric(o.get('spread'), errors='coerce')
+                    if pd.notna(home_spread) and isinstance(home_odds.get('favorite'), bool):
+                        home_spread = -abs(home_spread) if home_odds['favorite'] else abs(home_spread)
                 rows.append({
                     'home_team': home_abbr,
                     'away_team': away_abbr,
                     'total': o.get('overUnder'),
-                    'spread': o.get('spread'),
+                    'spread': home_spread,
                     'home_ml': o.get('homeTeamOdds', {}).get('moneyLine'),
                     'away_ml': o.get('awayTeamOdds', {}).get('moneyLine'),
                 })
-                time.sleep(0.3)
-            except Exception:
+                _time.sleep(0.3)
+            except Exception as exc:
+                skipped += 1
+                print(f"  ESPN game totals: skipped event {ref.rsplit('/', 1)[-1]} ({exc})")
                 continue
+        if skipped:
+            print(f"  ESPN game totals: {skipped} event(s) skipped due to unresolved teams or request errors")
         return pd.DataFrame(rows)
     except Exception as e:
         print(f"  Game totals unavailable: {e}")
         return pd.DataFrame()
+
+
+def _attach_game_total_context(pred_df: pd.DataFrame, totals_df: pd.DataFrame) -> pd.DataFrame:
+    """Attach validated ESPN context without changing predictions or probabilities.
+
+    DEC-106: scaling stays disabled pending separate forward evaluation. Keeping
+    this column neutral also disables its downstream probability-distribution use.
+    """
+    working = pred_df.copy()
+    working['game_total'] = np.nan
+    working['team_spread'] = 0.0
+    working['game_total_scale'] = 1.0
+    team_totals = {}
+    valid_games = []
+    for _, row in totals_df.iterrows():
+        home, away = row.get('home_team'), row.get('away_team')
+        total = pd.to_numeric(row.get('total'), errors='coerce')
+        if (home not in NBA_TEAM_TRICODES or away not in NBA_TEAM_TRICODES or home == away
+                or not np.isfinite(total) or total <= 0):
+            continue
+        spread = pd.to_numeric(row.get('spread'), errors='coerce')
+        spread = float(spread) if np.isfinite(spread) else 0.0
+        team_totals[home] = (float(total), spread)
+        team_totals[away] = (float(total), -spread)
+        valid_games.append((home, away))
+    if 'team' in working:
+        working['game_total'] = working.team.map(lambda team: team_totals.get(team, (np.nan, 0))[0])
+        working['team_spread'] = working.team.map(lambda team: team_totals.get(team, (np.nan, 0))[1])
+    matched = working.game_total.notna()
+    matched_teams = set(working.loc[matched, 'team']) if 'team' in working else set()
+    matched_games = len({(home, away) for home, away in valid_games
+                         if home in matched_teams or away in matched_teams})
+    print(
+        f"  Game totals context: {len(totals_df)} fetched, {len(valid_games)} valid games; "
+        f"matched {int(matched.sum())}/{len(working)} player rows across {matched_games} games; "
+        "prediction scaling OFF (game_total_scale=1.0)"
+    )
+    if not matched.any():
+        print("  Game totals context unavailable for prediction teams; no totals attached")
+    return working
 
 
 def _nba_season_for_date(as_of=None) -> str:
@@ -6827,37 +6914,11 @@ def generate_predictions(
         pred_df['teammates_out'] = ''
         pred_df['injury_adj_strength'] = 0.0
 
-    # Apply game total scaling: if game total is above league avg → boost predictions slightly
-    if apply_game_totals:
-        print("  Fetching game totals...")
-        totals_df = fetch_game_totals()
-    else:
-        totals_df = pd.DataFrame()
-    if len(totals_df) > 0:
-        league_avg_total = 225.0  # approximate NBA season average
-        # Build team → total + spread lookup
-        team_totals = {}
-        for _, row in totals_df.iterrows():
-            scale = 1 + 0.003 * (row['total'] - league_avg_total) if pd.notna(row.get('total')) else 1.0
-            team_totals[row['home_team']] = {'scale': scale, 'total': row.get('total'), 'spread': row.get('spread', 0)}
-            team_totals[row['away_team']] = {'scale': scale, 'total': row.get('total'), 'spread': -row.get('spread', 0) if pd.notna(row.get('spread')) else 0}
-        pred_df['game_total'] = pred_df['team'].map(lambda t: team_totals.get(t, {}).get('total'))
-        pred_df['team_spread'] = pred_df['team'].map(lambda t: team_totals.get(t, {}).get('spread', 0))
-        pred_df['game_total_scale'] = pred_df['team'].map(lambda t: team_totals.get(t, {}).get('scale', 1.0)).fillna(1.0)
-        # Scale pts/ast predictions by game environment (trb/stl/blk less affected by pace)
-        for stat in ['pts', 'ast', 'pra', 'pa']:
-            pred_col = f'{stat}_pred'
-            if pred_col in pred_df.columns:
-                scale_vec = pred_df['game_total_scale']
-                pred_df[pred_col] = (pred_df[pred_col] * scale_vec).round(1)
-        n_games = len(totals_df)
-        avg_total = totals_df['total'].mean()
-        print(f"  Game totals applied: {n_games} games, avg total {avg_total:.1f}")
-    else:
-        pred_df['game_total'] = None
-        pred_df['team_spread'] = 0
-        pred_df['game_total_scale'] = 1.0
-        print("  Game totals unavailable — skipping")
+    # DEC-106: retain neutral inputs while scoring. ESPN context is attached
+    # only afterwards, so repaired metadata cannot silently change meta scores.
+    pred_df['game_total'] = np.nan
+    pred_df['team_spread'] = 0.0
+    pred_df['game_total_scale'] = 1.0
 
     # Merge with Vegas lines if available
     if vegas_lines is not None and len(vegas_lines) > 0:
@@ -6924,7 +6985,14 @@ def generate_predictions(
             adv_market_sets,
         )
 
-    return pred_df
+    # Display/logging context only until game-environment effects are evaluated.
+    if apply_game_totals:
+        print("  Fetching game totals...")
+        totals_df = fetch_game_totals(slate_date)
+    else:
+        totals_df = pd.DataFrame()
+        print("  Game totals fetch disabled")
+    return _attach_game_total_context(pred_df, totals_df)
 
 
 def apply_first_principles_adjustments(pred_df: pd.DataFrame, feature_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
@@ -11798,9 +11866,10 @@ def main(command: Optional[str] = None, use_feature_cache: bool = True):
             picks = _attach_live_market_prices(picks, contract_lines)
             blocked = picks[~picks['price_gate_pass']]
             print(
-                f"\n  Price gate: {int(picks['price_gate_pass'].sum())}/{len(picks)} candidates are +EV "
+                f"\n  Price gate: {int(picks['price_gate_pass'].sum())}/{len(picks)} candidates pass "
                 f"at the exact FanDuel price (min EV {float(CONFIG.get('live_min_ev_per_unit', 0.03)):+.2f}, "
-                f"favorite cap {float(CONFIG.get('live_max_favorite_american', -200)):+.0f})"
+                f"favorite cap {float(CONFIG.get('live_max_favorite_american', -200)):+.0f}, "
+                f"UNDER model-market gap cap {CONFIG.get('live_max_under_model_market_gap')})"
             )
             for _, r in blocked.head(10).iterrows():
                 print(f"    blocked {r['player']} {r['prop']} {r['direction']} {r['line']}: {r['price_gate_reason']}")
