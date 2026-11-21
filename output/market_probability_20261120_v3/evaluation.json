@@ -1,0 +1,419 @@
+{
+  "specification": {
+    "version": "market_offset_v1",
+    "train_end": "2026-05-31",
+    "forward_start": "2026-10-21",
+    "data_end": "2026-11-19",
+    "penalty": 0.02,
+    "max_logit_correction": 0.5,
+    "features": [
+      "intercept",
+      "line_level",
+      "l10_gap",
+      "momentum",
+      "minutes"
+    ],
+    "props": [
+      "pts",
+      "trb",
+      "ast",
+      "pra",
+      "pr",
+      "pa",
+      "stl",
+      "blk"
+    ]
+  },
+  "foundation_training_rows": 28433,
+  "foundation_training_dates": 79,
+  "frozen_prior_season": {
+    "rows": 7917,
+    "dates": 18,
+    "market_log_loss": 0.6883671866113891,
+    "model_log_loss": 0.6876488287081849,
+    "difference": -0.0007183579032042789,
+    "date_cluster_difference_95": [
+      -0.0013744361341109942,
+      -7.192893205298918e-05
+    ],
+    "market_brier": 0.24763737708692699,
+    "model_brier": 0.2472808212504059,
+    "market_calibration_bias": 0.025987527330226853,
+    "model_calibration_bias": 0.01782461098611137,
+    "mean_probability_change": 0.008198802700717317,
+    "under_ev_001": {
+      "picks": 0,
+      "profit_units": 0.0,
+      "roi": null,
+      "hit_rate": null
+    }
+  },
+  "walk_forward": {
+    "rows": 7917,
+    "dates": 18,
+    "market_log_loss": 0.6883671866113891,
+    "model_log_loss": 0.6874547703420097,
+    "difference": -0.0009124162693795377,
+    "date_cluster_difference_95": [
+      -0.0018727215388097788,
+      -1.2003323151896408e-05
+    ],
+    "market_brier": 0.24763737708692699,
+    "model_brier": 0.24718352432516527,
+    "market_calibration_bias": 0.025987527330226853,
+    "model_calibration_bias": 0.014640594343723386,
+    "mean_probability_change": 0.01135630791821798,
+    "under_ev_001": {
+      "picks": 0,
+      "profit_units": 0.0,
+      "roi": null,
+      "hit_rate": null
+    }
+  },
+  "walk_forward_by_prop": {
+    "ast": {
+      "rows": 1015,
+      "dates": 18,
+      "market_log_loss": 0.6864225750249731,
+      "model_log_loss": 0.6855725984011473,
+      "difference": -0.000849976623825718,
+      "date_cluster_difference_95": [
+        -0.0029833051775455706,
+        0.0012597333321025441
+      ],
+      "market_brier": 0.2466538220725906,
+      "model_brier": 0.2462267902109046,
+      "market_calibration_bias": 0.01586655671410255,
+      "model_calibration_bias": -0.00021897089729830106,
+      "mean_probability_change": 0.01608552761140084,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "blk": {
+      "rows": 73,
+      "dates": 16,
+      "market_log_loss": 0.6637728592384883,
+      "model_log_loss": 0.6623226943994132,
+      "difference": -0.0014501648390752647,
+      "date_cluster_difference_95": [
+        -0.003991886438706875,
+        0.0012038852569791951
+      ],
+      "market_brier": 0.2354330408149988,
+      "model_brier": 0.2347403771160259,
+      "market_calibration_bias": 0.08322388235317103,
+      "model_calibration_bias": 0.0776466315464822,
+      "mean_probability_change": 0.005577250806688836,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pa": {
+      "rows": 1137,
+      "dates": 18,
+      "market_log_loss": 0.6922139715770242,
+      "model_log_loss": 0.691396979528573,
+      "difference": -0.0008169920484510575,
+      "date_cluster_difference_95": [
+        -0.0017529891169996501,
+        9.225452152936173e-05
+      ],
+      "market_brier": 0.24953351794261905,
+      "model_brier": 0.24912600701373577,
+      "market_calibration_bias": 0.028421627753998927,
+      "model_calibration_bias": 0.02025546675893571,
+      "mean_probability_change": 0.008169684301273229,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pr": {
+      "rows": 1451,
+      "dates": 18,
+      "market_log_loss": 0.6938031189670667,
+      "model_log_loss": 0.6924743825936518,
+      "difference": -0.0013287363734149336,
+      "date_cluster_difference_95": [
+        -0.0026021537925466497,
+        5.883574476798771e-05
+      ],
+      "market_brier": 0.25032776583858973,
+      "model_brier": 0.24966343587643527,
+      "market_calibration_bias": 0.03636998071253212,
+      "model_calibration_bias": 0.02461846408240688,
+      "mean_probability_change": 0.011752926272916516,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pra": {
+      "rows": 1170,
+      "dates": 18,
+      "market_log_loss": 0.6918194321419013,
+      "model_log_loss": 0.6906290702109358,
+      "difference": -0.001190361930965545,
+      "date_cluster_difference_95": [
+        -0.00260481310235876,
+        0.0001555594501976202
+      ],
+      "market_brier": 0.2493361923841882,
+      "model_brier": 0.2487423165707524,
+      "market_calibration_bias": 0.03330229157926925,
+      "model_calibration_bias": 0.01977772170588053,
+      "mean_probability_change": 0.013547184800415918,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pts": {
+      "rows": 1502,
+      "dates": 18,
+      "market_log_loss": 0.6896487143135017,
+      "model_log_loss": 0.6887545374229025,
+      "difference": -0.0008941768905991059,
+      "date_cluster_difference_95": [
+        -0.0019304916062998958,
+        0.00015727190964463626
+      ],
+      "market_brier": 0.24825313477882863,
+      "model_brier": 0.2478077976064714,
+      "market_calibration_bias": 0.026552483354833758,
+      "model_calibration_bias": 0.016752038295794174,
+      "mean_probability_change": 0.009828215018367897,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "stl": {
+      "rows": 205,
+      "dates": 17,
+      "market_log_loss": 0.62963036171403,
+      "model_log_loss": 0.6285095046280259,
+      "difference": -0.0011208570860039625,
+      "date_cluster_difference_95": [
+        -0.003981873716119505,
+        0.0023048006803038294
+      ],
+      "market_brier": 0.21905777789465586,
+      "model_brier": 0.2185727361426708,
+      "market_calibration_bias": 0.026937707189174227,
+      "model_calibration_bias": 0.01676798810539445,
+      "mean_probability_change": 0.010169719083779769,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "trb": {
+      "rows": 1364,
+      "dates": 18,
+      "market_log_loss": 0.686596586559414,
+      "model_log_loss": 0.6862794736490123,
+      "difference": -0.0003171129104017034,
+      "date_cluster_difference_95": [
+        -0.0013681334426325009,
+        0.0008809336600704808
+      ],
+      "market_brier": 0.24673993906581373,
+      "model_brier": 0.24657959952750913,
+      "market_calibration_bias": 0.010342655063155032,
+      "model_calibration_bias": -1.990747003560641e-05,
+      "mean_probability_change": 0.010362562533190643,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    }
+  },
+  "production_cal_comparable": {
+    "rows": 6527,
+    "dates": 16,
+    "market_log_loss": 0.6878911509097441,
+    "model_log_loss": 0.6892314870004864,
+    "difference": 0.0013403360907424096,
+    "date_cluster_difference_95": [
+      -0.0016258700687677764,
+      0.0041510882513498566
+    ],
+    "market_brier": 0.2474051398545407,
+    "model_brier": 0.248037866776467,
+    "market_calibration_bias": 0.03424753072581567,
+    "model_calibration_bias": 0.012268898421939624,
+    "mean_probability_change": 0.0335168490708325,
+    "under_ev_001": {
+      "picks": 1531,
+      "profit_units": 29.614532361558055,
+      "roi": 0.019343260850135893,
+      "hit_rate": 0.5225342913128674
+    }
+  },
+  "anchored_on_production_comparable": {
+    "rows": 6527,
+    "dates": 16,
+    "market_log_loss": 0.6878911509097441,
+    "model_log_loss": 0.6869236079166939,
+    "difference": -0.0009675429930501129,
+    "date_cluster_difference_95": [
+      -0.0021213470568479955,
+      0.00011813794432104256
+    ],
+    "market_brier": 0.2474051398545407,
+    "model_brier": 0.2469241329239539,
+    "market_calibration_bias": 0.03424753072581567,
+    "model_calibration_bias": 0.022567463172860885,
+    "mean_probability_change": 0.01169121706059257,
+    "under_ev_001": {
+      "picks": 0,
+      "profit_units": 0.0,
+      "roi": null,
+      "hit_rate": null
+    }
+  },
+  "limitations": [
+    "November outcomes were already inspected in DEC-104; this is chronological retrospective evidence, not untouched prospective proof.",
+    "Foundation uses first recorded pre-tip quotes (many late-day); forward archived slates use actual first morning runs, other dates use 10am. Capture timing differs.",
+    "Main-line no-vig price is a baseline probability, not an executable return; profit uses offered side odds.",
+    "Related props and player-game outcomes overlap; date-cluster intervals account for nights, not independent replication.",
+    "ROI diagnostics do not replay incumbent meta gates, game/player exposure or parlays.",
+    "Historical master-box revisions can differ from what was known live; prospective scoring is still required."
+  ],
+  "historical_evidence_pass": true,
+  "promotion_eligible": false,
+  "promotion_reason": "Prospective validation required; no live promotion performed",
+  "created_utc": "2026-11-21T00:31:30.158692+00:00",
+  "source_sha256": {
+    "data\\historical_lines.csv": "bb02d25a07df8375bd4dbce2c9786f9933a37abf7f9478ffcde365f8dee37e67",
+    "data\\nba_data.csv": "66c936d20a87de4cb96e705cac0c7072db13ac3746f7e708f2cfcdae2c334a28",
+    "output\\archive\\2026-10-26\\predictions_2026-10-26_103705.csv": "ec75583bbe3397428a687fdfa3701c92ec830b9cdcbb748a7a56b92294f4cded",
+    "output\\archive\\2026-10-28\\predictions_2026-10-28_084347.csv": "f82c0426cc750c262e4ac797c7d667dd5078f3747cb3e5a9e9753bf433026bef",
+    "output\\archive\\2026-10-31\\predictions_2026-10-31_084431.csv": "b44c69a2feba77f5744f4737ec4d143c00aa6c515bbdcda7d4c893e340d8f217",
+    "output\\archive\\2026-11-01\\predictions_2026-11-01_070108.csv": "0ef19cf15417ca60224353f65bcc0b45d22050db8b79706a53c99f1e6b9755f3",
+    "output\\archive\\2026-11-02\\predictions_2026-11-02_074224.csv": "afeb877c2f5288e61beeb6f086aed1b163e4d343784ff018309eadd6f8115dec",
+    "output\\archive\\2026-11-05\\predictions_2026-11-05_073909.csv": "a1c99677d76515d2a2844915f7579f8ac6bc4b31c143b774ad8490e111629eb9",
+    "output\\archive\\2026-11-07\\predictions_2026-11-07_073944.csv": "21301f6fb6873bb092064031fc71a8f1143ae53f7120e6e3c8afdbcf8fdb34a3",
+    "output\\archive\\2026-11-08\\predictions_2026-11-08_074800.csv": "aa78232a21f1ff0fd3d1d667f53d3bb779448be6279f1970aa22b8c8f9564217",
+    "output\\archive\\2026-11-09\\predictions_2026-11-09_075217.csv": "44c622734732368f846d96bd796e4e44004d18cacd5c373fab28d7487ec78ea5",
+    "output\\archive\\2026-11-10\\predictions_2026-11-10_074227.csv": "c69a2fd73997f496d9f730a1574af0c455e549ffa51cefa800ef2e679fd78361",
+    "output\\archive\\2026-11-12\\predictions_2026-11-12_085935.csv": "56e27ba58fdcfb6148bcce33ed6f35e929dd03367d4c473e6a6a7630dca14ad6",
+    "output\\archive\\2026-11-14\\predictions_2026-11-14_073857_347853.csv": "467d87d8d0a0fe4a21a8bec3e63559769d7ee06cf975d603cfa05eb89a033222",
+    "output\\archive\\2026-11-15\\predictions_2026-11-15_073913_120357.csv": "3f0cbd4425525083bb55d114007e4961ec99884d4ca1e78e4eadd5c654480707",
+    "output\\archive\\2026-11-16\\predictions_2026-11-16_074148_694528.csv": "cd639f50fa0ebf839a39fe9e5d66779685fe35ada7b8df51357786f4d7779ad8",
+    "output\\archive\\2026-11-17\\predictions_2026-11-17_063203_724440.csv": "28e9dbe635e5489c56a94674c6da03100ea9f59c6275d20763f4b0945391c034",
+    "output\\archive\\2026-11-19\\predictions_2026-11-19_073814_062371.csv": "6971c71f5abc661d2d5d1854d25fa3f9a4b397c6a25619d9a9667765c8c7f058"
+  },
+  "dataset_sha256": "3ecdc1380c770fdccac3bd2110cb6d2fbba8a2784ef859a5f9a855d7bbb779b3",
+  "build_counts": {
+    "raw_fanduel_rows": 79741,
+    "valid_timed_price_rows": 72735,
+    "unique_selected_offers": 37455,
+    "missing_or_nonparticipant_actuals": 1105,
+    "pushes": 0,
+    "graded_nonpush_offers": 36350,
+    "valid_residual_features": 36049
+  },
+  "git_head": "a3f5ef43f61c53d0427014119c72f01ef948d6c5",
+  "source_code_sha256": {
+    "market_probability.py": "ea5afa65a0e21154e344558d9e9d2b4b62dee7e70ff058d17d52cdb8cad4573c",
+    "scripts/train_market_probability.py": "d3326f58a56d54d37b56901d1daae0c050659f98e71c49d0fb07da934a9a927f"
+  },
+  "production_model_files_unchanged": true,
+  "production_model_sha256": {
+    "models\\availability_minutes_model.pkl": "e02fc6442ddb56c4a0bb46c8166ad822f70f6190382e9e21a995f47ab137c573",
+    "models\\availability_minutes_policy.json": "bb70783133c2950eef15e2f882f4d8f1da6733793ec2ef9b1af662688cfa7985",
+    "models\\bias.json": "eff3145acf57a71ce203dd117ef33d1daa7b460f80785871e8fac8384ca0396e",
+    "models\\bias_advanced.json": "53f0bb36379fa30918a858019e510da045028a1fe1f0af059b1f039408f2e23c",
+    "models\\clf_ast_advanced.pkl": "0b19acb67f3b8918b393f84816af9b37fe6b57462622a22aa105fbd3fdacc02b",
+    "models\\clf_blk_advanced.pkl": "e51344021985ffd21fe39f5c83d07d60d4bfb54813473443b5fa204f6651ef9c",
+    "models\\clf_pa_advanced.pkl": "2acc3b0f97591ba8f28c2dc93785691f00dfa3a26f11b777b8d116e3be4bb4c0",
+    "models\\clf_pra_advanced.pkl": "7b6926b671c2765b71e3d0695db4481a75c5a41a4c96c156d903215d323b6ce8",
+    "models\\clf_pr_advanced.pkl": "2014b8cf59c6b861cd5b7297f24f6c6f3bbb4758abb6adf9a1b9a162b343c9bc",
+    "models\\clf_pts_advanced.pkl": "8b35b0a022683606fed90aa862f2702f591fc9baa157274e6b0b94679cffa8e2",
+    "models\\clf_stl_advanced.pkl": "0e7392829d72d9de71fe43c9ac50f2dda331b5ceac7a7d62732c52e4d7c0211d",
+    "models\\clf_tov_advanced.pkl": "03696c3438216e8ce873301b1eb3baa7cd9d740ac4be70342104c73e5882892b",
+    "models\\clf_trb_advanced.pkl": "40f0ad871de0392860efbee019f15c4fb590ca1daa09d5b84dcb5dc839950b08",
+    "models\\clv_selection_overlay_t_minus_5.pkl": "c56dd2ca7ec8f6d7b2ba1ad5ef6332c306e50423852396b8b912ac74afe737e5",
+    "models\\clv_selection_overlay_t_minus_60.pkl": "4f3f1e59fd11483f485a3765ac1617465b75ac065934e1c0b7ee44f951be4d55",
+    "models\\clv_selection_policy.json": "9acf8a67e441aec08da2e4a946c1567db27d537eb2467a25da750757b0d034e3",
+    "models\\confidence_calibrator.pkl": "4317a2ed363efaaf633e22653f9227f3a1b86cb6723ea59af7bd72e97f3f1d0e",
+    "models\\defense_rating_feature_contract.json": "22d24bb2874b5205084dfa4b1814d487e1c23e92ece23e2c3b36a4cadd3c5d06",
+    "models\\edge_xgb_ast_advanced.pkl": "6e1db1b19f7fce2a0eccbd37e85c4f72001a8875e0d61b21495a53771356427a",
+    "models\\edge_xgb_blk_advanced.pkl": "025c9a3aa89efd52a03998a88327edb36fc95d35b4e3472e0a941335271933f7",
+    "models\\edge_xgb_pa_advanced.pkl": "b5d37f2b7e2e7ca315e2633e2f8f2d6d63100c62e0302877d2014ecf55e2f8ae",
+    "models\\edge_xgb_pra_advanced.pkl": "939adfe04c51d00f5e43b9572b6270b40345525e621a22e038ff23ba6edc9fb8",
+    "models\\edge_xgb_pr_advanced.pkl": "814bcf9830ffb43221e13e7bcdd1200012a046bfe6b473bebbfa23ea334b340d",
+    "models\\edge_xgb_pts_advanced.pkl": "980e977b997bad5ee3d264a73baa4cd9b39a4587e31172556a56e0235d4ee6d0",
+    "models\\edge_xgb_stl_advanced.pkl": "dd869075b6e25b82b6cc2174256b624eaa3f416db75f9aa8b4030c3d976c3c74",
+    "models\\edge_xgb_tov_advanced.pkl": "ae33380263aa32cc15614bae8864d3c07432c2cdd89e36ac0390458eb3baf515",
+    "models\\edge_xgb_trb_advanced.pkl": "0063536100c083ec77e18d53bb6815418a26ec916583d531f148fa30c66ffd01",
+    "models\\feature_importance_advanced.json": "347b076d667e2a0f65bbbb2aece1ce0d97285d6d5b7f8395569ff392d8c30aa7",
+    "models\\market_feature_sets_advanced.json": "59058cc32fa19ee7a4c4d62faf17f3159772e35ac747f57d44f1f3fb9abc7c41",
+    "models\\meta_clf_ast_advanced.pkl": "cdcae8fde41534aa16c8d77e0ddd8c0aca1a3be0e249c3d8ee4516ad752f5b50",
+    "models\\meta_clf_blk_advanced.pkl": "1fe1f8b93b174262948ac3b171f4904dfd6a48a87d3aa3d359af30d23fdfff75",
+    "models\\meta_clf_pa_advanced.pkl": "3c6e5d6f0788c7dc26d3f981fba147e965ba74582b397c4892f79147a8e0fae1",
+    "models\\meta_clf_pra_advanced.pkl": "a0e4da4c6a73f6d3eed7aa6ea52e7a9db9fe6c53fec5c6ca57f9c2190bdc353b",
+    "models\\meta_clf_pr_advanced.pkl": "68f1a449a5496f2287e74560570bbd3e12d3040f7161ac5774e2d222a5d4b905",
+    "models\\meta_clf_pts_advanced.pkl": "7c3b8360f996430b8019c270e3ecf3165aa9fabc8a5fea4167cb35389e1fa990",
+    "models\\meta_clf_stl_advanced.pkl": "754b97309ba1da097841167b18f7e0c8237db31e490eca9524d8b5298fe45f18",
+    "models\\meta_clf_tov_advanced.pkl": "357656a1da10bb7d521ec000b0146280b1c377199dcf85649bc83f23a93cffd2",
+    "models\\meta_clf_trb_advanced.pkl": "5d8cd186b513c0c70723a57c8116ccc8ac390be34bcc18263c8ae70dcc1d06e5",
+    "models\\minutes_deviation_model.pkl": "f995ff1eb76199f7bc458b359fe68160e3be20631eaf9b04888dc9eed9dd831e",
+    "models\\models.pkl": "c97a46fe15961efc03044c77c63f4e9e423308d6dcb2e1bf31100cb07b0376bd",
+    "models\\ou_classifiers.pkl": "771ca04272649c89e5d4fe661780a3bcc0da8f2d7af34355452a709300582890",
+    "models\\ppp_ridge_model.pkl": "e95bec50bacc1e94cd72f8e6fd12559dedd999219312ce6739d4497368e1c44f",
+    "models\\probability_calibrator_advanced.pkl": "959a64f5879fbf48342896b1f4067002e0ae2eccf6fcddfa32c28bd3c461231b",
+    "models\\probability_diagnostics_advanced.json": "ef3cc9bd2899556be3fe185f52290c3b103fa2b7fec8c052ded37f1b4de6bd1a",
+    "models\\probability_oof_advanced.csv": "68e6636f53479fb2f95ab8c863ce9b04b8c6e525264a1298897cf00fdb757763",
+    "models\\prob_sidecar_ast_advanced.pkl": "c7b41444617caf9247bfe29b9ee91bfb4c4a0df0308f75d5fed9fb7db0266ff0",
+    "models\\prob_sidecar_blk_advanced.pkl": "47d8dabd50f5040a52d111124089db3de8d773ee31cf52dd081be944d9fff224",
+    "models\\prob_sidecar_pa_advanced.pkl": "4f9bc71e7e7fd3d87c471255cae2a414a655aa99c08e7d53ece356db258b5633",
+    "models\\prob_sidecar_pra_advanced.pkl": "c84a2e2b405bdf5455618de1bf750cea750d3f596ef3630e00a84749389fb28f",
+    "models\\prob_sidecar_pr_advanced.pkl": "c16966c0ab914d1460a38fe1607d7574d6becab73212a7a3bb96929a66525ea2",
+    "models\\prob_sidecar_pts_advanced.pkl": "1c7d86f3cc2e29a5d7839a04351b7d7a61d4ded917fa072c3cd63ca89382d415",
+    "models\\prob_sidecar_stl_advanced.pkl": "5a745984a02eeada748ef514dcdca7dba1461b20797c130e36a2a5507736c2e5",
+    "models\\prob_sidecar_tov_advanced.pkl": "3b9c7913cbabe2537ae3733f88120f311ab478d027f5b747ccfc37853f0528a9",
+    "models\\prob_sidecar_trb_advanced.pkl": "5c5d21ff137c50c57173e6c6e59ef2619129fe9d248ae46c39e0f73c59eb914e",
+    "models\\results.json": "746f63ebaa27ce7aafea581426fd8cfab6021a93e8067897dd85707d1bc61dd1",
+    "models\\selected_features_advanced.json": "2f68413c8f70c8e20ec33cd55579d800d5366f579646c4f0bc4a012e2e2f07e2",
+    "models\\shadow_candidate_registry.json": "f01766dfe2087cfd92c707bbb3a72528fdb69869fb165d227e32da04537b8d08",
+    "models\\sigma_context_analysis.json": "3fb7831a38b25169fba1d726a7b6e8ab1cfb21b793f71c0cfa91352bce474363",
+    "models\\sigma_forward_validation.json": "236844c06c5a9968abe83cb3188b6273dbbbfe4cd3bdd33fe2201f938c175bf6",
+    "models\\sportsbook_selection_overlay_t_minus_5.pkl": "75bb4dcd05f5ff1c2eaa3b65b1f30e17e5744f8d05a301d235fd291a3bdc9762",
+    "models\\sportsbook_selection_overlay_t_minus_60.pkl": "8f49edf0e17237e2b050eb08018622eef129561eda2fc5560401f62371a1297f",
+    "models\\sportsbook_selection_policy.json": "fc4bfc7e2dcc5ec2b2445796d22e280a4981d1ab78d3519cfbbbbd68aab62f8f",
+    "models\\training_edge_analysis.json": "8715eeea1a5ff46a82ae083864a948093d9c79d129275176423b92345030294b",
+    "models\\training_probability_analysis.json": "509f57023528a712982d5f9d3256bf596f14f2d15fcef98d96ef103874bbd735",
+    "models\\training_results.json": "e413b9917e09ade19360d4ec55a8d163e98e9efb7a05f61f6df7c072b3365dba",
+    "models\\xgb_ast_advanced.pkl": "6cd2eb69003aa4559ca7ef51b2870fb33388f7bf68a1c8f810b4ed929992df4b",
+    "models\\xgb_blk_advanced.pkl": "4dd3902b32b80166cdec9953f6125c1cb0bf43698cf60831c0515a78f4d97070",
+    "models\\xgb_pa_advanced.pkl": "9edcac1da157be84ad6f39a8dbc61c63a24621d73ba2dd3eed294315eb5d1898",
+    "models\\xgb_pra_advanced.pkl": "add76e1bdae26e024e9a970deb04444f74905caeba6d40fdd660225c6f31f6bb",
+    "models\\xgb_pr_advanced.pkl": "6a8adc2769c0a2b04aac5b1653869945211714cb7f6e3a21951cb7faa20d9bb2",
+    "models\\xgb_pts_advanced.pkl": "a295bf76ebec05de646ec1b9f4459a54b5d22d9a5634a86f08cf62e4db6f2fc2",
+    "models\\xgb_stl_advanced.pkl": "bfcfb0422822ccea4a6292423c6cc7d51add5a6428b0d65711f83884b182880e",
+    "models\\xgb_tov_advanced.pkl": "44be75a1c144f0bf8d954a31a069eb3515f49998e97fb4bbd73b603d96094578",
+    "models\\xgb_trb_advanced.pkl": "0b668898bdca094132954c1d41f1eef10dce32974ef1cea4b37a717e844b2806"
+  }
+}

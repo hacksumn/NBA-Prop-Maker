@@ -10732,6 +10732,126 @@ def sanity_check_picks(picks: pd.DataFrame, df: pd.DataFrame, injury_data: dict 
     return picks.loc[clean_idx].reset_index(drop=True)
 
 
+def _log_market_probability_shadow(pred_df: pd.DataFrame, market_lines: Optional[pd.DataFrame],
+                                   slate_date: str, run_id: str = '',
+                                   now_utc: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+    """Observe the isolated market-offset model; its probabilities never enter picks."""
+    path = CONFIG['output_dir'] / 'market_probability_shadow.json'
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        import market_probability as market_prob
+        if market_lines is None or market_lines.empty:
+            print('  Market probability shadow: no FanDuel offers [NOT BET]')
+            return pd.DataFrame()
+        model_bytes = path.read_bytes()
+        model = json.loads(model_bytes)
+        boxes = pd.read_csv(CONFIG['data_dir'] / 'nba_data.csv', low_memory=False,
+                            usecols=['player', 'game_date', 'mp', 'pts', 'trb', 'ast', 'stl', 'blk'])
+        now = now_utc if now_utc is not None else _utc_now()
+        tracked = market_prob.score_live(model, market_lines, boxes, slate_date, now)
+        if tracked.empty:
+            print('  Market probability shadow: 0 eligible paired pre-tip quotes [NOT BET]')
+            return tracked
+        # Incumbent scores are comparison fields only, joined on the exact line.
+        comparison = []
+        for prop in market_prob.PROPS:
+            if {f'{prop}_line', f'{prop}_p_over_cal'} <= set(pred_df):
+                comparison.append(pd.DataFrame({
+                    'player_norm': pred_df.player.map(market_prob.normalize_name), 'prop': prop,
+                    'line': pred_df[f'{prop}_line'], 'production_cal': pred_df[f'{prop}_p_over_cal']}))
+        if comparison:
+            incumbent = pd.concat(comparison).dropna(subset=['line'])
+            tracked = tracked.merge(incumbent, on=['player_norm', 'prop', 'line'], how='left', validate='many_to_one')
+        tracked['prop'] = tracked.prop.str.upper()
+        tracked['run_id'] = run_id
+        tracked['model_sha256'] = hashlib.sha256(model_bytes).hexdigest()
+        tracked['logged_at'] = pd.Timestamp(now).isoformat()
+        for col in ['result', 'actual', 'profit_units', 'graded_at']:
+            tracked[col] = ''
+        log_path = CONFIG['output_dir'] / 'market_probability_history.csv'
+        _, added, existing = _append_only_history(log_path, tracked, SHADOW_LANE_KEY)
+        print(f'  Market probability shadow: +{added} first offers, {existing} already recorded; '
+              f'{int(tracked.history_fallback_to_market.sum())} history fallbacks [NOT BET]')
+        return tracked
+    except Exception as exc:
+        print(f'  WARNING: market probability shadow failed ({type(exc).__name__}: {exc}); live card unaffected')
+        return pd.DataFrame()
+
+
+SHADOW_LANE_RULES = {
+    'PRA': ('pra_under_meta_gt_070', 0.70, 1.0, False),
+    'PTS': ('pts_under_meta_050_070', 0.50, 0.70, True),
+}
+# One first eligible offer per player/prop/slate; reruns cannot change its line.
+SHADOW_LANE_KEY = ['game_date', 'player', 'prop', 'direction']
+
+
+def _log_shadow_lanes(pred_df: pd.DataFrame, market_lines: Optional[pd.DataFrame],
+                      slate_date: str, now_utc: Optional[pd.Timestamp] = None,
+                      run_id: str = '') -> pd.DataFrame:
+    """Append fixed DEC-108 UNDER hypotheses to a separate, never-published log.
+
+    Meta probabilities are fractions in [0, 1]. Observe the paired FanDuel main
+    line before tip; do not apply live-card generation, price/EV or cutoff gates.
+    The first eligible priced offer is immutable, including its meta and price.
+    """
+    try:
+        if pred_df is None or pred_df.empty or market_lines is None or market_lines.empty:
+            print('  Shadow lanes: no scored FanDuel offers to record [NOT BET]')
+            return pd.DataFrame()
+        now = pd.Timestamp(now_utc if now_utc is not None else _utc_now())
+        slate = pd.Timestamp(slate_date).strftime('%Y-%m-%d')
+        rows = []
+        for prop, (lane, low, high, inclusive_low) in SHADOW_LANE_RULES.items():
+            stat = prop.lower()
+            for _, row in pred_df.iterrows():
+                meta = pd.to_numeric(row.get(f'{stat}_meta_prob'), errors='coerce')
+                line = pd.to_numeric(row.get(f'{stat}_line'), errors='coerce')
+                p_over = pd.to_numeric(row.get(f'{stat}_p_over_cal'), errors='coerce')
+                if not (np.isfinite(meta) and (meta >= low if inclusive_low else meta > low)
+                        and meta <= high and np.isfinite(line)
+                        and np.isfinite(p_over) and 0 <= p_over <= 1):
+                    continue
+                rows.append({
+                    'game_date': slate, 'player': row['player'], 'team': row.get('team', ''),
+                    'opponent': row.get('opp', ''), 'prop': prop, 'direction': 'UNDER',
+                    'line': float(line), 'prediction': row.get(f'{stat}_pred'),
+                    'meta_prob': float(meta), 'shadow_lane': lane, 'lane_version': 'DEC-108',
+                    'run_id': run_id,
+                    'dir_prob': 100 * (1 - p_over), 'p_over_cal': float(p_over),
+                    'prob_source': 'calibrated_p_over', 'line_source': 'fanduel',
+                    'tracking_only': True, 'published': False,
+                    'logged_at': now.isoformat(),
+                    'result': '', 'actual': '', 'profit_units': '', 'graded_at': '',
+                })
+        if not rows:
+            print('  Shadow lanes: 0 qualifying scored offers in the fixed meta bands [NOT BET]')
+            return pd.DataFrame()
+        lines = market_lines.copy()
+        if 'game_date' in lines:
+            dates = pd.to_datetime(lines.game_date, errors='coerce').dt.strftime('%Y-%m-%d')
+            lines = lines[dates.eq(slate)].copy()
+        tracked = _attach_live_market_prices(pd.DataFrame(rows), lines, now_utc=now)
+        tip = pd.to_datetime(tracked.commence_time, utc=True, errors='coerce', format='mixed')
+        snapshot = pd.to_datetime(tracked.line_snapshot_ts, utc=True, errors='coerce', format='mixed')
+        eligible = (tip.gt(now) & snapshot.le(now) &
+                    np.isfinite(tracked.side_decimal_odds) & tracked.no_vig_side_prob.notna())
+        eligible &= tip.dt.tz_convert(CONFIG['local_timezone']).dt.strftime('%Y-%m-%d').eq(slate)
+        skipped = int((~eligible).sum())
+        tracked = tracked[eligible].copy()
+        path = CONFIG['output_dir'] / 'shadow_lanes_history.csv'
+        _, added, existing = _append_only_history(path, tracked, SHADOW_LANE_KEY)
+        for lane, _, _, _ in SHADOW_LANE_RULES.values():
+            print(f"  Shadow lane {lane}: {int(tracked.shadow_lane.eq(lane).sum())} eligible offers [NOT BET]")
+        print(f'  Shadow lanes: +{added} new, {existing} already recorded, {skipped} invalid/late offers skipped; '
+              f'first offers retained -> {path.name} [NOT BET]')
+        return tracked
+    except Exception as exc:
+        print(f'  WARNING: shadow-lane logging failed ({type(exc).__name__}: {exc}); live card unaffected')
+        return pd.DataFrame()
+
+
 def _log_tracking_only_props(pred_df: pd.DataFrame,
                              market_lines: Optional[pd.DataFrame],
                              slate_date: str) -> pd.DataFrame:
@@ -11874,6 +11994,10 @@ def main(command: Optional[str] = None, use_feature_cache: bool = True):
             for _, r in blocked.head(10).iterrows():
                 print(f"    blocked {r['player']} {r['prop']} {r['direction']} {r['line']}: {r['price_gate_reason']}")
         _log_tracking_only_props(pred_df, market_lines, active_slate_date)
+        if _line_source == 'fanduel':
+            # Observe pre-gate predictions only; never merge shadow rows into picks.
+            _log_shadow_lanes(pred_df, market_lines, active_slate_date, run_id=gate_run['run_id'])
+            _log_market_probability_shadow(pred_df, market_lines, active_slate_date, run_id=gate_run['run_id'])
         pre_card_candidates = _apply_live_accuracy_gates(picks.copy(), history_df=df)
         if len(pre_card_candidates) > 0:
             pre_card_candidates['line_source'] = _line_source

@@ -1,0 +1,299 @@
+{
+  "specification": {
+    "version": "market_offset_v1",
+    "train_end": "2026-05-31",
+    "forward_start": "2026-10-21",
+    "data_end": "2026-11-19",
+    "penalty": 0.02,
+    "max_logit_correction": 0.5,
+    "features": [
+      "intercept",
+      "line_level",
+      "l10_gap",
+      "momentum",
+      "minutes"
+    ],
+    "props": [
+      "pts",
+      "trb",
+      "ast",
+      "pra",
+      "pr",
+      "pa",
+      "stl",
+      "blk"
+    ]
+  },
+  "foundation_training_rows": 28433,
+  "foundation_training_dates": 79,
+  "frozen_prior_season": {
+    "rows": 7917,
+    "dates": 18,
+    "market_log_loss": 0.6883671866113891,
+    "model_log_loss": 0.6876488287081849,
+    "difference": -0.0007183579032042789,
+    "date_cluster_difference_95": [
+      -0.0013744361341109942,
+      -7.192893205298918e-05
+    ],
+    "market_brier": 0.24763737708692699,
+    "model_brier": 0.2472808212504059,
+    "mean_probability_change": 0.008198802700717317,
+    "under_ev_001": {
+      "picks": 0,
+      "profit_units": 0.0,
+      "roi": null,
+      "hit_rate": null
+    }
+  },
+  "walk_forward": {
+    "rows": 7917,
+    "dates": 18,
+    "market_log_loss": 0.6883671866113891,
+    "model_log_loss": 0.6874547703420097,
+    "difference": -0.0009124162693795377,
+    "date_cluster_difference_95": [
+      -0.0018727215388097788,
+      -1.2003323151896408e-05
+    ],
+    "market_brier": 0.24763737708692699,
+    "model_brier": 0.24718352432516527,
+    "mean_probability_change": 0.01135630791821798,
+    "under_ev_001": {
+      "picks": 0,
+      "profit_units": 0.0,
+      "roi": null,
+      "hit_rate": null
+    }
+  },
+  "walk_forward_by_prop": {
+    "ast": {
+      "rows": 1015,
+      "dates": 18,
+      "market_log_loss": 0.6864225750249731,
+      "model_log_loss": 0.6855725984011473,
+      "difference": -0.000849976623825718,
+      "date_cluster_difference_95": [
+        -0.0029833051775455706,
+        0.0012597333321025441
+      ],
+      "market_brier": 0.2466538220725906,
+      "model_brier": 0.2462267902109046,
+      "mean_probability_change": 0.01608552761140084,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "blk": {
+      "rows": 73,
+      "dates": 16,
+      "market_log_loss": 0.6637728592384883,
+      "model_log_loss": 0.6623226943994132,
+      "difference": -0.0014501648390752647,
+      "date_cluster_difference_95": [
+        -0.003991886438706875,
+        0.0012038852569791951
+      ],
+      "market_brier": 0.2354330408149988,
+      "model_brier": 0.2347403771160259,
+      "mean_probability_change": 0.005577250806688836,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pa": {
+      "rows": 1137,
+      "dates": 18,
+      "market_log_loss": 0.6922139715770242,
+      "model_log_loss": 0.691396979528573,
+      "difference": -0.0008169920484510575,
+      "date_cluster_difference_95": [
+        -0.0017529891169996501,
+        9.225452152936173e-05
+      ],
+      "market_brier": 0.24953351794261905,
+      "model_brier": 0.24912600701373577,
+      "mean_probability_change": 0.008169684301273229,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pr": {
+      "rows": 1451,
+      "dates": 18,
+      "market_log_loss": 0.6938031189670667,
+      "model_log_loss": 0.6924743825936518,
+      "difference": -0.0013287363734149336,
+      "date_cluster_difference_95": [
+        -0.0026021537925466497,
+        5.883574476798771e-05
+      ],
+      "market_brier": 0.25032776583858973,
+      "model_brier": 0.24966343587643527,
+      "mean_probability_change": 0.011752926272916516,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pra": {
+      "rows": 1170,
+      "dates": 18,
+      "market_log_loss": 0.6918194321419013,
+      "model_log_loss": 0.6906290702109358,
+      "difference": -0.001190361930965545,
+      "date_cluster_difference_95": [
+        -0.00260481310235876,
+        0.0001555594501976202
+      ],
+      "market_brier": 0.2493361923841882,
+      "model_brier": 0.2487423165707524,
+      "mean_probability_change": 0.013547184800415918,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "pts": {
+      "rows": 1502,
+      "dates": 18,
+      "market_log_loss": 0.6896487143135017,
+      "model_log_loss": 0.6887545374229025,
+      "difference": -0.0008941768905991059,
+      "date_cluster_difference_95": [
+        -0.0019304916062998958,
+        0.00015727190964463626
+      ],
+      "market_brier": 0.24825313477882863,
+      "model_brier": 0.2478077976064714,
+      "mean_probability_change": 0.009828215018367897,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "stl": {
+      "rows": 205,
+      "dates": 17,
+      "market_log_loss": 0.62963036171403,
+      "model_log_loss": 0.6285095046280259,
+      "difference": -0.0011208570860039625,
+      "date_cluster_difference_95": [
+        -0.003981873716119505,
+        0.0023048006803038294
+      ],
+      "market_brier": 0.21905777789465586,
+      "model_brier": 0.2185727361426708,
+      "mean_probability_change": 0.010169719083779769,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    },
+    "trb": {
+      "rows": 1364,
+      "dates": 18,
+      "market_log_loss": 0.686596586559414,
+      "model_log_loss": 0.6862794736490123,
+      "difference": -0.0003171129104017034,
+      "date_cluster_difference_95": [
+        -0.0013681334426325009,
+        0.0008809336600704808
+      ],
+      "market_brier": 0.24673993906581373,
+      "model_brier": 0.24657959952750913,
+      "mean_probability_change": 0.010362562533190643,
+      "under_ev_001": {
+        "picks": 0,
+        "profit_units": 0.0,
+        "roi": null,
+        "hit_rate": null
+      }
+    }
+  },
+  "production_cal_comparable": {
+    "rows": 6527,
+    "dates": 16,
+    "market_log_loss": 0.6878911509097441,
+    "model_log_loss": 0.6892314870004864,
+    "difference": 0.0013403360907424096,
+    "date_cluster_difference_95": [
+      -0.0016258700687677764,
+      0.0041510882513498566
+    ],
+    "market_brier": 0.2474051398545407,
+    "model_brier": 0.248037866776467,
+    "mean_probability_change": 0.0335168490708325,
+    "under_ev_001": {
+      "picks": 1531,
+      "profit_units": 29.614532361558055,
+      "roi": 0.019343260850135893,
+      "hit_rate": 0.5225342913128674
+    }
+  },
+  "limitations": [
+    "November outcomes were already inspected in DEC-104; this is chronological retrospective evidence, not untouched prospective proof.",
+    "Foundation uses first recorded pre-tip quotes (many late-day); forward archived slates use actual first morning runs, other dates use 10am. Capture timing differs.",
+    "Main-line no-vig price is a baseline probability, not an executable return; profit uses offered side odds.",
+    "Related props and player-game outcomes overlap; date-cluster intervals account for nights, not independent replication.",
+    "ROI diagnostics do not replay incumbent meta gates, game/player exposure or parlays.",
+    "Historical master-box revisions can differ from what was known live; prospective scoring is still required."
+  ],
+  "historical_evidence_pass": true,
+  "promotion_eligible": false,
+  "promotion_reason": "Prospective validation required; no live promotion performed",
+  "created_utc": "2026-11-21T00:26:56.310662+00:00",
+  "source_sha256": {
+    "data\\historical_lines.csv": "bb02d25a07df8375bd4dbce2c9786f9933a37abf7f9478ffcde365f8dee37e67",
+    "data\\nba_data.csv": "66c936d20a87de4cb96e705cac0c7072db13ac3746f7e708f2cfcdae2c334a28",
+    "output\\archive\\2026-10-26\\predictions_2026-10-26_103705.csv": "ec75583bbe3397428a687fdfa3701c92ec830b9cdcbb748a7a56b92294f4cded",
+    "output\\archive\\2026-10-28\\predictions_2026-10-28_084347.csv": "f82c0426cc750c262e4ac797c7d667dd5078f3747cb3e5a9e9753bf433026bef",
+    "output\\archive\\2026-10-31\\predictions_2026-10-31_084431.csv": "b44c69a2feba77f5744f4737ec4d143c00aa6c515bbdcda7d4c893e340d8f217",
+    "output\\archive\\2026-11-01\\predictions_2026-11-01_070108.csv": "0ef19cf15417ca60224353f65bcc0b45d22050db8b79706a53c99f1e6b9755f3",
+    "output\\archive\\2026-11-02\\predictions_2026-11-02_074224.csv": "afeb877c2f5288e61beeb6f086aed1b163e4d343784ff018309eadd6f8115dec",
+    "output\\archive\\2026-11-05\\predictions_2026-11-05_073909.csv": "a1c99677d76515d2a2844915f7579f8ac6bc4b31c143b774ad8490e111629eb9",
+    "output\\archive\\2026-11-07\\predictions_2026-11-07_073944.csv": "21301f6fb6873bb092064031fc71a8f1143ae53f7120e6e3c8afdbcf8fdb34a3",
+    "output\\archive\\2026-11-08\\predictions_2026-11-08_074800.csv": "aa78232a21f1ff0fd3d1d667f53d3bb779448be6279f1970aa22b8c8f9564217",
+    "output\\archive\\2026-11-09\\predictions_2026-11-09_075217.csv": "44c622734732368f846d96bd796e4e44004d18cacd5c373fab28d7487ec78ea5",
+    "output\\archive\\2026-11-10\\predictions_2026-11-10_074227.csv": "c69a2fd73997f496d9f730a1574af0c455e549ffa51cefa800ef2e679fd78361",
+    "output\\archive\\2026-11-12\\predictions_2026-11-12_085935.csv": "56e27ba58fdcfb6148bcce33ed6f35e929dd03367d4c473e6a6a7630dca14ad6",
+    "output\\archive\\2026-11-14\\predictions_2026-11-14_073857_347853.csv": "467d87d8d0a0fe4a21a8bec3e63559769d7ee06cf975d603cfa05eb89a033222",
+    "output\\archive\\2026-11-15\\predictions_2026-11-15_073913_120357.csv": "3f0cbd4425525083bb55d114007e4961ec99884d4ca1e78e4eadd5c654480707",
+    "output\\archive\\2026-11-16\\predictions_2026-11-16_074148_694528.csv": "cd639f50fa0ebf839a39fe9e5d66779685fe35ada7b8df51357786f4d7779ad8",
+    "output\\archive\\2026-11-17\\predictions_2026-11-17_063203_724440.csv": "28e9dbe635e5489c56a94674c6da03100ea9f59c6275d20763f4b0945391c034",
+    "output\\archive\\2026-11-19\\predictions_2026-11-19_073814_062371.csv": "6971c71f5abc661d2d5d1854d25fa3f9a4b397c6a25619d9a9667765c8c7f058"
+  },
+  "dataset_sha256": "3ecdc1380c770fdccac3bd2110cb6d2fbba8a2784ef859a5f9a855d7bbb779b3",
+  "build_counts": {
+    "raw_fanduel_rows": 79741,
+    "valid_timed_price_rows": 72735,
+    "unique_morning_offers": 37455,
+    "missing_or_nonparticipant_actuals": 1105,
+    "pushes": 0,
+    "graded_nonpush_offers": 36350,
+    "valid_residual_features": 36049
+  },
+  "git_head": "a3f5ef43f61c53d0427014119c72f01ef948d6c5",
+  "source_code_sha256": {
+    "market_probability.py": "f4e3a49ba700ab522ea4c21b27b38b3d85696fdaf925c803d127f3a63858cad3",
+    "scripts/train_market_probability.py": "7b00deab2c8059af4c8ae22259a03ee2e6930b01b8ba7fbe7acdef58f0efd42a"
+  },
+  "production_model_files_unchanged": true
+}

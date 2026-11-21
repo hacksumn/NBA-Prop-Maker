@@ -1206,6 +1206,83 @@ def _grade_candidate_rows(hist, box, available_dates, today_str, stale_cutoff, n
     return graded
 
 
+def step1_9_grade_shadow_lanes(errors, history_name='shadow_lanes_history.csv'):
+    """Grade DEC-108 paper-only lanes and report progress; never promote a lane."""
+    _step_header('1.9', f'Grade shadow probabilities [NOT BET] ({history_name})')
+    try:
+        import pandas as pd
+        from artifact_retention import artifact_lock
+
+        if history_name not in {'shadow_lanes_history.csv', 'market_probability_history.csv'}:
+            raise ValueError('Unsupported shadow history filename')
+        path = OUTPUT_DIR / history_name
+        if not path.exists():
+            logger.info('  %s not created yet; waiting for the next FanDuel prediction run', history_name)
+            return
+        # Keep the append-only logger from racing this read/grade/write cycle.
+        with artifact_lock(path):
+            hist = pd.read_csv(path, dtype=str, keep_default_na=False)
+            today = pd.Timestamp.now(tz='America/Chicago')
+            today_str = today.strftime('%Y-%m-%d')
+
+            def norm(name):
+                value = unicodedata.normalize('NFKD', str(name)).encode('ascii', 'ignore').decode('ascii')
+                return re.sub(r'[^a-z0-9 ]', '', value.lower()).strip()
+
+            pending = hist[_blank_text_mask(hist.result) & hist.game_date.lt(today_str)]
+            graded = []
+            if not pending.empty:
+                if not GAME_LOG_CSV.exists():
+                    _warn('No nba_data.csv; shadow lanes remain ungraded [NOT BET]')
+                    return
+                box = _prepare_box_score_frame(pd.read_csv(GAME_LOG_CSV, low_memory=False), norm)
+                box, available = _hydrate_live_box_scores(
+                    box, pending.game_date.unique(), norm, context_label='[shadow lanes] ')
+                graded = _grade_candidate_rows(
+                    hist, box, set(available), today_str,
+                    (today - pd.Timedelta(days=3)).strftime('%Y-%m-%d'), today.isoformat(), norm)
+                if graded:
+                    _atomic_csv(hist, path)
+        for lane, group in hist.groupby('shadow_lane'):
+            binary = group[group.result.isin(['WIN', 'LOSS'])]
+            wins = int(binary.result.eq('WIN').sum())
+            profits = pd.to_numeric(binary.profit_units, errors='coerce').dropna()
+            hit = f'{wins / len(binary):.1%}' if len(binary) else 'n/a'
+            roi = f'{profits.mean():+.1%}' if len(profits) else 'n/a'
+            review_minimum = len(binary) >= 300 and (
+                history_name != 'market_probability_history.csv' or binary.game_date.nunique() >= 30)
+            logger.info(
+                '  [NOT BET] %s: %s/300 binary outcomes, %s dates, hit %s, '
+                'paper units %+.2f on %s priced, ROI %s; PUSH %s, DNP %s, pending %s; '
+                'review minimum reached=%s (no automatic promotion)',
+                lane, len(binary), binary.game_date.nunique(), hit, profits.sum(), len(profits), roi,
+                int(group.result.eq('PUSH').sum()), int(group.result.eq('DNP').sum()),
+                int(_blank_text_mask(group.result).sum()), review_minimum)
+            if history_name == 'market_probability_history.csv' and not binary.empty:
+                import numpy as np
+                actual_over = binary.result.eq('LOSS').astype(float)
+                q = pd.to_numeric(binary.nv_over, errors='coerce')
+
+                def log_loss(prob):
+                    prob = prob.clip(1e-9, 1 - 1e-9)
+                    y = actual_over.loc[prob.index]
+                    return -(y * np.log(prob) + (1 - y) * np.log1p(-prob))
+
+                for label, column in [('market-offset', 'anchored_over'), ('incumbent', 'production_cal')]:
+                    if column in binary:
+                        p = pd.to_numeric(binary[column], errors='coerce')
+                        valid = p.between(0, 1) & q.between(0, 1)
+                        delta = log_loss(p[valid]) - log_loss(q[valid])
+                        logger.info('  [NOT BET] %s vs market: %s comparable rows, mean log-loss difference %s',
+                                    label, len(delta), f'{delta.mean():+.6f}' if len(delta) else 'n/a')
+                logger.info('  Market model prospective review minima: >=30 dates and >=300 binary rows; reached=%s; '
+                            'no automatic promotion', binary.game_date.nunique() >= 30 and len(binary) >= 300)
+        logger.info('  Shadow-lane grading: %s newly graded; live card unaffected [NOT BET]', len(graded))
+    except Exception as exc:
+        _warn(f'Shadow-lane grading failed ({type(exc).__name__}: {exc}); picks are unaffected')
+        logger.debug(exc, exc_info=True)
+
+
 def pd_isna(value):
     """Scalar NaN/None check without importing pandas at module import time."""
     try:
@@ -2734,6 +2811,8 @@ def main() -> int:
             step1_6_grade_betslips(errors)
             step1_7_clv_report()
             step1_8_grade_candidates(errors)
+            step1_9_grade_shadow_lanes(errors)
+            step1_9_grade_shadow_lanes(errors, history_name='market_probability_history.csv')
         else:
             logger.info("Skipping game logs (--lines-only mode)")
 

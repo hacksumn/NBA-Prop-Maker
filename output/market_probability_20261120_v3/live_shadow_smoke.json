@@ -1,0 +1,12 @@
+{
+  "as_of_utc": "2026-11-21T00:33:04.690072+00:00",
+  "slate_date": "2026-11-20",
+  "source_run_id": "6f7ef2e2a0f247d69a656fbb27be0d17",
+  "retained_market_offers": 605,
+  "eligible_future_offers_scored": 531,
+  "quote_age_hours_min": 11.039629334444445,
+  "quote_age_hours_max": 12.961529596388887,
+  "production_input_unchanged": true,
+  "writes": "temporary directory only; no history seeded",
+  "log": "  Market probability shadow: +531 first offers, 0 already recorded; 0 history fallbacks [NOT BET]\n"
+}
